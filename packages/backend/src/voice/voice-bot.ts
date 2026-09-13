@@ -996,7 +996,7 @@ export class VoiceBot extends EventEmitter {
       name: `${this.config.nickname} Stream`,
       type: 3,
       bitrate: 4608,
-      accessibility: 1,
+      accessibility: 0, // public — see stream-signaling.ts
       mode: 1,
       viewerLimit: 0,
       audio: true,
