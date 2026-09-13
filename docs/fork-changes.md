@@ -247,9 +247,60 @@ so nothing had reported it. Every one had a published fix, so they were
 resolved with version bumps and overrides rather than added to
 `auditConfig.ignoreGhsas`.
 
+### Field fixes from the first production deploy
+
+Four defects the refactor introduced or exposed, found on a real host rather
+than in CI:
+
+- **`!tv` was blocked by its own SSRF guard.** The IPTV *playlist* fetch
+  deliberately bypasses `validateUrl`, but the channel URLs it returns went
+  through `resolveVideoUrl`, which refuses private addresses — so every
+  LAN-hosted channel failed with "Private/reserved IP addresses are blocked".
+  `resolveVideoUrl` now takes an explicit `operatorConfigured` flag that only
+  `!tv` sets. A TeamSpeak user cannot reach it: `!tv` takes a channel *name*
+  and looks the URL up in the operator's parsed playlist.
+
+- **The encoder probe was reporting profiles the GPU cannot run.**
+  `ffmpeg -encoders` lists what the build was compiled with, not what the
+  hardware supports. A build shipping `vp8_vaapi` on a GPU whose driver
+  exposes no VP8 encode entrypoint offered it in the UI and then died at
+  stream start with *"No usable encoding entrypoint found for profile
+  VAProfileVP8Version0_3"*. The sidecar now test-encodes a few frames with
+  each profile and reports only what actually works, cached per encoder and
+  device. `/capabilities` takes the render node as a query parameter, because
+  the answer is a property of the GPU rather than of FFmpeg.
+
+- **`MusicBot.streamPreset` silently overrode the configured default.** No UI
+  writes that column, so every row carries the schema default — which then
+  won over Settings → Streaming, making the one preset an operator can set
+  appear to do nothing. It is no longer read. The column stays as the seed for
+  a per-bot override and must gain a UI before it is consulted again.
+
+- **The encoder settings presented a cross product instead of two choices.**
+  A hardware toggle plus a flat list of vp8/vp9 × software/vaapi let the two
+  controls contradict each other, and made "VP9 (VAAPI hardware)" with the
+  toggle off a reachable, meaningless state. The UI now offers a codec, and
+  the toggle decides the backend; `effectiveEncoder` composes the profile from
+  the two, so they cannot disagree. The codec dropdown marks a codec the GPU
+  cannot encode, using the sidecar's probe rather than FFmpeg's build flags.
+
+- **Switching the encoder to VP9 silently produced VP8.** With hardware
+  acceleration off, `effectiveEncoder` returned an empty string for any VAAPI
+  profile, which the sidecar reads as "no preference" and answers with its own
+  default — `vp8_software`. Selecting VP9 therefore kept encoding VP8 and
+  looked like the setting was being ignored. Turning hardware off now drops
+  the hardware *backend* and keeps the codec: `vp9_vaapi` becomes
+  `vp9_software`. The two controls could contradict each other and the
+  resolution discarded the more specific one.
+
+- **Presets could exceed what TeamSpeak accepts.** The server caps a stream at
+  10 Mbit/s and drops one that exceeds it, which presents as an encoder
+  failure. 2160p asked for 18000k. It is now 9500k, and `clampBitrate` holds
+  any caller-supplied value under the ceiling.
+
 ## Open follow-ups
 
-1. **Confirm the refactored encoder path still drives the GPU.** The hardware
+1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
    question is settled: VP9 VAAPI encoding has run in production on a UGREEN
    NASync DXP4800 Plus since 2026-08, with `devices: /dev/dri:/dev/dri` and
    `group_add: "105"`, streaming both IPTV and YouTube. The GPU is capable and

@@ -3,7 +3,13 @@ import api from './client';
 export interface StreamSettings {
   hwAccelEnabled: boolean;
   hwAccelDevice: string;
+  /**
+   * Stored profile key. The UI edits `videoCodec` instead — the backend half
+   * is decided by hwAccelEnabled, so the two cannot contradict.
+   */
   encoderProfile: string;
+  /** Codec half of encoderProfile, e.g. "vp9". What the UI presents. */
+  videoCodec?: string;
   defaultPreset: string;
   streamPublic: boolean;
   iptvEnabled: boolean;
@@ -32,9 +38,18 @@ export interface EncoderOption {
   available: boolean;
 }
 
+/** A codec, and whether this host can encode it in software and in hardware. */
+export interface CodecOption {
+  codec: string;
+  label: string;
+  softwareAvailable: boolean;
+  hardwareAvailable: boolean;
+}
+
 export interface StreamSettingsOptions {
   presets: StreamPresetOption[];
   encoders: EncoderOption[];
+  codecs: CodecOption[];
   /** False when the sidecar could not be probed, so availability is unknown. */
   sidecarReachable: boolean;
   iptvSorts: string[];
@@ -43,6 +58,6 @@ export interface StreamSettingsOptions {
 export const streamSettingsApi = {
   get: (): Promise<StreamSettings> => api.get('/stream-settings').then((r) => r.data),
   options: (): Promise<StreamSettingsOptions> => api.get('/stream-settings/options').then((r) => r.data),
-  update: (data: Partial<StreamSettings>): Promise<StreamSettings> =>
+  update: (data: Partial<StreamSettings> & { videoCodec?: string }): Promise<StreamSettings> =>
     api.put('/stream-settings', data).then((r) => r.data),
 };

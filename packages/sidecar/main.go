@@ -1288,7 +1288,7 @@ func main() {
 			return
 		}
 
-		profile, warning := resolveProfile(req.Encoder)
+		profile, warning := resolveProfile(req.Encoder, req.HWDevice)
 		if warning != "" {
 			log.Printf("[API] %s", warning)
 		}
@@ -1318,7 +1318,15 @@ func main() {
 	// profiles that will work and show the rest as unavailable rather than
 	// letting an operator pick one that fails at stream time.
 	mux.HandleFunc("GET /capabilities", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"encoders": encoderCapabilities()})
+		// Hardware profiles are probed against a specific render node, so the
+		// caller passes the one it has configured. Without it they report as
+		// unavailable, which is the truth: they cannot run with no device.
+		device := r.URL.Query().Get("device")
+		if device != "" && !devicePathRe.MatchString(device) {
+			http.Error(w, "invalid device", 400)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"encoders": encoderCapabilities(device)})
 	})
 
 	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {

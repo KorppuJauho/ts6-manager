@@ -71,15 +71,41 @@ export async function getStreamSettings(prisma: PrismaClient): Promise<StreamSet
 }
 
 /**
- * The encoder to ask the sidecar for.
+ * The hardware backend used when acceleration is on.
  *
- * Returns "" when hardware acceleration is off and the stored profile is a
- * hardware one — the sidecar then falls back to its own software default,
- * rather than this having to know which software profile pairs with it.
+ * Single-valued because the registry has exactly one usable hardware backend.
+ * Adding a second (NVENC, QSV) means this can no longer be inferred and the
+ * settings need to carry which one to prefer.
+ */
+const HARDWARE_BACKEND = 'vaapi';
+
+/** The codec half of a profile key: "vp9_vaapi" -> "vp9". */
+export function codecFromProfile(profile: string): string {
+  const [codec] = profile.split('_');
+  return codec || 'vp8';
+}
+
+/** Build a profile key from its two independent halves. */
+export function composeProfile(codec: string, hardware: boolean): string {
+  return `${codec}_${hardware ? HARDWARE_BACKEND : 'software'}`;
+}
+
+/**
+ * The encoder profile to ask the sidecar for.
+ *
+ * Codec and backend are independent settings: the stored profile supplies the
+ * codec, and the hardware toggle decides the backend. Composing them here
+ * rather than trusting the stored key whole means the two can never disagree
+ * — which they could before, when a VAAPI profile with the toggle off
+ * resolved to an empty string and the sidecar answered with its own default,
+ * silently changing the codec as well as the backend.
+ *
+ * A combination this host cannot run is not this function's problem: the
+ * sidecar probes each profile and falls back to the software encoder for the
+ * same codec, logging why.
  */
 export function effectiveEncoder(settings: StreamSettingsValue): string {
-  if (settings.hwAccelEnabled) return settings.encoderProfile;
-  return settings.encoderProfile.endsWith('_vaapi') ? '' : settings.encoderProfile;
+  return composeProfile(codecFromProfile(settings.encoderProfile), settings.hwAccelEnabled);
 }
 
 /** Split the stored comma-separated filter into lowercase substrings. */

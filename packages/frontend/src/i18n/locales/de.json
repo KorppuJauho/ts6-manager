@@ -411,11 +411,7 @@
       "hwAccelEnabled": "Hardwarekodierung verwenden",
       "hwAccelDevice": "Kodierungsgerät",
       "hwAccelDeviceHint": "Der Render-Node der GPU, z. B. /dev/dri/renderD128. Der Sidecar-Container braucht Zugriff auf dieses Gerät — siehe docker-compose.yml.",
-      "encoderProfile": "Encoder",
-      "encoderProfileHint": "VP9 liefert bei gleicher Bitrate bessere Qualität als VP8, kostet in Software aber mehr Rechenzeit.",
-      "encoderUnavailable": "auf diesem Host nicht verfügbar",
       "sidecarUnreachable": "Der Sidecar war nicht erreichbar, die Encoder-Verfügbarkeit ist daher unbekannt. Die Liste zeigt alle bekannten Profile.",
-      "hardwareProfileDisabled": "Das ist ein Hardwareprofil, aber die Hardwarekodierung ist aus — Streams laufen in Software.",
       "playbackTitle": "Wiedergabe",
       "defaultPreset": "Standardqualität",
       "defaultPresetHint": "Wird verwendet, wenn weder der Befehl noch der Bot etwas angibt. Höhere Presets brauchen mehr Upload-Bandbreite und einen stärkeren Encoder.",
@@ -432,7 +428,11 @@
       "iptvSortName": "Alphabetisch",
       "iptvSortPlaylist": "Wie in der Playlist",
       "toastSaved": "Streaming-Einstellungen gespeichert",
-      "toastSaveFailed": "Streaming-Einstellungen konnten nicht gespeichert werden"
+      "toastSaveFailed": "Streaming-Einstellungen konnten nicht gespeichert werden",
+      "codec": "Video-Codec",
+      "codecHint": "VP9 liefert bei gleicher Bitrate bessere Qualität als VP8, kostet in Software aber mehr Rechenzeit. Ob GPU oder CPU, entscheidet der Schalter oben.",
+      "noHardwareForCodec": "keine GPU-Unterstützung",
+      "hardwareUnavailableForCodec": "Diese GPU kann den gewählten Codec nicht kodieren — Streams fallen auf den Software-Encoder zurück."
     }
   },
   "channels": {

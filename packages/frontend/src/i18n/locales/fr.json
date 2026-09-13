@@ -411,11 +411,7 @@
       "hwAccelEnabled": "Utiliser l'encodage matériel",
       "hwAccelDevice": "Périphérique d'encodage",
       "hwAccelDeviceHint": "Le nœud de rendu du GPU, par ex. /dev/dri/renderD128. Le conteneur sidecar doit avoir accès à ce périphérique — voir docker-compose.yml.",
-      "encoderProfile": "Encodeur",
-      "encoderProfileHint": "VP9 offre une meilleure qualité à débit égal que VP8, mais coûte plus cher à encoder en logiciel.",
-      "encoderUnavailable": "indisponible sur cet hôte",
       "sidecarUnreachable": "Le sidecar est injoignable : la disponibilité des encodeurs est inconnue. La liste montre tous les profils connus.",
-      "hardwareProfileDisabled": "C'est un profil matériel mais l'encodage matériel est désactivé : la diffusion se fera en logiciel.",
       "playbackTitle": "Lecture",
       "defaultPreset": "Qualité par défaut",
       "defaultPresetHint": "Utilisée quand ni la commande ni le bot n'en précise une. Les presets élevés demandent plus de bande passante et un encodeur plus puissant.",
@@ -432,7 +428,11 @@
       "iptvSortName": "Alphabétique",
       "iptvSortPlaylist": "Comme dans la playlist",
       "toastSaved": "Paramètres de diffusion enregistrés",
-      "toastSaveFailed": "Impossible d'enregistrer les paramètres de diffusion"
+      "toastSaveFailed": "Impossible d'enregistrer les paramètres de diffusion",
+      "codec": "Codec vidéo",
+      "codecHint": "VP9 offre une meilleure qualité à débit égal que VP8, mais coûte plus cher à encoder en logiciel. Le choix GPU ou processeur se fait avec l'interrupteur ci-dessus.",
+      "noHardwareForCodec": "non pris en charge par le GPU",
+      "hardwareUnavailableForCodec": "Ce GPU ne peut pas encoder le codec sélectionné : la diffusion utilisera l'encodeur logiciel."
     }
   },
   "channels": {

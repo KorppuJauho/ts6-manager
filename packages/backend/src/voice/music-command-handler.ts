@@ -1126,7 +1126,11 @@ export class MusicCommandHandler {
 
     reply(this.m.tvStarting(match));
     try {
-      await bot.startVideoStream(this.tvChannels.get(match)!);
+      // The URL comes from the operator's own playlist, not from the user —
+      // see resolveVideoUrl. The user supplied only the channel name.
+      await bot.startVideoStream(this.tvChannels.get(match)!, undefined, undefined, undefined, {
+        operatorConfigured: true,
+      });
     } catch (err: any) {
       reply(this.m.tvStartFailed(err.message));
     }

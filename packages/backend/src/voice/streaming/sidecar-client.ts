@@ -90,9 +90,14 @@ export class SidecarClient {
     await this.call('POST', '/source/stop');
   }
 
-  /** Encoder profiles this sidecar knows, and whether its FFmpeg can run them. */
-  async getCapabilities(): Promise<{ encoders: EncoderCapability[] }> {
-    return this.call('GET', '/capabilities');
+  /**
+   * Encoder profiles this sidecar knows, and whether this host can actually
+   * run each one. `device` is the render node hardware profiles are probed
+   * against — without it they report unavailable, because they would be.
+   */
+  async getCapabilities(device?: string): Promise<{ encoders: EncoderCapability[] }> {
+    const query = device ? `?device=${encodeURIComponent(device)}` : '';
+    return this.call('GET', `/capabilities${query}`);
   }
 
   async getStats(): Promise<SidecarStats> {
