@@ -4,6 +4,11 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/intervalpli"
+	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
+	"github.com/pion/webrtc/v4"
 	"log"
 	"net"
 	"net/http"
@@ -18,11 +23,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"github.com/pion/interceptor"
-	"github.com/pion/interceptor/pkg/intervalpli"
-	"github.com/pion/rtcp"
-	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v4"
 )
 
 var defaultStunServers = []string{
@@ -326,16 +326,16 @@ type createInFlight struct {
 }
 
 type Peer struct {
-	ID              string
-	PC              *webrtc.PeerConnection
-	VideoTrack      *webrtc.TrackLocalStaticRTP
-	AudioTrack      *webrtc.TrackLocalStaticRTP
-	VideoSSRC       uint32
-	AudioSSRC       uint32
-	Active          bool
-	Started         bool
-	mu              sync.Mutex
-	stopSR          chan struct{}
+	ID         string
+	PC         *webrtc.PeerConnection
+	VideoTrack *webrtc.TrackLocalStaticRTP
+	AudioTrack *webrtc.TrackLocalStaticRTP
+	VideoSSRC  uint32
+	AudioSSRC  uint32
+	Active     bool
+	Started    bool
+	mu         sync.Mutex
+	stopSR     chan struct{}
 }
 
 type Sidecar struct {
@@ -360,13 +360,13 @@ type Sidecar struct {
 	hwDevice  string
 
 	// Atomic timestamps for RTCP Sender Report generation
-	lastVideoRTPTs uint64 // atomic: latest video RTP timestamp seen
-	lastAudioRTPTs uint64 // atomic: latest audio RTP timestamp seen
-	videoPktCount  uint64 // atomic
-	videOctetCount uint64 // atomic
-	audioPktCount  uint64 // atomic
+	lastVideoRTPTs  uint64 // atomic: latest video RTP timestamp seen
+	lastAudioRTPTs  uint64 // atomic: latest audio RTP timestamp seen
+	videoPktCount   uint64 // atomic
+	videOctetCount  uint64 // atomic
+	audioPktCount   uint64 // atomic
 	audioOctetCount uint64 // atomic
-	
+
 	videoQueue chan *rtp.Packet
 	audioQueue chan *rtp.Packet
 
@@ -390,7 +390,6 @@ func NewSidecar() *Sidecar {
 		audioQueue: make(chan *rtp.Packet, envIntOrDefault("AUDIO_QUEUE_SIZE", 2048)),
 	}
 }
-
 
 func (s *Sidecar) StartRTP() error {
 	var err error
@@ -623,7 +622,7 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 	}()
 
 	iceServers := []webrtc.ICEServer{}
-    
+
 	for _, stun := range getStunServers() {
 		iceServers = append(iceServers, webrtc.ICEServer{URLs: []string{stun}})
 	}
@@ -1033,7 +1032,6 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 			fmt.Sprintf("rtp://127.0.0.1:%d", s.audioPort),
 		)
 	}
-
 
 	log.Printf("[FFmpeg] Starting: source=%s video=:%d audio=:%d encoder=%s", source, s.videoPort, s.audioPort, profile.Encoder)
 
