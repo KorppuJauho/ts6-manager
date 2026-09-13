@@ -59,13 +59,17 @@ streamSettingsRoutes.get('/', async (req: Request, res: Response, next: NextFunc
 /**
  * GET /api/stream-settings/options — what the UI can offer.
  *
- * Presets come from the backend's own table. Encoders are probed from the
- * sidecar, so the dropdown can distinguish a profile this host can run from
- * one it merely knows about, instead of letting an operator pick one that
- * fails at stream time.
+ * Presets come from the backend's own table. Encoders are probed by the
+ * sidecar, which test-encodes with each one: a build can ship vp8_vaapi on a
+ * GPU with no VP8 encode entrypoint, so only running it tells the truth. The
+ * dropdown can then disable what would fail at stream start.
  */
-streamSettingsRoutes.get('/options', async (_req: Request, res: Response, next: NextFunction) => {
+streamSettingsRoutes.get('/options', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Probe against the configured device: a VAAPI profile's availability is a
+    // property of the GPU, not of the FFmpeg build, so the answer differs per
+    // render node.
+    const settings = await getStreamSettings(req.app.locals.prisma);
     const presets = Object.entries(STREAM_PRESETS).map(([key, p]) => ({
       key,
       label: p.label,
@@ -79,7 +83,7 @@ streamSettingsRoutes.get('/options', async (_req: Request, res: Response, next: 
     let sidecarReachable = false;
     try {
       const client = new SidecarClient(process.env.SIDECAR_URL || 9800);
-      const caps = await client.getCapabilities();
+      const caps = await client.getCapabilities(settings.hwAccelDevice);
       if (Array.isArray(caps?.encoders) && caps.encoders.length > 0) {
         encoders = caps.encoders;
         sidecarReachable = true;

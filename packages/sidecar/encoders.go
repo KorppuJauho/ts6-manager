@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -107,13 +110,9 @@ var (
 	availableSet  map[string]bool
 )
 
-// availableEncoders lists the encoder names this FFmpeg build can use, so the
-// UI can distinguish a profile the host supports from one it merely knows
-// about. Probed once: the answer cannot change while the process runs.
-//
-// This reports what FFmpeg was *built* with. It cannot tell whether the GPU is
-// actually reachable — that needs a device, which is why a stream that fails
-// to start on a hardware profile falls back rather than trusting this.
+// availableEncoders lists the encoder names this FFmpeg build was compiled
+// with. Necessary but not sufficient: a build can offer vp8_vaapi while the
+// GPU has no VP8 encode entrypoint, which is why probeEncoder exists.
 func availableEncoders() map[string]bool {
 	availableOnce.Do(func() {
 		availableSet = map[string]bool{}
@@ -136,17 +135,83 @@ func availableEncoders() map[string]bool {
 	return availableSet
 }
 
+type probeKey struct{ encoder, device string }
+
+var probeCache sync.Map // probeKey -> bool
+
+// probeEncoder answers whether this host can actually encode with a profile,
+// by encoding a handful of frames with it and seeing whether FFmpeg succeeds.
+//
+// Asking `ffmpeg -encoders` is not enough, and the difference is not academic:
+// a build that ships vp8_vaapi on a GPU whose VAAPI driver exposes no VP8
+// encode entrypoint reports the encoder as present, offers it in the UI, and
+// then fails at stream start with "No usable encoding entrypoint found". Only
+// running it distinguishes the two.
+//
+// Results are cached per encoder and device: the answer cannot change while
+// the process runs, and a probe costs an FFmpeg launch.
+func probeEncoder(p EncoderProfile, device string) bool {
+	if !availableEncoders()[p.Encoder] {
+		return false
+	}
+	if p.NeedsDevice() && device == "" {
+		return false
+	}
+
+	key := probeKey{encoder: p.Encoder, device: device}
+	if cached, ok := probeCache.Load(key); ok {
+		return cached.(bool)
+	}
+
+	ok := runEncoderProbe(p, device)
+	probeCache.Store(key, ok)
+	if !ok {
+		log.Printf("[Probe] %s unusable on this host", p.Key)
+	}
+	return ok
+}
+
+func runEncoderProbe(p EncoderProfile, device string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	args := []string{"-hide_banner", "-loglevel", "error"}
+	if p.NeedsDevice() {
+		args = append(args, "-vaapi_device", device)
+	}
+
+	hwUpload := ""
+	if p.NeedsDevice() {
+		hwUpload = ",hwupload"
+	}
+
+	// A few frames at a small size: enough to force encoder initialisation,
+	// which is where an unsupported profile fails, without costing real time.
+	args = append(args,
+		"-f", "lavfi", "-i", "testsrc=size=320x240:rate=25:duration=0.2",
+		"-vf", fmt.Sprintf("format=%s%s", p.PixelFormat, hwUpload),
+		"-c:v", p.Encoder,
+		"-b:v", "500k",
+	)
+	args = append(args, p.ExtraArgs...)
+	args = append(args, "-f", "null", "-")
+
+	return exec.CommandContext(ctx, getFfmpegPath(), args...).Run() == nil
+}
+
 // ProfileStatus is one entry of the /capabilities response.
 type ProfileStatus struct {
 	EncoderProfile
 	Available bool `json:"available"`
 }
 
-func encoderCapabilities() []ProfileStatus {
-	avail := availableEncoders()
+// encoderCapabilities reports what this host can actually encode with.
+// `device` is the render node hardware profiles are probed against; without
+// one they are reported unavailable, since they cannot run anyway.
+func encoderCapabilities(device string) []ProfileStatus {
 	out := make([]ProfileStatus, 0, len(encoderProfiles))
 	for _, p := range encoderProfiles {
-		out = append(out, ProfileStatus{EncoderProfile: p, Available: avail[p.Encoder]})
+		out = append(out, ProfileStatus{EncoderProfile: p, Available: probeEncoder(p, device)})
 	}
 	return out
 }
@@ -159,7 +224,7 @@ func encoderCapabilities() []ProfileStatus {
 // and none of that is visible from the settings screen. A stream that quietly
 // runs in software is a better outcome than one that refuses to start, so long
 // as the reason is logged — which is why the caller is told what happened.
-func resolveProfile(key string) (EncoderProfile, string) {
+func resolveProfile(key string, device string) (EncoderProfile, string) {
 	if key == "" {
 		return defaultProfile(), ""
 	}
@@ -167,16 +232,16 @@ func resolveProfile(key string) (EncoderProfile, string) {
 	if !ok {
 		return defaultProfile(), fmt.Sprintf("unknown encoder profile %q, using %s", key, defaultProfileKey)
 	}
-	if availableEncoders()[p.Encoder] {
+	if probeEncoder(p, device) {
 		return p, ""
 	}
 
-	// Prefer the software encoder for the same codec, so the negotiated
-	// codec does not change underneath a peer that has already connected.
+	// Prefer the software encoder for the same codec, so the negotiated codec
+	// does not change underneath a peer that has already connected.
 	for _, alt := range encoderProfiles {
-		if alt.MimeType == p.MimeType && alt.HWAccel == "" && availableEncoders()[alt.Encoder] {
-			return alt, fmt.Sprintf("encoder %q unavailable, falling back to %s", p.Encoder, alt.Key)
+		if alt.MimeType == p.MimeType && alt.HWAccel == "" && probeEncoder(alt, device) {
+			return alt, fmt.Sprintf("encoder %q cannot run on this host, falling back to %s", p.Encoder, alt.Key)
 		}
 	}
-	return defaultProfile(), fmt.Sprintf("encoder %q unavailable, falling back to %s", p.Encoder, defaultProfileKey)
+	return defaultProfile(), fmt.Sprintf("encoder %q cannot run on this host, falling back to %s", p.Encoder, defaultProfileKey)
 }

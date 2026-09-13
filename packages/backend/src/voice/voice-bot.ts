@@ -7,7 +7,14 @@ import { fetchIcyMetadata } from './audio/icy-metadata.js';
 import { StreamSignaling, type ActiveStream, type SignalingMessage } from './streaming/stream-signaling.js';
 import { SidecarClient } from './streaming/sidecar-client.js';
 import { SidecarProcess, type SidecarConfig } from './streaming/sidecar-process.js';
-import { STREAM_PRESETS, DEFAULT_PRESET, SOURCE_SEPARATOR, type VideoViewerInfo, type VideoStreamStatus } from './streaming/types.js';
+import {
+  STREAM_PRESETS,
+  DEFAULT_PRESET,
+  SOURCE_SEPARATOR,
+  clampBitrate,
+  type VideoViewerInfo,
+  type VideoStreamStatus,
+} from './streaming/types.js';
 import { getCookieArgs, runYtDlp, assertSafeUrl } from './audio/youtube.js';
 import { validateUrl } from '../utils/url-validator.js';
 import {
@@ -17,16 +24,30 @@ import {
 } from '../utils/stream-settings.js';
 
 /** Resolve a YouTube/yt-dlp-compatible URL to a direct stream URL */
-async function resolveVideoUrl(url: string, maxHeight: number = 720): Promise<string> {
+async function resolveVideoUrl(
+  url: string,
+  maxHeight: number = 720,
+  operatorConfigured = false,
+): Promise<string> {
   assertSafeUrl(url);
 
   // Only resolve YouTube and other yt-dlp-supported sites
   if (!url.includes('youtube.com/') && !url.includes('youtu.be/') && !url.includes('twitch.tv/')) {
     // Anything else goes straight to the sidecar's ffmpeg, so apply the same
     // SSRF guard the radio path uses before handing a URL to a fetcher.
-    const check = await validateUrl(url, { allowedProtocols: ['http:', 'https:'] });
-    if (!check.valid) {
-      throw new Error(`Video source blocked: ${check.error}`);
+    //
+    // `operatorConfigured` skips it, and only !tv sets it. Those URLs come out
+    // of an M3U playlist an admin configured, and the expected deployment
+    // points that at an IPTV proxy on the LAN — exactly the private address
+    // validateUrl exists to refuse. A TeamSpeak user cannot reach this path
+    // with a URL of their own: !tv takes a channel *name* and looks the URL up
+    // in the parsed playlist. The sidecar still requires http(s) per segment,
+    // so this cannot become a file: or concat: read.
+    if (!operatorConfigured) {
+      const check = await validateUrl(url, { allowedProtocols: ['http:', 'https:'] });
+      if (!check.valid) {
+        throw new Error(`Video source blocked: ${check.error}`);
+      }
     }
     return url;
   }
@@ -153,6 +174,7 @@ export class VoiceBot extends EventEmitter {
   private _videoBitrate: string = STREAM_PRESETS[DEFAULT_PRESET]?.bitrate ?? '2500k';
   private _videoStartedAt: number | null = null;
   private _viewers: Map<number, VideoViewerInfo> = new Map();
+  private _videoOperatorConfigured = false;
   private _videoEncoder = '';
   private _videoHwDevice = '';
   private _videoIdleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -912,7 +934,13 @@ export class VoiceBot extends EventEmitter {
   }
 
   /** Start video streaming to TS6 via WebRTC */
-  async startVideoStream(source: string, preset?: string, framerate?: number, bitrate?: string): Promise<void> {
+  async startVideoStream(
+    source: string,
+    preset?: string,
+    framerate?: number,
+    bitrate?: string,
+    opts: { operatorConfigured?: boolean } = {},
+  ): Promise<void> {
     if (this._status !== 'connected' && this._status !== 'playing' && this._status !== 'paused') {
       throw new Error('Bot is not connected');
     }
@@ -924,10 +952,14 @@ export class VoiceBot extends EventEmitter {
     const sidecarPort = this.config.sidecarPort || 9800;
     const settings = (await this.config.getStreamSettings?.()) ?? STREAM_SETTINGS_DEFAULTS;
 
-    // Precedence: what the caller asked for, then this bot's own column, then
-    // the configured default. An unknown key falls through to DEFAULT_PRESET
-    // rather than failing the stream.
-    this._videoPreset = preset ?? this.config.streamPreset ?? settings.defaultPreset;
+    // Precedence: what the caller asked for, then the configured default.
+    //
+    // MusicBot.streamPreset is deliberately NOT consulted. No UI writes it, so
+    // every row carries the schema default — which then silently overrode the
+    // one preset an operator can actually set, making Settings -> Streaming
+    // look broken. It stays in the schema as the seed for a per-bot override,
+    // and must gain a UI before it is read again.
+    this._videoPreset = preset ?? settings.defaultPreset;
     const presetConfig = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     if (!STREAM_PRESETS[this._videoPreset]) {
       console.warn(`[VoiceBot ${this.config.id}] Unknown preset "${this._videoPreset}", using ${DEFAULT_PRESET}`);
@@ -939,9 +971,9 @@ export class VoiceBot extends EventEmitter {
     const effectiveFramerate = framerate && framerate > 0
       ? framerate
       : presetConfig.framerate;
-    const effectiveBitrate = bitrate?.trim()
-      ? bitrate.trim()
-      : presetConfig.bitrate;
+    // Clamped: a caller-supplied bitrate over the TeamSpeak ceiling gets the
+    // stream dropped by the server, which looks like the encoder failing.
+    const effectiveBitrate = clampBitrate(bitrate?.trim() || presetConfig.bitrate);
 
     this._videoFramerate = effectiveFramerate;
     this._videoBitrate = effectiveBitrate;
@@ -1032,7 +1064,8 @@ export class VoiceBot extends EventEmitter {
     this._videoStartedAt = Date.now();
 
     // Resolve YouTube/streaming URLs via yt-dlp, then start ffmpeg
-    const resolvedSource = await resolveVideoUrl(source, presetConfig.height);
+    this._videoOperatorConfigured = opts.operatorConfigured === true;
+    const resolvedSource = await resolveVideoUrl(source, presetConfig.height, this._videoOperatorConfigured);
     await this.sidecarHttp.setSource(
       resolvedSource,
       presetConfig.width,
@@ -1140,7 +1173,9 @@ export class VoiceBot extends EventEmitter {
     }
     this._videoSource = source;
     const currentPreset = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
-    const resolvedSource = await resolveVideoUrl(source, currentPreset.height);
+    // A source swapped mid-stream is a fresh URL from the caller, so it is
+    // only trusted if this stream was started from the operator's playlist.
+    const resolvedSource = await resolveVideoUrl(source, currentPreset.height, this._videoOperatorConfigured);
 
     // Reuses the encoder resolved at stream start: changing it here would
     // renegotiate the codec under peers that are already connected.
