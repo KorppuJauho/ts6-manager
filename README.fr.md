@@ -364,13 +364,24 @@ Lorsqu'un bot musical est connecté à un canal, les utilisateurs de ce canal pe
 | `!vol <0-100>` | Régler le volume |
 | `!np` / `!nowplaying` | Afficher la piste en cours |
 | `!info` | Piste en cours avec la progression de lecture |
-| `!help` / `!aide` | Lister les commandes disponibles |
+| `!lyrics [recherche]` | Paroles de la piste en cours ou d'une recherche |
+| `!stream <url> [preset]` | Diffuser une vidéo dans le salon |
+| `!tv` | Lister les chaînes IPTV disponibles |
+| `!tv <chaîne>` | Lancer une chaîne TV en direct |
+| `!tv reload` | Recharger la playlist IPTV |
+| `!stopstream` | Arrêter la diffusion vidéo |
+| `!viewers` | Lister les spectateurs du stream |
+| `!help` | Lister les commandes disponibles |
 | `!channels` | Lister les canaux avec leurs identifiants |
 | `!move <user> <channel>` | Déplacer un utilisateur vers un canal (admin) |
 | `!moveall <channel>` | Déplacer tout le monde vers un canal (admin) |
 | `!notif` | Activer/désactiver la notification « lecture en cours » (admin) |
 
 `!move`, `!moveall` et `!notif` sont des commandes d'administration ; l'accès aux commandes musicales et aux commandes d'administration peut être restreint à des groupes de serveurs TeamSpeak spécifiques dans **Paramètres → Commandes musicales**.
+
+`!tv` nécessite une playlist M3U configurée dans **Paramètres → Diffusion** ; sans cela la commande ne fait rien.
+
+La langue dans laquelle le bot répond se choisit dans **Paramètres → Commandes musicales** et est indépendante de la langue de l'interface web.
 
 ## Configuration SSO / SAML
 

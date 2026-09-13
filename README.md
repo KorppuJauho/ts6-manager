@@ -42,6 +42,21 @@ Hardened, reliability-focused evolution of [clusterzx/ts6-manager](https://githu
 - Robust yt-dlp pipeline: hard timeouts, stale-artifact cleanup, deduplicated concurrent downloads, full error logging, low CPU priority, auto-update at container start
 - Load & Play starts playback; playlist song counts stay fresh
 
+**Video streaming**
+- Hardware video encoding on an Intel GPU (VAAPI), configurable from the web UI — encoder profile, GPU device, and an on/off toggle. The UI probes the sidecar and greys out profiles this host cannot run
+- VP8 and VP9, software or hardware; a profile the host cannot run falls back to software rather than failing the stream
+- Quality presets up to 2160p (4K), with the default selectable in the UI
+- DASH source pairs: separate video and audio streams, so 1080p and above are reachable on YouTube (progressive formats cap at 720p)
+- Streams with no viewers stop themselves after five minutes instead of holding a GPU encode session open
+- Stream visibility (public, or the TeamSpeak server's own access rules) is a setting
+
+**Live TV**
+- `!tv` streams live TV channels from an M3U/M3U8 playlist, with loose name matching so `!tv mtv3` finds "MTV 3"
+- Playlist URL, a channel filter and the channel order are configured in the web UI
+
+**Bot language**
+- The bot's TeamSpeak replies are available in English, Finnish, French, German, Spanish and Italian, selected in the UI and independent of the interface language
+
 **Security**
 - Built-in safe expression evaluator replaces the unmaintained `expr-eval`
 - Sidecar API bearer-token auth, hardened containers, committed binaries removed
@@ -345,6 +360,17 @@ The Docker images handle migrations automatically on startup.
 | `AUDIO_READ_RTP_BUFFER` | `1048576` | UDP OS-socketbuffer for audio port |
 | `VIDEO_BUFSIZE` | `1M` | FFmpeg Video Buffer |
 
+The **encoder profile and GPU device are not environment variables** — they
+are configured in the web UI under Settings → Streaming and travel to the
+sidecar with each stream. In a container deployment the sidecar is long-lived
+and its environment is fixed at container start, so a setting changed in the
+UI could not reach it any other way.
+
+Hardware encoding additionally needs the GPU passed through to the sidecar
+container, and the container's unprivileged user in the group that owns the
+render node. Both are set up in `docker-compose.yml`; `RENDER_GID` in `.env`
+overrides the group if the host differs from the default.
+
 ## Music Bot Text Commands
 
 When a music bot is connected to a channel, users in that channel can control it via chat:
@@ -365,13 +391,24 @@ When a music bot is connected to a channel, users in that channel can control it
 | `!vol <0-100>` | Set volume |
 | `!np` / `!nowplaying` | Show current track |
 | `!info` | Current track with playback progress |
-| `!help` / `!aide` | List available commands |
+| `!lyrics [search]` | Lyrics for the current track, or for a search |
+| `!stream <url> [preset]` | Stream a video to the channel |
+| `!tv` | List the available IPTV channels |
+| `!tv <channel>` | Start a live TV channel |
+| `!tv reload` | Refetch the IPTV playlist |
+| `!stopstream` | Stop the video stream |
+| `!viewers` | List the video stream viewers |
+| `!help` | List available commands |
 | `!channels` | List channels with their IDs |
 | `!move <user> <channel>` | Move a user to a channel (admin) |
 | `!moveall <channel>` | Move everyone to a channel (admin) |
 | `!notif` | Toggle the now-playing notification (admin) |
 
 `!move`, `!moveall`, and `!notif` are admin commands; access to music and admin commands can be restricted to specific TeamSpeak server groups under **Settings → Music Commands**.
+
+`!tv` needs an M3U playlist configured under **Settings → Streaming**; it does nothing until one is set.
+
+The language the bot replies in is chosen under **Settings → Music Commands** and is independent of the web interface's own language.
 
 ## SSO / SAML Configuration
 

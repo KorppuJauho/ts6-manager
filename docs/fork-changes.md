@@ -64,11 +64,18 @@ one format and carries another:
 2. `NewTrackLocalStaticRTP` — the local track's codec capability
 3. FFmpeg's `-payload_type`
 
-**Known regression.** `isVP8KeyframeStart` parses VP8 payload descriptors and
-cannot read VP9, so the per-peer stream gate opens on the first packet of any
-kind instead of on a keyframe. A viewer joining mid-frame may see artefacts
-until the next keyframe. The function is left in the file as the starting point
-for a VP9-aware replacement. **Follow-up: write a VP9 keyframe detector.**
+Encoding is now selected from the web UI rather than hardcoded. `encoders.go`
+declares each profile once — codec, payload type, encoder name, pixel format,
+FFmpeg flags — and all three codec sites derive from that record. `GET
+/capabilities` probes `ffmpeg -encoders` so the UI can distinguish a profile
+this host can run from one it merely knows about, and a profile the host
+cannot run falls back to the software encoder for the same codec.
+
+**Partly-resolved regression.** The per-peer keyframe gate is applied again
+when VP8 is the active codec. `isVP8KeyframeStart` still cannot read VP9, so a
+VP9 stream opens the gate on the first packet and a viewer joining mid-frame
+may see artefacts until the next keyframe. **Follow-up: write a VP9 keyframe
+detector.**
 
 Deployment depends on `/dev/dri` passthrough *and* group membership for the
 unprivileged `sidecar` user — see the comments in `docker-compose.yml`.
@@ -127,10 +134,12 @@ committed `migrations/` directory is a single one-off patch, not a replayable
 history — `prisma migrate diff` cannot even replay it. **Schema changes in this
 fork go through `db push`; do not add migration files.**
 
-Carries a known defect, marked `FIXME` in `voice-bot.ts`: `startVideoStream`
-resolves the preset as `preset ?? DEFAULT_PRESET` and ignores
-`this.config.streamPreset`, so the per-bot preset column is written by the UI
-and then never read. **Follow-up: fixed when the preset becomes a setting.**
+1440p and 2160p presets were added alongside, and the default is a setting
+rather than a constant. The defect carried through the import — that
+`startVideoStream` ignored `this.config.streamPreset`, so the per-bot column
+was written by the UI and never read — is fixed: precedence is the caller,
+then the bot's own column, then the configured default, with an unknown key
+warning and falling back rather than failing the stream.
 
 ### Idle stream auto-stop
 
@@ -155,9 +164,9 @@ the caller passed**. On a private server every member should be able to watch
 any bot stream, and the upstream default was turning away viewers who were
 entitled to watch.
 
-This is an access-control decision hardcoded in a transport helper, which is
-the wrong place for it. **Follow-up: replaced by a real setting, still
-defaulting to public.**
+Resolved. `StreamSignaling` honours the caller's `accessibility` again, and
+the decision is made in `VoiceBot` from the `streamPublic` setting, still
+defaulting to public.
 
 ### Bot speaks English
 
@@ -172,8 +181,15 @@ quotes"` (the French marks render inconsistently across TeamSpeak client
 fonts), column padding was re-aligned for English label widths, and the French
 aliases `!aide` and `!paroles` were dropped.
 
-Strings are still literals at their call sites. **Follow-up: a lookup table and
-a stored setting, so the language is selectable from the web UI.**
+Resolved. `voice/bot-i18n/` holds one catalogue per language (English,
+Finnish, French, German, Spanish, Italian), selected by a stored setting.
+Every catalogue is typed `BotMessages`, so a key added to one and forgotten
+elsewhere is a compile error; `messages(lang)` falls back to English for an
+unknown value, because it comes from a database column.
+
+Typing the keys surfaced a latent bug: `QueueItem.artist` is optional and was
+interpolated directly, so a track with no artist metadata replied "Now
+playing: undefined - Title".
 
 ### Live TV (`!tv`)
 
@@ -188,8 +204,10 @@ parsed once and cached for the process.
 
 **Deviation from the fork as deployed:** the original hardcoded the playlist
 URL — a private LAN address — and a ten-entry channel whitelist as module
-constants. Both are read from `IPTV_M3U_URL` and `IPTV_CHANNEL_FILTER`, so a
-private network address stays out of a public repository's permanent history.
+constants. They were first moved to environment variables, and now live in the
+`StreamSettings` row with an enable toggle and a channel sort order, editable
+in the web UI. A private network address stays out of a public repository's
+permanent history either way.
 
 The URL is deliberately **not** passed through `validateUrl`: that helper's
 SSRF guard refuses private addresses, and the expected deployment is an IPTV
@@ -204,13 +222,30 @@ enforced instead.
 | Radio stations ordered by id | `fix(bot): list radio stations…` | `!radio <id>` means ids are what users type; alphabetical order renumbered them on every insert |
 | `python3` + `build-essential` in base images | `build(docker): install a native-module toolchain…` | node-gyp builds `@discordjs/opus`, `cpu-features`, `ssh2` at install time |
 
+### Settings, and the dependency fixes
+
+The hardcoded values above are now a `StreamSettings` row, edited in
+Settings → Streaming: hardware encoding and its device, the encoder profile,
+the default preset, stream visibility, and the IPTV playlist, filter and sort.
+The bot's language sits with the other bot settings in Settings → Music
+Commands.
+
+Encoder selection reaches the sidecar in the `POST /source` body rather than
+its environment. This is not a style choice: in a container deployment the
+sidecar is long-lived and its env is fixed at container start, so a setting
+changed in the web UI could not reach it any other way.
+
+Separately, `pnpm audit --audit-level high` was failing with 13 advisories —
+all of them already red on `main`, but GitHub Actions was disabled on the fork
+so nothing had reported it. Every one had a published fix, so they were
+resolved with version bumps and overrides rather than added to
+`auditConfig.ignoreGhsas`.
+
 ## Open follow-ups
 
-1. VP9 keyframe detector, to restore the per-peer stream gate.
+1. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8
+   streams gate correctly again.)
 2. Confirm whether removing A/V pacing causes audio drift on long streams.
-3. Per-bot `streamPreset` is written but never read (`FIXME` in `voice-bot.ts`).
-4. Stream visibility should be a setting, not a hardcoded override.
-5. Bot language should be selectable from the web UI.
-6. IPTV playlist URL and channel filter should be UI settings, not env vars.
-
-Items 3–6 are the subject of the settings work that follows this import.
+3. H.264 profiles. The registry has no entry: the RTP handling and keyframe
+   detection in `main.go` are VP8/VP9 shaped, and a profile that negotiates
+   but never renders would be worse than its absence.
