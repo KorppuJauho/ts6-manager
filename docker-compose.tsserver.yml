@@ -7,6 +7,10 @@
 # the server in this container. For a full containerised stack that mirrors
 # production instead, use docker-compose.test.yml.
 #
+# Published ports are shifted off the production numbers (+1) so this can run
+# on a host that already serves a real TeamSpeak server without colliding.
+# Connect a client to port 9988, and point the manager at WebQuery on 10081.
+#
 # See docs/local-testing.md for the WSL2 networking setting this needs, how to
 # get the WebQuery API key, and what a local rig can and cannot verify.
 
@@ -27,15 +31,15 @@ services:
     ports:
       # Voice. UDP — this is the one that needs mirrored networking on WSL2
       # for a Windows TeamSpeak client to reach it over localhost.
-      - "9987:9987/udp"
+      - "${TEST_TS_VOICE_PORT:-9988}:9987/udp"
       # WebQuery HTTP API. This is what the manager actually talks to; it is
       # the `webqueryPort` on a server connection, default 10080.
-      - "10080:10080"
+      - "${TEST_TS_WEBQUERY_PORT:-10081}:10080"
       # ServerQuery over SSH. Only needed to exercise the server-access
       # recovery feature; everything else works without it.
-      - "10022:10022"
+      - "${TEST_TS_SSH_PORT:-10023}:10022"
       # File transfer.
-      - "30033:30033"
+      - "${TEST_TS_FILE_PORT:-30034}:30033"
     # State is deliberately ephemeral: a test rig is more useful when
     # `docker compose down -v` gives you a clean server. To keep it, add a
     # volume here mounted at your image's data directory (the official images

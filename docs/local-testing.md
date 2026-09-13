@@ -25,6 +25,61 @@ video+audio resolution, presets, stream visibility, the idle auto-stop, the
 bot's six reply languages, and `!tv` — which can point at a real IPTV proxy on
 your LAN, since the backend does the fetching.
 
+## Running alongside a production deployment
+
+The test rig is built to coexist with a real deployment on the same host —
+which is the point of running it on the server that has the GPU. Four things
+keep them apart, and all four matter.
+
+**Ports are shifted.** TeamSpeak +1, manager +10. Nothing in the test stack
+binds a port production uses.
+
+| | Production | Test |
+|---|---|---|
+| TeamSpeak voice (UDP) | 9987 | **9988** |
+| TeamSpeak WebQuery | 10080 | **10081** |
+| TeamSpeak ServerQuery (SSH) | 10022 | **10023** |
+| TeamSpeak file transfer | 30033 | **30034** |
+| Manager UI | 3000 | **3010** |
+| Manager API | 3001 | **3011** |
+
+Each is overridable in `.env` (`TEST_TS_VOICE_PORT`, `TEST_FRONTEND_PORT`, …)
+if any of those are already taken.
+
+**Container names are prefixed.** `docker-compose.yml` pins
+`container_name: ts6-backend` / `ts6-sidecar` / `ts6-frontend`, and Docker
+refuses duplicates — the test stack uses `ts6-test-*` so it does not collide
+or, worse, get mistaken for the production container.
+
+**Use a distinct project name.** Always pass `-p ts6-test`:
+
+```bash
+docker compose -p ts6-test -f docker-compose.test.yml up -d --build
+docker compose -p ts6-test -f docker-compose.test.yml down -v
+```
+
+This is the one that protects your data. `down -v` deletes volumes *in the
+current project* — run it without `-p` from the wrong directory and it can
+take the production database with it. The project name scopes it.
+
+**Volumes are separate.** `test-backend-data` and `test-music-data`, namespaced
+again by the project name, so the test manager gets its own database and never
+touches production's.
+
+### The GPU is the one thing genuinely shared
+
+To exercise VAAPI, add the override:
+
+```bash
+docker compose -p ts6-test \
+  -f docker-compose.test.yml -f docker-compose.test.gpu.yml up -d --build
+```
+
+The render node supports multiple clients, so this does not break production.
+But hardware *encode* is a limited fixed-function resource: two concurrent
+streams contend, and on a modest iGPU that can show up as dropped frames on
+both. Test while production is not streaming.
+
 ## One-time WSL setup
 
 ### Mirrored networking
@@ -118,7 +173,7 @@ Then add the server in the UI under Settings → Connections:
 | Field | Value |
 |---|---|
 | Host | `localhost` |
-| WebQuery port | `10080` |
+| WebQuery port | `10081` (the shifted test port) |
 | API key | the admin key from the server's first-start log |
 | Use HTTPS | off |
 
@@ -128,9 +183,11 @@ Mirrors production, and catches Dockerfile and compose problems the native
 loop cannot see.
 
 ```bash
-docker compose -f docker-compose.test.yml up -d --build
-# UI on http://localhost:3000
+docker compose -p ts6-test -f docker-compose.test.yml up -d --build
+# UI on http://localhost:3010
 ```
+
+The `-p ts6-test` is not optional — see the isolation section above.
 
 Both compose files publish the same host ports for TeamSpeak, so run one or
 the other, not both.
@@ -144,10 +201,12 @@ the other, not both.
 4. Watch the sidecar log for the encoder it resolved:
 
 ```bash
-docker compose -f docker-compose.test.yml logs -f sidecar
+docker compose -p ts6-test -f docker-compose.test.yml logs -f sidecar
 ```
 
-`[FFmpeg] Starting: … encoder=libvpx` is the expected result locally. Anything
+`[FFmpeg] Starting: … encoder=libvpx` is the expected result under WSL2. On a
+real Linux host with the GPU override, expect `encoder=vp9_vaapi` — anything
+else means the fallback fired, and the line above it says why. Anything
 naming a `_vaapi` encoder means the probe found one, which would be a surprise
 under WSL2 and worth investigating before trusting it.
 

@@ -8,9 +8,18 @@
 # For a fast edit-reload loop instead, run docker-compose.tsserver.yml and
 # `pnpm dev`. See docs/local-testing.md.
 #
-# Differs from docker-compose.yml deliberately: it adds the TeamSpeak server,
-# and it does NOT pass a GPU through — see the hardware encoding section of
-# docs/local-testing.md for why that is pointless under WSL2.
+# Every published port is shifted off the production numbers so this can run
+# alongside a real deployment on the same host without colliding: TeamSpeak
+# ports +1, manager ports +10. Container names are prefixed too, since the
+# production compose pins container_name and Docker refuses duplicates.
+#
+# No GPU is passed through here — pointless under WSL2, where the render node
+# is a D3D12 shim. On a real Linux host add the override:
+#   docker compose -f docker-compose.test.yml -f docker-compose.test.gpu.yml up -d
+#
+# Run it under its own project name so `down -v` can never reach production
+# volumes:
+#   docker compose -p ts6-test -f docker-compose.test.yml up -d --build
 
 services:
   teamspeak:
@@ -20,10 +29,10 @@ services:
     environment:
       - TS3SERVER_LICENSE=accept
     ports:
-      - "9987:9987/udp"
-      - "10080:10080"
-      - "10022:10022"
-      - "30033:30033"
+      - "${TEST_TS_VOICE_PORT:-9988}:9987/udp"
+      - "${TEST_TS_WEBQUERY_PORT:-10081}:10080"
+      - "${TEST_TS_SSH_PORT:-10023}:10022"
+      - "${TEST_TS_FILE_PORT:-30034}:30033"
     networks:
       - ts6-test
 
@@ -39,7 +48,8 @@ services:
       - DATABASE_URL=file:/app/packages/backend/data/ts6webui.db
       - "JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env - generate with openssl rand -hex 32}"
       - "ENCRYPTION_KEY=${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env, different from JWT_SECRET}"
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      # Must match the port the browser actually uses, or CORS rejects the UI.
+      - FRONTEND_URL=${TEST_FRONTEND_URL:-http://localhost:3010}
       - MUSIC_DIR=/data/music
       - SIDECAR_URL=http://ts6-test-sidecar:9800
       - "SIDECAR_TOKEN=${SIDECAR_TOKEN:?set SIDECAR_TOKEN in .env - generate with openssl rand -hex 32}"
@@ -47,7 +57,7 @@ services:
       - test-backend-data:/app/packages/backend/data
       - test-music-data:/data/music
     ports:
-      - "3001:3001"
+      - "${TEST_BACKEND_PORT:-3011}:3001"
     depends_on:
       - sidecar
       - teamspeak
@@ -79,7 +89,7 @@ services:
     container_name: ts6-test-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-3000}:8080"
+      - "${TEST_FRONTEND_PORT:-3010}:8080"
     depends_on:
       - backend
     networks:
