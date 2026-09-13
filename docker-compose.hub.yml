@@ -45,8 +45,6 @@ services:
       - SIDECAR_LISTEN_ADDR=0.0.0.0
       - "SIDECAR_TOKEN=${SIDECAR_TOKEN:?set SIDECAR_TOKEN in .env - generate with openssl rand -hex 32}"
       # DRM render node the VAAPI encoder uploads frames to. Must match the
-      # device passed through below.
-      - VAAPI_DEVICE=${VAAPI_DEVICE:-/dev/dri/renderD128}
     # Hardware encoding needs the host GPU inside the container. Without this
     # the sidecar starts, then every stream dies with "No VA display found".
     # The container runs as the unprivileged `sidecar` user, so it also needs
