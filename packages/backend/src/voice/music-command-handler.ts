@@ -240,7 +240,10 @@ export class MusicCommandHandler {
 
     const stations = await this.prisma.radioStation.findMany({
       where: { serverConfigId: dbBot.serverConfigId },
-      orderBy: { name: 'asc' },
+      // Insertion order, not alphabetical: !radio prints the id beside each
+      // station and users learn those numbers. Sorting by name reshuffles
+      // every id as soon as a station is added.
+      orderBy: { id: 'asc' },
     });
 
     if (stations.length === 0) {
