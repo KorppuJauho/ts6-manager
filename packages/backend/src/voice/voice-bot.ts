@@ -142,6 +142,8 @@ export class VoiceBot extends EventEmitter {
   private _videoBitrate: string = STREAM_PRESETS[DEFAULT_PRESET]?.bitrate ?? '2500k';
   private _videoStartedAt: number | null = null;
   private _viewers: Map<number, VideoViewerInfo> = new Map();
+  private _videoIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly VIDEO_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
   constructor(config: VoiceBotConfig) {
     super();
@@ -1018,6 +1020,7 @@ export class VoiceBot extends EventEmitter {
 
     console.log(`[VoiceBot ${this.config.id}] Video stream started: ${stream.id}, source: ${source}`);
     this.emit('videoStreamStarted', { streamId: stream.id, source, preset: this._videoPreset });
+    this.checkVideoIdle();
     this.emit('statusChange', this._status);
   }
 
@@ -1064,6 +1067,45 @@ export class VoiceBot extends EventEmitter {
     console.log(`[VoiceBot ${this.config.id}] Video stream stopped`);
     this.emit('videoStreamStopped');
     this.emit('statusChange', this._status);
+    this.clearVideoIdleTimer();
+  }
+
+  /**
+   * Start or cancel the idle countdown after any change to the viewer set.
+   * An encode runs whether or not anyone is watching, so a stream nobody
+   * joined would otherwise hold a GPU encode session open indefinitely.
+   */
+  private checkVideoIdle(): void {
+    if (!this._videoStreaming) {
+      this.clearVideoIdleTimer();
+      return;
+    }
+
+    if (this._viewers.size > 0) {
+      if (this._videoIdleTimer) {
+        console.log(`[VoiceBot ${this.config.id}] Viewer joined, cancelling idle timer`);
+        this.clearVideoIdleTimer();
+      }
+      return;
+    }
+
+    if (this._videoIdleTimer) return;
+
+    console.log(`[VoiceBot ${this.config.id}] No viewers, starting idle timer`);
+    this._videoIdleTimer = setTimeout(() => {
+      this._videoIdleTimer = null;
+      console.log(`[VoiceBot ${this.config.id}] Stream idle, auto-stopping`);
+      this.stopVideoStream().catch((err) => {
+        console.error(`[VoiceBot ${this.config.id}] Idle auto-stop failed: ${err.message}`);
+      });
+    }, this.VIDEO_IDLE_TIMEOUT_MS);
+  }
+
+  private clearVideoIdleTimer(): void {
+    if (this._videoIdleTimer) {
+      clearTimeout(this._videoIdleTimer);
+      this._videoIdleTimer = null;
+    }
   }
 
   /** Change video source while streaming */
@@ -1095,6 +1137,7 @@ export class VoiceBot extends EventEmitter {
     this.signaling.sendRemoveClient(clid, this._activeStreamId);
     this._viewers.delete(clid);
     this.emit('videoViewerLeft', clid);
+    this.checkVideoIdle();
   }
 
   /** Get WebRTC offer for WebUI preview player */
@@ -1137,6 +1180,7 @@ export class VoiceBot extends EventEmitter {
         this.sidecarHttp?.closePeer(String(clid)).catch(() => { });
         this._viewers.delete(clid);
         this.emit('videoViewerLeft', clid);
+        this.checkVideoIdle();
       }
     });
   }
@@ -1199,6 +1243,7 @@ export class VoiceBot extends EventEmitter {
       this.signaling.sendJoinResponse(viewerClid, streamId, true, result.sdp);
       console.log(`[VoiceBot ${this.config.id}] Viewer accepted: clid=${viewerClid} (${this._viewers.size} total)`);
       this.emit('videoViewerJoined', viewer);
+      this.checkVideoIdle();
     } catch (err: any) {
       console.error(`[VoiceBot ${this.config.id}] handleViewerJoin error (clid=${viewerClid}): ${err.message}`);
       this._viewers.delete(viewerClid);
