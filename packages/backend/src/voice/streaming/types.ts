@@ -13,10 +13,20 @@ export interface VideoStreamPreset {
 export const STREAM_PRESETS: Record<string, VideoStreamPreset> = {
   '480p': { label: '480p', width: 854, height: 480, bitrate: '1000k', framerate: 24 },
   '720p': { label: '720p', width: 1280, height: 720, bitrate: '2500k', framerate: 30 },
-  '1080p': { label: '1080p', width: 1920, height: 1080, bitrate: '4500k', framerate: 30 },
+  '1080p': { label: '1080p', width: 1920, height: 1080, bitrate: '5500k', framerate: 30 },
+  '1440p': { label: '1440p', width: 2560, height: 1440, bitrate: '9000k', framerate: 30 },
+  '2160p': { label: '2160p (4K)', width: 3840, height: 2160, bitrate: '18000k', framerate: 30 },
 };
 
-export const DEFAULT_PRESET = '720p';
+export const DEFAULT_PRESET = '1080p';
+
+/**
+ * Joins the video and audio URLs of a DASH source into the single `source`
+ * string the sidecar's HTTP API carries. The sidecar splits on it and gives
+ * FFmpeg one `-i` per segment; it must stay in sync with `sourceSeparator`
+ * in packages/sidecar/main.go.
+ */
+export const SOURCE_SEPARATOR = '|||';
 
 export interface VideoViewerInfo {
   clid: number;

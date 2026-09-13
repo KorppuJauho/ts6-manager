@@ -365,13 +365,24 @@ Wenn ein Musik-Bot mit einem Kanal verbunden ist, können Benutzer in diesem Kan
 | `!vol <0-100>` | Lautstärke setzen |
 | `!np` / `!nowplaying` | Aktuellen Titel anzeigen |
 | `!info` | Aktueller Titel mit Wiedergabefortschritt |
-| `!help` / `!aide` | Verfügbare Befehle auflisten |
+| `!lyrics [Suche]` | Songtext des aktuellen Titels oder einer Suche |
+| `!stream <url> [Preset]` | Ein Video in den Channel streamen |
+| `!tv` | Verfügbare IPTV-Sender auflisten |
+| `!tv <Sender>` | Einen Live-TV-Sender starten |
+| `!tv reload` | Die IPTV-Playlist neu laden |
+| `!stopstream` | Den Videostream stoppen |
+| `!viewers` | Zuschauer des Videostreams auflisten |
+| `!help` | Verfügbare Befehle auflisten |
 | `!channels` | Kanäle mit ihren IDs auflisten |
 | `!move <user> <channel>` | Einen Benutzer in einen Kanal verschieben (Admin) |
 | `!moveall <channel>` | Alle in einen Kanal verschieben (Admin) |
 | `!notif` | Die „Jetzt läuft"-Benachrichtigung umschalten (Admin) |
 
 `!move`, `!moveall` und `!notif` sind Admin-Befehle; der Zugriff auf Musik- und Admin-Befehle kann unter **Einstellungen → Musikbefehle** auf bestimmte TeamSpeak-Servergruppen beschränkt werden.
+
+`!tv` benötigt eine unter **Einstellungen → Streaming** konfigurierte M3U-Playlist; ohne sie tut der Befehl nichts.
+
+Die Sprache, in der der Bot antwortet, wird unter **Einstellungen → Musikbefehle** gewählt und ist unabhängig von der Sprache der Weboberfläche.
 
 ## SSO / SAML-Konfiguration
 

@@ -7,9 +7,14 @@ import { fetchIcyMetadata } from './audio/icy-metadata.js';
 import { StreamSignaling, type ActiveStream, type SignalingMessage } from './streaming/stream-signaling.js';
 import { SidecarClient } from './streaming/sidecar-client.js';
 import { SidecarProcess, type SidecarConfig } from './streaming/sidecar-process.js';
-import { STREAM_PRESETS, DEFAULT_PRESET, type VideoViewerInfo, type VideoStreamStatus } from './streaming/types.js';
+import { STREAM_PRESETS, DEFAULT_PRESET, SOURCE_SEPARATOR, type VideoViewerInfo, type VideoStreamStatus } from './streaming/types.js';
 import { getCookieArgs, runYtDlp, assertSafeUrl } from './audio/youtube.js';
 import { validateUrl } from '../utils/url-validator.js';
+import {
+  STREAM_SETTINGS_DEFAULTS,
+  effectiveEncoder,
+  type StreamSettingsValue,
+} from '../utils/stream-settings.js';
 
 /** Resolve a YouTube/yt-dlp-compatible URL to a direct stream URL */
 async function resolveVideoUrl(url: string, maxHeight: number = 720): Promise<string> {
@@ -26,10 +31,17 @@ async function resolveVideoUrl(url: string, maxHeight: number = 720): Promise<st
     return url;
   }
 
-  // Request best combined format (video+audio) up to the target height.
+  // Prefer a separate video+audio (DASH) pair over a combined progressive
+  // format: YouTube caps progressive at 720p, so asking for `best` puts a hard
+  // ceiling on the 1080p preset. The `+` makes yt-dlp print one URL per line,
+  // which we hand to the sidecar joined by SOURCE_SEPARATOR.
+  //
+  // dynamic_range=SDR excludes HDR formats — VP9 HDR tone-maps poorly through
+  // the VAAPI path and arrives washed out.
+  //
   // runYtDlp adds the cookie args' siblings (timeout, full stderr logging);
   // normal CPU priority — the user is waiting for the stream to start.
-  const formatFilter = `best[height<=${maxHeight}][ext=mp4]/best[height<=${maxHeight}]/best[ext=mp4]/best`;
+  const formatFilter = `bestvideo[height<=${maxHeight}][dynamic_range=SDR]+bestaudio/best[height<=${maxHeight}][dynamic_range=SDR]/best[height<=${maxHeight}]/best`;
   const stdout = await runYtDlp([
     ...getCookieArgs(),
     '-f', formatFilter,
@@ -39,8 +51,10 @@ async function resolveVideoUrl(url: string, maxHeight: number = 720): Promise<st
     url,
   ], 60_000, { lowPriority: false });
 
-  // yt-dlp -g returns the direct URL(s), take the first one
-  const directUrl = stdout.trim().split('\n')[0];
+  // yt-dlp -g prints one URL per stream: a single line for a progressive
+  // format, two (video then audio) for a DASH pair.
+  const urls = stdout.trim().split('\n').map((u) => u.trim()).filter(Boolean);
+  const directUrl = urls.join(SOURCE_SEPARATOR);
   if (!directUrl) {
     throw new Error('yt-dlp returned no URL');
   }
@@ -70,6 +84,12 @@ export interface VoiceBotConfig {
   sidecarBinaryPath?: string;
   sidecarPort?: number;
   streamPreset?: string;
+  /**
+   * Reads the current streaming settings. Supplied by VoiceBotManager, which
+   * owns the Prisma client; called at stream start so a change made in the
+   * web UI applies to the next stream without restarting the bot.
+   */
+  getStreamSettings?: () => Promise<StreamSettingsValue>;
 }
 
 export class VoiceBot extends EventEmitter {
@@ -133,6 +153,10 @@ export class VoiceBot extends EventEmitter {
   private _videoBitrate: string = STREAM_PRESETS[DEFAULT_PRESET]?.bitrate ?? '2500k';
   private _videoStartedAt: number | null = null;
   private _viewers: Map<number, VideoViewerInfo> = new Map();
+  private _videoEncoder = '';
+  private _videoHwDevice = '';
+  private _videoIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly VIDEO_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
   constructor(config: VoiceBotConfig) {
     super();
@@ -898,8 +922,20 @@ export class VoiceBot extends EventEmitter {
 
     const sidecarBinary = this.config.sidecarBinaryPath || process.env.SIDECAR_BINARY_PATH || 'sidecar';
     const sidecarPort = this.config.sidecarPort || 9800;
-    this._videoPreset = preset ?? this.config.streamPreset ?? DEFAULT_PRESET;
+    const settings = (await this.config.getStreamSettings?.()) ?? STREAM_SETTINGS_DEFAULTS;
+
+    // Precedence: what the caller asked for, then this bot's own column, then
+    // the configured default. An unknown key falls through to DEFAULT_PRESET
+    // rather than failing the stream.
+    this._videoPreset = preset ?? this.config.streamPreset ?? settings.defaultPreset;
     const presetConfig = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
+    if (!STREAM_PRESETS[this._videoPreset]) {
+      console.warn(`[VoiceBot ${this.config.id}] Unknown preset "${this._videoPreset}", using ${DEFAULT_PRESET}`);
+      this._videoPreset = DEFAULT_PRESET;
+    }
+
+    this._videoEncoder = effectiveEncoder(settings);
+    this._videoHwDevice = settings.hwAccelEnabled ? settings.hwAccelDevice : '';
     const effectiveFramerate = framerate && framerate > 0
       ? framerate
       : presetConfig.framerate;
@@ -981,7 +1017,9 @@ export class VoiceBot extends EventEmitter {
       name: `${this.config.nickname} Stream`,
       type: 3,
       bitrate: 4608,
-      accessibility: 1,
+      // Public streams admit any client on the TeamSpeak server; restricted
+      // defers to the server's own access rules.
+      accessibility: settings.streamPublic ? 0 : 1,
       mode: 1,
       viewerLimit: 0,
       audio: true,
@@ -1001,10 +1039,13 @@ export class VoiceBot extends EventEmitter {
       presetConfig.height,
       effectiveFramerate,
       effectiveBitrate,
+      this._videoEncoder,
+      this._videoHwDevice,
     );
 
     console.log(`[VoiceBot ${this.config.id}] Video stream started: ${stream.id}, source: ${source}`);
     this.emit('videoStreamStarted', { streamId: stream.id, source, preset: this._videoPreset });
+    this.checkVideoIdle();
     this.emit('statusChange', this._status);
   }
 
@@ -1051,6 +1092,45 @@ export class VoiceBot extends EventEmitter {
     console.log(`[VoiceBot ${this.config.id}] Video stream stopped`);
     this.emit('videoStreamStopped');
     this.emit('statusChange', this._status);
+    this.clearVideoIdleTimer();
+  }
+
+  /**
+   * Start or cancel the idle countdown after any change to the viewer set.
+   * An encode runs whether or not anyone is watching, so a stream nobody
+   * joined would otherwise hold a GPU encode session open indefinitely.
+   */
+  private checkVideoIdle(): void {
+    if (!this._videoStreaming) {
+      this.clearVideoIdleTimer();
+      return;
+    }
+
+    if (this._viewers.size > 0) {
+      if (this._videoIdleTimer) {
+        console.log(`[VoiceBot ${this.config.id}] Viewer joined, cancelling idle timer`);
+        this.clearVideoIdleTimer();
+      }
+      return;
+    }
+
+    if (this._videoIdleTimer) return;
+
+    console.log(`[VoiceBot ${this.config.id}] No viewers, starting idle timer`);
+    this._videoIdleTimer = setTimeout(() => {
+      this._videoIdleTimer = null;
+      console.log(`[VoiceBot ${this.config.id}] Stream idle, auto-stopping`);
+      this.stopVideoStream().catch((err) => {
+        console.error(`[VoiceBot ${this.config.id}] Idle auto-stop failed: ${err.message}`);
+      });
+    }, this.VIDEO_IDLE_TIMEOUT_MS);
+  }
+
+  private clearVideoIdleTimer(): void {
+    if (this._videoIdleTimer) {
+      clearTimeout(this._videoIdleTimer);
+      this._videoIdleTimer = null;
+    }
   }
 
   /** Change video source while streaming */
@@ -1062,12 +1142,16 @@ export class VoiceBot extends EventEmitter {
     const currentPreset = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     const resolvedSource = await resolveVideoUrl(source, currentPreset.height);
 
+    // Reuses the encoder resolved at stream start: changing it here would
+    // renegotiate the codec under peers that are already connected.
     await this.sidecarHttp.setSource(
       resolvedSource,
       currentPreset.width,
       currentPreset.height,
       this._videoFramerate,
       this._videoBitrate,
+      this._videoEncoder,
+      this._videoHwDevice,
     );
     console.log(`[VoiceBot ${this.config.id}] Video source changed: ${source}`);
     this.emit('videoSourceChanged', source);
@@ -1082,6 +1166,7 @@ export class VoiceBot extends EventEmitter {
     this.signaling.sendRemoveClient(clid, this._activeStreamId);
     this._viewers.delete(clid);
     this.emit('videoViewerLeft', clid);
+    this.checkVideoIdle();
   }
 
   /** Get WebRTC offer for WebUI preview player */
@@ -1124,6 +1209,7 @@ export class VoiceBot extends EventEmitter {
         this.sidecarHttp?.closePeer(String(clid)).catch(() => { });
         this._viewers.delete(clid);
         this.emit('videoViewerLeft', clid);
+        this.checkVideoIdle();
       }
     });
   }
@@ -1186,6 +1272,7 @@ export class VoiceBot extends EventEmitter {
       this.signaling.sendJoinResponse(viewerClid, streamId, true, result.sdp);
       console.log(`[VoiceBot ${this.config.id}] Viewer accepted: clid=${viewerClid} (${this._viewers.size} total)`);
       this.emit('videoViewerJoined', viewer);
+      this.checkVideoIdle();
     } catch (err: any) {
       console.error(`[VoiceBot ${this.config.id}] handleViewerJoin error (clid=${viewerClid}): ${err.message}`);
       this._viewers.delete(viewerClid);

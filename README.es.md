@@ -365,13 +365,24 @@ Cuando un bot de música está conectado a un canal, los usuarios de ese canal p
 | `!vol <0-100>` | Establecer el volumen |
 | `!np` / `!nowplaying` | Mostrar la pista actual |
 | `!info` | Pista actual con el progreso de reproducción |
-| `!help` / `!aide` | Listar los comandos disponibles |
+| `!lyrics [búsqueda]` | Letra de la pista actual o de una búsqueda |
+| `!stream <url> [preajuste]` | Transmitir un vídeo al canal |
+| `!tv` | Listar los canales IPTV disponibles |
+| `!tv <canal>` | Iniciar un canal de TV en directo |
+| `!tv reload` | Recargar la lista IPTV |
+| `!stopstream` | Detener la transmisión de vídeo |
+| `!viewers` | Listar los espectadores de la transmisión |
+| `!help` | Listar los comandos disponibles |
 | `!channels` | Listar los canales con sus ID |
 | `!move <user> <channel>` | Mover a un usuario a un canal (admin) |
 | `!moveall <channel>` | Mover a todos a un canal (admin) |
 | `!notif` | Alternar la notificación de reproducción actual (admin) |
 
 `!move`, `!moveall` y `!notif` son comandos de administrador; el acceso a los comandos de música y de administrador puede restringirse a grupos específicos del servidor de TeamSpeak en **Configuración → Comandos de música**.
+
+`!tv` necesita una lista M3U configurada en **Ajustes → Transmisión**; sin ella el comando no hace nada.
+
+El idioma en el que responde el bot se elige en **Ajustes → Comandos de música** y es independiente del idioma de la interfaz web.
 
 ## Configuración SSO / SAML
 

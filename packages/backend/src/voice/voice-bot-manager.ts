@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import type { PrismaClient } from '../../generated/prisma/index.js';
+import { getStreamSettings } from '../utils/stream-settings.js';
 import type { WebSocketServer } from 'ws';
 import { VoiceBot, type VoiceBotConfig, type VoiceBotStatus } from './voice-bot.js';
 import { generateIdentityAsync, restoreIdentity, type IdentityData } from './tslib/index.js';
@@ -81,7 +82,8 @@ export class VoiceBotManager extends EventEmitter {
         identity,
         sidecarBinaryPath: process.env.SIDECAR_BINARY_PATH,
         sidecarPort: (dbBot as any).sidecarPort ?? 9800,
-        streamPreset: (dbBot as any).streamPreset ?? '720p',
+        streamPreset: (dbBot as any).streamPreset ?? undefined,
+        getStreamSettings: () => getStreamSettings(this.prisma),
       };
 
       const bot = this.createBotInstance(config);
@@ -246,7 +248,8 @@ export class VoiceBotManager extends EventEmitter {
       identity,
       sidecarBinaryPath: process.env.SIDECAR_BINARY_PATH,
       sidecarPort: 9800,
-      streamPreset: '720p',
+      streamPreset: undefined,
+      getStreamSettings: () => getStreamSettings(this.prisma),
     };
 
     const bot = this.createBotInstance(config);

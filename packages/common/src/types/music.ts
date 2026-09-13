@@ -134,7 +134,7 @@ export interface YouTubeUrlInfo {
 
 // === Video Streaming Types ===
 
-export type VideoStreamPresetKey = '480p' | '720p' | '1080p';
+export type VideoStreamPresetKey = '480p' | '720p' | '1080p' | '1440p' | '2160p';
 
 export interface VideoStreamPreset {
   label: string;

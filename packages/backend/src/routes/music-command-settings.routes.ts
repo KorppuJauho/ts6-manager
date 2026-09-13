@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { requireRole } from '../middleware/rbac.js';
+import { isBotLanguage, BOT_LANGUAGES, DEFAULT_BOT_LANGUAGE } from '../voice/bot-i18n/index.js';
 
 export const musicCommandSettingsRoutes: Router = Router();
 
@@ -26,6 +27,8 @@ musicCommandSettingsRoutes.get('/', async (req: Request, res: Response, next) =>
       musicCommandSgid: s.musicCommandSgid,
       adminCommandSgid: s.adminCommandSgid,
       notifyNowPlaying: s.notifyNowPlaying,
+      language: s.language ?? DEFAULT_BOT_LANGUAGE,
+      availableLanguages: BOT_LANGUAGES,
     });
   } catch (err) { next(err); }
 });
@@ -35,12 +38,18 @@ musicCommandSettingsRoutes.put('/', async (req: Request, res: Response, next) =>
   try {
     const prisma = req.app.locals.prisma;
     const current = await getOrCreate(prisma);
-    const { musicCommandSgid, adminCommandSgid, notifyNowPlaying } = req.body;
+    const { musicCommandSgid, adminCommandSgid, notifyNowPlaying, language } = req.body;
 
     const data: any = {};
     if (musicCommandSgid !== undefined) data.musicCommandSgid = normSgid(musicCommandSgid);
     if (adminCommandSgid !== undefined) data.adminCommandSgid = normSgid(adminCommandSgid);
     if (notifyNowPlaying !== undefined) data.notifyNowPlaying = !!notifyNowPlaying;
+    if (language !== undefined) {
+      if (!isBotLanguage(language)) {
+        return res.status(400).json({ error: `Unsupported language "${language}"` });
+      }
+      data.language = language;
+    }
 
     await prisma.musicCommandSettings.update({ where: { id: current.id }, data });
     res.json({ success: true });

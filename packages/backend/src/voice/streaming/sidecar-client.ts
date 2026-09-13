@@ -3,6 +3,17 @@
  * Manages peers, media sources, and health checks.
  */
 
+/** One entry of the sidecar's /capabilities response. */
+export interface EncoderCapability {
+  key: string;
+  label: string;
+  mimeType: string;
+  payloadType: number;
+  hwAccel: string;
+  encoder: string;
+  available: boolean;
+}
+
 export interface SidecarStats {
   videoPort: number;
   audioPort: number;
@@ -51,18 +62,37 @@ export class SidecarClient {
     await this.call('POST', '/peer/close', { id });
   }
 
-  async setSource(source: string, width?: number, height?: number, framerate?: number, bitrate?: string): Promise<void> {
+  async setSource(
+    source: string,
+    width?: number,
+    height?: number,
+    framerate?: number,
+    bitrate?: string,
+    encoder?: string,
+    hwDevice?: string,
+  ): Promise<void> {
+    // Encoder selection travels in the body rather than the sidecar's
+    // environment: in a container deployment the sidecar is long-lived and
+    // its env is fixed at container start, so a setting changed in the web UI
+    // could not reach it any other way.
     await this.call('POST', '/source', {
       source,
       width,
       height,
       framerate,
       bitrate,
+      encoder,
+      hwDevice,
     });
   }
 
   async stopSource(): Promise<void> {
     await this.call('POST', '/source/stop');
+  }
+
+  /** Encoder profiles this sidecar knows, and whether its FFmpeg can run them. */
+  async getCapabilities(): Promise<{ encoders: EncoderCapability[] }> {
+    return this.call('GET', '/capabilities');
   }
 
   async getStats(): Promise<SidecarStats> {

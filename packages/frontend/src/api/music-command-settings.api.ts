@@ -4,6 +4,10 @@ export interface MusicCommandSettings {
   musicCommandSgid: number | null;
   adminCommandSgid: number | null;
   notifyNowPlaying: boolean;
+  /** Language the bot replies in on TeamSpeak. */
+  language: string;
+  /** Languages the backend has catalogues for; read-only. */
+  availableLanguages?: string[];
 }
 
 export const musicCommandSettingsApi = {
