@@ -1,0 +1,25 @@
+{
+  "namespace": "widget",
+  "keys": {
+    "en": {
+      "loading": "Loading...",
+      "notAvailable": "Widget not available"
+    },
+    "fr": {
+      "loading": "Chargement...",
+      "notAvailable": "Widget non disponible"
+    },
+    "de": {
+      "loading": "Wird geladen...",
+      "notAvailable": "Widget nicht verfügbar"
+    },
+    "es": {
+      "loading": "Cargando...",
+      "notAvailable": "Widget no disponible"
+    },
+    "it": {
+      "loading": "Caricamento...",
+      "notAvailable": "Widget non disponibile"
+    }
+  }
+}

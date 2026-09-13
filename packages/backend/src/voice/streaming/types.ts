@@ -11,12 +11,13 @@ export interface VideoStreamPreset {
 }
 
 export const STREAM_PRESETS: Record<string, VideoStreamPreset> = {
+//  'auto': { label: 'Auto (Original)', width: 0, height: 0, bitrate: '8000k', framerate: 0 }, // Dynaaminen profiili, reilu bittikartta
   '480p': { label: '480p', width: 854, height: 480, bitrate: '1000k', framerate: 24 },
   '720p': { label: '720p', width: 1280, height: 720, bitrate: '2500k', framerate: 30 },
-  '1080p': { label: '1080p', width: 1920, height: 1080, bitrate: '4500k', framerate: 30 },
+  '1080p': { label: '1080p', width: 1920, height: 1080, bitrate: '5500k', framerate: 30 },
 };
 
-export const DEFAULT_PRESET = '720p';
+export const DEFAULT_PRESET = '1080p';
 
 export interface VideoViewerInfo {
   clid: number;

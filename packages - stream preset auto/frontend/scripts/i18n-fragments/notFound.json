@@ -1,0 +1,30 @@
+{
+  "namespace": "notFound",
+  "keys": {
+    "en": {
+      "heading": "Page Not Found",
+      "message": "The page you're looking for doesn't exist or has been moved.",
+      "backToDashboard": "Back to Dashboard"
+    },
+    "fr": {
+      "heading": "Page introuvable",
+      "message": "La page que vous recherchez n'existe pas ou a été déplacée.",
+      "backToDashboard": "Retour au tableau de bord"
+    },
+    "de": {
+      "heading": "Seite nicht gefunden",
+      "message": "Die gesuchte Seite existiert nicht oder wurde verschoben.",
+      "backToDashboard": "Zurück zum Dashboard"
+    },
+    "es": {
+      "heading": "Página no encontrada",
+      "message": "La página que buscas no existe o ha sido movida.",
+      "backToDashboard": "Volver al panel"
+    },
+    "it": {
+      "heading": "Pagina non trovata",
+      "message": "La pagina che stai cercando non esiste o è stata spostata.",
+      "backToDashboard": "Torna alla dashboard"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "namespace": "shared",
+  "keys": {
+    "en": {
+      "confirm": "Confirm",
+      "cancel": "Cancel",
+      "processing": "Processing...",
+      "loading": "LOADING..."
+    },
+    "fr": {
+      "confirm": "Confirmer",
+      "cancel": "Annuler",
+      "processing": "Traitement en cours...",
+      "loading": "CHARGEMENT..."
+    },
+    "de": {
+      "confirm": "Bestätigen",
+      "cancel": "Abbrechen",
+      "processing": "Wird verarbeitet...",
+      "loading": "WIRD GELADEN..."
+    },
+    "es": {
+      "confirm": "Confirmar",
+      "cancel": "Cancelar",
+      "processing": "Procesando...",
+      "loading": "CARGANDO..."
+    },
+    "it": {
+      "confirm": "Conferma",
+      "cancel": "Annulla",
+      "processing": "Elaborazione in corso...",
+      "loading": "CARICAMENTO..."
+    }
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "namespace": "settings",
+  "keys": {
+    "en": {
+      "account": {
+        "passwordTooShort": "New password must be at least 6 characters",
+        "mfa": {
+          "title": "Two-Factor Authentication (TOTP)",
+          "on": "Enabled",
+          "off": "Disabled",
+          "recoveryTitle": "Recovery codes (shown once)",
+          "recoveryHint": "Each can be used once if you lose your device. Store them somewhere safe.",
+          "intro": "Protect your account with an authenticator app (Google Authenticator, Authy, Bitwarden...).",
+          "starting": "Starting...",
+          "enable": "Enable 2FA",
+          "scanPrompt": "Scan with your authenticator app, then enter the 6-digit code.",
+          "verifying": "Verifying...",
+          "verifyEnable": "Verify & enable",
+          "requiredNote": "2FA is required by an administrator and cannot be disabled.",
+          "disablePrompt": "Enter your password to disable 2FA.",
+          "passwordPlaceholder": "Password",
+          "disable": "Disable",
+          "setupFailed": "Failed to start MFA setup",
+          "enabledToast": "MFA enabled",
+          "invalidCode": "Invalid code",
+          "disabledToast": "MFA disabled",
+          "disableFailed": "Failed to disable MFA"
+        }
+      }
+    },
+    "fr": {
+      "account": {
+        "passwordTooShort": "Le nouveau mot de passe doit contenir au moins 6 caractères",
+        "mfa": {
+          "title": "Authentification à deux facteurs (TOTP)",
+          "on": "Activée",
+          "off": "Désactivée",
+          "recoveryTitle": "Codes de récupération (affichés une seule fois)",
+          "recoveryHint": "Chacun est utilisable une fois en cas de perte de votre appareil. Conservez-les en lieu sûr.",
+          "intro": "Protégez votre compte avec une application d'authentification (Google Authenticator, Authy, Bitwarden...).",
+          "starting": "Démarrage...",
+          "enable": "Activer le 2FA",
+          "scanPrompt": "Scannez avec votre application d'authentification, puis saisissez le code à 6 chiffres.",
+          "verifying": "Vérification...",
+          "verifyEnable": "Vérifier et activer",
+          "requiredNote": "Le 2FA est imposé par un administrateur et ne peut pas être désactivé.",
+          "disablePrompt": "Saisissez votre mot de passe pour désactiver le 2FA.",
+          "passwordPlaceholder": "Mot de passe",
+          "disable": "Désactiver",
+          "setupFailed": "Échec du démarrage de la configuration MFA",
+          "enabledToast": "MFA activé",
+          "invalidCode": "Code invalide",
+          "disabledToast": "MFA désactivé",
+          "disableFailed": "Échec de la désactivation du MFA"
+        }
+      }
+    },
+    "de": {
+      "account": {
+        "passwordTooShort": "Das neue Passwort muss mindestens 6 Zeichen lang sein",
+        "mfa": {
+          "title": "Zwei-Faktor-Authentifizierung (TOTP)",
+          "on": "Aktiviert",
+          "off": "Deaktiviert",
+          "recoveryTitle": "Wiederherstellungscodes (einmalig angezeigt)",
+          "recoveryHint": "Jeder ist einmal verwendbar, falls Sie Ihr Gerät verlieren. Bewahren Sie sie sicher auf.",
+          "intro": "Schützen Sie Ihr Konto mit einer Authenticator-App (Google Authenticator, Authy, Bitwarden...).",
+          "starting": "Wird gestartet...",
+          "enable": "2FA aktivieren",
+          "scanPrompt": "Mit Ihrer Authenticator-App scannen und dann den 6-stelligen Code eingeben.",
+          "verifying": "Überprüfung...",
+          "verifyEnable": "Überprüfen & aktivieren",
+          "requiredNote": "2FA wird von einem Administrator verlangt und kann nicht deaktiviert werden.",
+          "disablePrompt": "Geben Sie Ihr Passwort ein, um 2FA zu deaktivieren.",
+          "passwordPlaceholder": "Passwort",
+          "disable": "Deaktivieren",
+          "setupFailed": "MFA-Einrichtung konnte nicht gestartet werden",
+          "enabledToast": "MFA aktiviert",
+          "invalidCode": "Ungültiger Code",
+          "disabledToast": "MFA deaktiviert",
+          "disableFailed": "MFA konnte nicht deaktiviert werden"
+        }
+      }
+    },
+    "es": {
+      "account": {
+        "passwordTooShort": "La nueva contraseña debe tener al menos 6 caracteres",
+        "mfa": {
+          "title": "Autenticación de dos factores (TOTP)",
+          "on": "Activada",
+          "off": "Desactivada",
+          "recoveryTitle": "Códigos de recuperación (se muestran una vez)",
+          "recoveryHint": "Cada uno se puede usar una vez si pierdes tu dispositivo. Guárdalos en un lugar seguro.",
+          "intro": "Protege tu cuenta con una app de autenticación (Google Authenticator, Authy, Bitwarden...).",
+          "starting": "Iniciando...",
+          "enable": "Activar 2FA",
+          "scanPrompt": "Escanea con tu app de autenticación e introduce el código de 6 dígitos.",
+          "verifying": "Verificando...",
+          "verifyEnable": "Verificar y activar",
+          "requiredNote": "Un administrador exige el 2FA y no se puede desactivar.",
+          "disablePrompt": "Introduce tu contraseña para desactivar el 2FA.",
+          "passwordPlaceholder": "Contraseña",
+          "disable": "Desactivar",
+          "setupFailed": "No se pudo iniciar la configuración de MFA",
+          "enabledToast": "MFA activado",
+          "invalidCode": "Código inválido",
+          "disabledToast": "MFA desactivado",
+          "disableFailed": "No se pudo desactivar el MFA"
+        }
+      }
+    },
+    "it": {
+      "account": {
+        "passwordTooShort": "La nuova password deve contenere almeno 6 caratteri",
+        "mfa": {
+          "title": "Autenticazione a due fattori (TOTP)",
+          "on": "Attivata",
+          "off": "Disattivata",
+          "recoveryTitle": "Codici di recupero (mostrati una sola volta)",
+          "recoveryHint": "Ognuno è utilizzabile una volta se perdi il dispositivo. Conservali in un luogo sicuro.",
+          "intro": "Proteggi il tuo account con un'app di autenticazione (Google Authenticator, Authy, Bitwarden...).",
+          "starting": "Avvio...",
+          "enable": "Attiva 2FA",
+          "scanPrompt": "Scansiona con la tua app di autenticazione e inserisci il codice a 6 cifre.",
+          "verifying": "Verifica in corso...",
+          "verifyEnable": "Verifica e attiva",
+          "requiredNote": "Il 2FA è richiesto da un amministratore e non può essere disattivato.",
+          "disablePrompt": "Inserisci la tua password per disattivare il 2FA.",
+          "passwordPlaceholder": "Password",
+          "disable": "Disattiva",
+          "setupFailed": "Impossibile avviare la configurazione MFA",
+          "enabledToast": "MFA attivato",
+          "invalidCode": "Codice non valido",
+          "disabledToast": "MFA disattivato",
+          "disableFailed": "Impossibile disattivare il MFA"
+        }
+      }
+    }
+  }
+}

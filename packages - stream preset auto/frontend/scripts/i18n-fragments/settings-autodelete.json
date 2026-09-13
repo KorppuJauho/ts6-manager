@@ -1,0 +1,10 @@
+{
+  "namespace": "settings",
+  "keys": {
+    "en": { "discord": { "autoDelete": "Auto-delete notifications after (seconds)", "autoDeleteHint": "0 = keep messages. Removes join/leave, now-playing and /stats messages after the delay to avoid channel clutter (the live stats panel is not affected)." } },
+    "fr": { "discord": { "autoDelete": "Auto-suppression des notifications après (secondes)", "autoDeleteHint": "0 = conserver les messages. Supprime les notifs join/leave, now-playing et /stats après le délai pour éviter la pollution du canal (le panneau stats live n'est pas concerné)." } },
+    "de": { "discord": { "autoDelete": "Benachrichtigungen automatisch löschen nach (Sekunden)", "autoDeleteHint": "0 = Nachrichten behalten. Entfernt Join/Leave-, Now-Playing- und /stats-Nachrichten nach der Verzögerung, um den Kanal sauber zu halten (das Live-Statspanel ist nicht betroffen)." } },
+    "es": { "discord": { "autoDelete": "Eliminar notificaciones automáticamente tras (segundos)", "autoDeleteHint": "0 = conservar los mensajes. Elimina los mensajes de entrada/salida, now-playing y /stats tras el tiempo indicado para evitar saturar el canal (el panel de estadísticas en vivo no se ve afectado)." } },
+    "it": { "discord": { "autoDelete": "Eliminazione automatica delle notifiche dopo (secondi)", "autoDeleteHint": "0 = mantieni i messaggi. Rimuove i messaggi di entrata/uscita, now-playing e /stats dopo il ritardo per evitare di intasare il canale (il pannello statistiche live non è interessato)." } }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "namespace": "settings",
+  "keys": {
+    "en": { "users": { "requireMfa": "Require MFA (enroll at first login)", "mustChangePassword": "Change password at next logon" } },
+    "fr": { "users": { "requireMfa": "Exiger le MFA (enrôlement à la 1re connexion)", "mustChangePassword": "Changer le mot de passe à la prochaine connexion" } },
+    "de": { "users": { "requireMfa": "MFA erforderlich (Einrichtung bei der ersten Anmeldung)", "mustChangePassword": "Passwort bei der nächsten Anmeldung ändern" } },
+    "es": { "users": { "requireMfa": "Exigir MFA (registro en el primer inicio de sesión)", "mustChangePassword": "Cambiar la contraseña en el próximo inicio de sesión" } },
+    "it": { "users": { "requireMfa": "Richiedi MFA (registrazione al primo accesso)", "mustChangePassword": "Cambia la password al prossimo accesso" } }
+  }
+}

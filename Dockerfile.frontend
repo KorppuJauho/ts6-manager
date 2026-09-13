@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.4
 # Node 20 reached end-of-life in April 2026 — track the active LTS line.
 FROM node:22-slim AS base
+RUN apt-get update && apt-get install -y python3 build-essential && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@9 --activate
 WORKDIR /app
 

@@ -1,0 +1,60 @@
+{
+  "namespace": "login",
+  "keys": {
+    "en": {
+      "changePasswordTitle": "Change your password",
+      "changePasswordPrompt": "You must set a new password before continuing.",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm new password",
+      "changeAndContinue": "Change & continue",
+      "changingPassword": "Changing...",
+      "passwordsDoNotMatch": "Passwords do not match",
+      "changeFailed": "Could not change the password"
+    },
+    "fr": {
+      "changePasswordTitle": "Changez votre mot de passe",
+      "changePasswordPrompt": "Vous devez définir un nouveau mot de passe avant de continuer.",
+      "currentPassword": "Mot de passe actuel",
+      "newPassword": "Nouveau mot de passe",
+      "confirmPassword": "Confirmer le nouveau mot de passe",
+      "changeAndContinue": "Changer et continuer",
+      "changingPassword": "Modification...",
+      "passwordsDoNotMatch": "Les mots de passe ne correspondent pas",
+      "changeFailed": "Impossible de changer le mot de passe"
+    },
+    "de": {
+      "changePasswordTitle": "Passwort ändern",
+      "changePasswordPrompt": "Sie müssen ein neues Passwort festlegen, bevor Sie fortfahren.",
+      "currentPassword": "Aktuelles Passwort",
+      "newPassword": "Neues Passwort",
+      "confirmPassword": "Neues Passwort bestätigen",
+      "changeAndContinue": "Ändern & fortfahren",
+      "changingPassword": "Wird geändert...",
+      "passwordsDoNotMatch": "Die Passwörter stimmen nicht überein",
+      "changeFailed": "Passwort konnte nicht geändert werden"
+    },
+    "es": {
+      "changePasswordTitle": "Cambia tu contraseña",
+      "changePasswordPrompt": "Debes establecer una nueva contraseña antes de continuar.",
+      "currentPassword": "Contraseña actual",
+      "newPassword": "Nueva contraseña",
+      "confirmPassword": "Confirmar nueva contraseña",
+      "changeAndContinue": "Cambiar y continuar",
+      "changingPassword": "Cambiando...",
+      "passwordsDoNotMatch": "Las contraseñas no coinciden",
+      "changeFailed": "No se pudo cambiar la contraseña"
+    },
+    "it": {
+      "changePasswordTitle": "Cambia la tua password",
+      "changePasswordPrompt": "Devi impostare una nuova password prima di continuare.",
+      "currentPassword": "Password attuale",
+      "newPassword": "Nuova password",
+      "confirmPassword": "Conferma nuova password",
+      "changeAndContinue": "Cambia e continua",
+      "changingPassword": "Modifica in corso...",
+      "passwordsDoNotMatch": "Le password non corrispondono",
+      "changeFailed": "Impossibile cambiare la password"
+    }
+  }
+}

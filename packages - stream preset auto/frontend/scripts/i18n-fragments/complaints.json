@@ -1,0 +1,50 @@
+{
+  "namespace": "complaints",
+  "keys": {
+    "en": {
+      "title": "Complaints",
+      "noServerSelected": "No server selected",
+      "searchPlaceholder": "Search complaints...",
+      "columnFrom": "From",
+      "columnAbout": "About",
+      "columnMessage": "Message",
+      "columnWhen": "When"
+    },
+    "fr": {
+      "title": "Plaintes",
+      "noServerSelected": "Aucun serveur sélectionné",
+      "searchPlaceholder": "Rechercher des plaintes...",
+      "columnFrom": "De",
+      "columnAbout": "À propos de",
+      "columnMessage": "Message",
+      "columnWhen": "Quand"
+    },
+    "de": {
+      "title": "Beschwerden",
+      "noServerSelected": "Kein Server ausgewählt",
+      "searchPlaceholder": "Beschwerden suchen...",
+      "columnFrom": "Von",
+      "columnAbout": "Über",
+      "columnMessage": "Nachricht",
+      "columnWhen": "Wann"
+    },
+    "es": {
+      "title": "Quejas",
+      "noServerSelected": "Ningún servidor seleccionado",
+      "searchPlaceholder": "Buscar quejas...",
+      "columnFrom": "De",
+      "columnAbout": "Acerca de",
+      "columnMessage": "Mensaje",
+      "columnWhen": "Cuándo"
+    },
+    "it": {
+      "title": "Reclami",
+      "noServerSelected": "Nessun server selezionato",
+      "searchPlaceholder": "Cerca reclami...",
+      "columnFrom": "Da",
+      "columnAbout": "Riguardo a",
+      "columnMessage": "Messaggio",
+      "columnWhen": "Quando"
+    }
+  }
+}

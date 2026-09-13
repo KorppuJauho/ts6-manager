@@ -1,0 +1,75 @@
+{
+  "namespace": "serverLogs",
+  "keys": {
+    "en": {
+      "noServerSelected": "No server selected",
+      "title": "Server Logs",
+      "refresh": "Refresh",
+      "filterPlaceholder": "Filter logs...",
+      "levelAll": "All Levels",
+      "levelError": "Error",
+      "levelWarning": "Warning",
+      "levelInfo": "Info",
+      "levelDebug": "Debug",
+      "linesCount": "{{count}} lines",
+      "empty": "No log entries found.",
+      "entriesShown": "{{count}} entries shown"
+    },
+    "fr": {
+      "noServerSelected": "Aucun serveur sélectionné",
+      "title": "Journaux du serveur",
+      "refresh": "Actualiser",
+      "filterPlaceholder": "Filtrer les journaux...",
+      "levelAll": "Tous les niveaux",
+      "levelError": "Erreur",
+      "levelWarning": "Avertissement",
+      "levelInfo": "Information",
+      "levelDebug": "Débogage",
+      "linesCount": "{{count}} lignes",
+      "empty": "Aucune entrée de journal trouvée.",
+      "entriesShown": "{{count}} entrées affichées"
+    },
+    "de": {
+      "noServerSelected": "Kein Server ausgewählt",
+      "title": "Serverprotokolle",
+      "refresh": "Aktualisieren",
+      "filterPlaceholder": "Protokolle filtern...",
+      "levelAll": "Alle Stufen",
+      "levelError": "Fehler",
+      "levelWarning": "Warnung",
+      "levelInfo": "Info",
+      "levelDebug": "Debug",
+      "linesCount": "{{count}} Zeilen",
+      "empty": "Keine Protokolleinträge gefunden.",
+      "entriesShown": "{{count}} Einträge angezeigt"
+    },
+    "es": {
+      "noServerSelected": "Ningún servidor seleccionado",
+      "title": "Registros del servidor",
+      "refresh": "Actualizar",
+      "filterPlaceholder": "Filtrar registros...",
+      "levelAll": "Todos los niveles",
+      "levelError": "Error",
+      "levelWarning": "Advertencia",
+      "levelInfo": "Información",
+      "levelDebug": "Depuración",
+      "linesCount": "{{count}} líneas",
+      "empty": "No se encontraron entradas de registro.",
+      "entriesShown": "{{count}} entradas mostradas"
+    },
+    "it": {
+      "noServerSelected": "Nessun server selezionato",
+      "title": "Registri del server",
+      "refresh": "Aggiorna",
+      "filterPlaceholder": "Filtra i registri...",
+      "levelAll": "Tutti i livelli",
+      "levelError": "Errore",
+      "levelWarning": "Avviso",
+      "levelInfo": "Informazioni",
+      "levelDebug": "Debug",
+      "linesCount": "{{count}} righe",
+      "empty": "Nessuna voce di registro trovata.",
+      "entriesShown": "{{count}} voci mostrate"
+    }
+  }
+}

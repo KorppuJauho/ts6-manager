@@ -1,5 +1,4 @@
 import { EventEmitter } from 'events';
-import { randomBytes } from 'crypto';
 import { Ts3Client, type Ts3ClientOptions, generateIdentity, type IdentityData, buildCommand } from './tslib/index.js';
 import { AudioPipeline, FRAME_MS, BYTES_PER_FRAME } from './audio/pipeline.js';
 import { PlayQueue, type QueueItem } from './playlist/queue.js';
@@ -8,43 +7,33 @@ import { StreamSignaling, type ActiveStream, type SignalingMessage } from './str
 import { SidecarClient } from './streaming/sidecar-client.js';
 import { SidecarProcess, type SidecarConfig } from './streaming/sidecar-process.js';
 import { STREAM_PRESETS, DEFAULT_PRESET, type VideoViewerInfo, type VideoStreamStatus } from './streaming/types.js';
-import { getCookieArgs, runYtDlp, assertSafeUrl } from './audio/youtube.js';
-import { validateUrl } from '../utils/url-validator.js';
+import { getCookieArgs, runYtDlp } from './audio/youtube.js';
 
 /** Resolve a YouTube/yt-dlp-compatible URL to a direct stream URL */
 async function resolveVideoUrl(url: string, maxHeight: number = 720): Promise<string> {
-  assertSafeUrl(url);
-
-  // Only resolve YouTube and other yt-dlp-supported sites
   if (!url.includes('youtube.com/') && !url.includes('youtu.be/') && !url.includes('twitch.tv/')) {
-    // Anything else goes straight to the sidecar's ffmpeg, so apply the same
-    // SSRF guard the radio path uses before handing a URL to a fetcher.
-    const check = await validateUrl(url, { allowedProtocols: ['http:', 'https:'] });
-    if (!check.valid) {
-      throw new Error(`Video source blocked: ${check.error}`);
-    }
     return url;
   }
 
-  // Request best combined format (video+audio) up to the target height.
-  // runYtDlp adds the cookie args' siblings (timeout, full stderr logging);
-  // normal CPU priority — the user is waiting for the stream to start.
-  const formatFilter = `best[height<=${maxHeight}][ext=mp4]/best[height<=${maxHeight}]/best[ext=mp4]/best`;
+  // 1. Pyydetään erilliset bestvideo ja bestaudio, yhdistetään ne + merkillä
+  const formatFilter = `bestvideo[height<=${maxHeight}][dynamic_range=SDR]+bestaudio/best[height<=${maxHeight}][dynamic_range=SDR]/best`;
   const stdout = await runYtDlp([
     ...getCookieArgs(),
     '-f', formatFilter,
     '--no-playlist',
     '-g',  // print direct URL only
-    '--',  // nothing past this point is parsed as an option
     url,
   ], 60_000, { lowPriority: false });
 
-  // yt-dlp -g returns the direct URL(s), take the first one
-  const directUrl = stdout.trim().split('\n')[0];
-  if (!directUrl) {
+  // 2. yt-dlp palauttaa nyt KAKSI osoitetta eri riveille. 
+  // Yhdistetään ne väliaikaisesti putkimerkillä (|||) sidecaria varten.
+  const urls = stdout.trim().split('\n');
+  if (urls.length === 0 || !urls[0]) {
     throw new Error('yt-dlp returned no URL');
   }
-  console.log(`[VideoResolve] Resolved: ${url.substring(0, 60)}... → direct URL`);
+  
+  const directUrl = urls.join('|||');
+  console.log(`[VideoResolve] Resolved: ${url.substring(0, 60)}... → direct URL(s)`);
   return directUrl;
 }
 
@@ -133,6 +122,8 @@ export class VoiceBot extends EventEmitter {
   private _videoBitrate: string = STREAM_PRESETS[DEFAULT_PRESET]?.bitrate ?? '2500k';
   private _videoStartedAt: number | null = null;
   private _viewers: Map<number, VideoViewerInfo> = new Map();
+  private _videoIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly VIDEO_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minuuttia
 
   constructor(config: VoiceBotConfig) {
     super();
@@ -898,7 +889,8 @@ export class VoiceBot extends EventEmitter {
 
     const sidecarBinary = this.config.sidecarBinaryPath || process.env.SIDECAR_BINARY_PATH || 'sidecar';
     const sidecarPort = this.config.sidecarPort || 9800;
-    this._videoPreset = preset ?? this.config.streamPreset ?? DEFAULT_PRESET;
+    // Ohitetaan tietokannan asetukset ja pakotetaan älykäs "auto" tila
+    this._videoPreset = preset ?? '1080p';
     const presetConfig = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     const effectiveFramerate = framerate && framerate > 0
       ? framerate
@@ -914,20 +906,12 @@ export class VoiceBot extends EventEmitter {
     const sidecarUrl = process.env.SIDECAR_URL;
 
     if (sidecarUrl) {
-      // Docker mode: the sidecar is a separate container, so the shared secret
-      // has to be configured on both sides. The sidecar refuses to start
-      // without it; fail here with a message that names the variable.
-      if (!process.env.SIDECAR_TOKEN) {
-        throw new Error('SIDECAR_TOKEN must be set when SIDECAR_URL is used (shared secret for the media API)');
-      }
+      // Docker mode: sidecar is an external service, don't spawn it
       this.sidecarHttp = new SidecarClient(sidecarUrl);
     } else {
-      // Local mode: spawn the sidecar binary. Mint a per-spawn token so the
-      // media API is authenticated with no configuration required.
-      const sidecarToken = process.env.SIDECAR_TOKEN || randomBytes(32).toString('hex');
+      // Local mode: spawn sidecar binary
       const sidecarConfig: SidecarConfig = {
         binaryPath: sidecarBinary,
-        token: sidecarToken,
         port: sidecarPort,
         videoBitrate: effectiveBitrate,
         videoResolution: { width: presetConfig.width, height: presetConfig.height },
@@ -951,7 +935,7 @@ export class VoiceBot extends EventEmitter {
         this.sidecarProc = null;
         throw new Error(`Failed to start sidecar: ${err.message}`, { cause: err });
       }
-      this.sidecarHttp = new SidecarClient(sidecarPort, sidecarToken);
+      this.sidecarHttp = new SidecarClient(sidecarPort);
     }
 
     // Wait for sidecar to be healthy
@@ -981,7 +965,7 @@ export class VoiceBot extends EventEmitter {
       name: `${this.config.nickname} Stream`,
       type: 3,
       bitrate: 4608,
-      accessibility: 1,
+      accessibility: 0,
       mode: 1,
       viewerLimit: 0,
       audio: true,
@@ -1006,6 +990,7 @@ export class VoiceBot extends EventEmitter {
     console.log(`[VoiceBot ${this.config.id}] Video stream started: ${stream.id}, source: ${source}`);
     this.emit('videoStreamStarted', { streamId: stream.id, source, preset: this._videoPreset });
     this.emit('statusChange', this._status);
+    this.checkVideoIdle(); // <--- LISÄÄ TÄMÄ RIVI
   }
 
   /** Stop video streaming */
@@ -1051,6 +1036,40 @@ export class VoiceBot extends EventEmitter {
     console.log(`[VoiceBot ${this.config.id}] Video stream stopped`);
     this.emit('videoStreamStopped');
     this.emit('statusChange', this._status);
+    this.clearVideoIdleTimer();
+  }
+
+  /** Checks if the stream is empty and starts the auto-stop timer if needed */
+  private checkVideoIdle(): void {
+    if (!this._videoStreaming) {
+      this.clearVideoIdleTimer();
+      return;
+    }
+
+    if (this._viewers.size === 0) {
+      // Jos katsojia on 0 eikä ajastinta ole vielä käynnissä, aloitetaan lähtölaskenta
+      if (!this._videoIdleTimer) {
+        console.log(`[VoiceBot ${this.config.id}] No viewers, starting 5 min idle timer...`);
+        this._videoIdleTimer = setTimeout(() => {
+          console.log(`[VoiceBot ${this.config.id}] Stream idle for 5 mins, auto-stopping.`);
+          this.stopVideoStream().catch(err => console.error("Auto-stop failed:", err));
+        }, this.VIDEO_IDLE_TIMEOUT_MS);
+      }
+    } else {
+      // Jos striimillä on taas katsojia, perutaan sammutus
+      if (this._videoIdleTimer) {
+        console.log(`[VoiceBot ${this.config.id}] Viewer joined, cancelling idle timer.`);
+        this.clearVideoIdleTimer();
+      }
+    }
+  }
+
+  /** Clears the idle timer */
+  private clearVideoIdleTimer(): void {
+    if (this._videoIdleTimer) {
+      clearTimeout(this._videoIdleTimer);
+      this._videoIdleTimer = null;
+    }
   }
 
   /** Change video source while streaming */
@@ -1082,6 +1101,7 @@ export class VoiceBot extends EventEmitter {
     this.signaling.sendRemoveClient(clid, this._activeStreamId);
     this._viewers.delete(clid);
     this.emit('videoViewerLeft', clid);
+    this.checkVideoIdle();
   }
 
   /** Get WebRTC offer for WebUI preview player */
@@ -1124,6 +1144,7 @@ export class VoiceBot extends EventEmitter {
         this.sidecarHttp?.closePeer(String(clid)).catch(() => { });
         this._viewers.delete(clid);
         this.emit('videoViewerLeft', clid);
+        this.checkVideoIdle();
       }
     });
   }
@@ -1186,6 +1207,7 @@ export class VoiceBot extends EventEmitter {
       this.signaling.sendJoinResponse(viewerClid, streamId, true, result.sdp);
       console.log(`[VoiceBot ${this.config.id}] Viewer accepted: clid=${viewerClid} (${this._viewers.size} total)`);
       this.emit('videoViewerJoined', viewer);
+      this.checkVideoIdle();
     } catch (err: any) {
       console.error(`[VoiceBot ${this.config.id}] handleViewerJoin error (clid=${viewerClid}): ${err.message}`);
       this._viewers.delete(viewerClid);

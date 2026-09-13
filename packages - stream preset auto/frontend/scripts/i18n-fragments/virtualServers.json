@@ -1,0 +1,70 @@
+{
+  "namespace": "virtualServers",
+  "keys": {
+    "en": {
+      "title": "Virtual Servers",
+      "noServerSelected": "No server selected",
+      "serverCount": "{{count}} server(s)",
+      "sidLabel": "SID: {{sid}}",
+      "portLabel": "Port: {{port}}",
+      "start": "Start",
+      "stop": "Stop",
+      "serverStarted": "Server started",
+      "serverStopped": "Server stopped",
+      "startFailed": "Failed to start server",
+      "stopFailed": "Failed to stop server"
+    },
+    "fr": {
+      "title": "Serveurs virtuels",
+      "noServerSelected": "Aucun serveur sélectionné",
+      "serverCount": "{{count}} serveur(s)",
+      "sidLabel": "SID : {{sid}}",
+      "portLabel": "Port : {{port}}",
+      "start": "Démarrer",
+      "stop": "Arrêter",
+      "serverStarted": "Serveur démarré",
+      "serverStopped": "Serveur arrêté",
+      "startFailed": "Échec du démarrage du serveur",
+      "stopFailed": "Échec de l'arrêt du serveur"
+    },
+    "de": {
+      "title": "Virtuelle Server",
+      "noServerSelected": "Kein Server ausgewählt",
+      "serverCount": "{{count}} Server",
+      "sidLabel": "SID: {{sid}}",
+      "portLabel": "Port: {{port}}",
+      "start": "Starten",
+      "stop": "Stoppen",
+      "serverStarted": "Server gestartet",
+      "serverStopped": "Server gestoppt",
+      "startFailed": "Server konnte nicht gestartet werden",
+      "stopFailed": "Server konnte nicht gestoppt werden"
+    },
+    "es": {
+      "title": "Servidores virtuales",
+      "noServerSelected": "Ningún servidor seleccionado",
+      "serverCount": "{{count}} servidor(es)",
+      "sidLabel": "SID: {{sid}}",
+      "portLabel": "Puerto: {{port}}",
+      "start": "Iniciar",
+      "stop": "Detener",
+      "serverStarted": "Servidor iniciado",
+      "serverStopped": "Servidor detenido",
+      "startFailed": "Error al iniciar el servidor",
+      "stopFailed": "Error al detener el servidor"
+    },
+    "it": {
+      "title": "Server virtuali",
+      "noServerSelected": "Nessun server selezionato",
+      "serverCount": "{{count}} server",
+      "sidLabel": "SID: {{sid}}",
+      "portLabel": "Porta: {{port}}",
+      "start": "Avvia",
+      "stop": "Arresta",
+      "serverStarted": "Server avviato",
+      "serverStopped": "Server arrestato",
+      "startFailed": "Impossibile avviare il server",
+      "stopFailed": "Impossibile arrestare il server"
+    }
+  }
+}

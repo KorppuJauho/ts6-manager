@@ -1,0 +1,50 @@
+{
+  "namespace": "musicRequests",
+  "keys": {
+    "en": {
+      "noServerSelected": "No server selected",
+      "title": "Music Request History",
+      "descriptionBefore": "History of songs requested via the",
+      "descriptionAfter": "command on this server.",
+      "emptyTitle": "No music requests yet",
+      "emptyDescription": "When users request songs using the !play command, they will appear here as a history log.",
+      "requestedAgo": "Requested {{time}}"
+    },
+    "fr": {
+      "noServerSelected": "Aucun serveur sélectionné",
+      "title": "Historique des demandes musicales",
+      "descriptionBefore": "Historique des morceaux demandés via la commande",
+      "descriptionAfter": "sur ce serveur.",
+      "emptyTitle": "Aucune demande musicale pour le moment",
+      "emptyDescription": "Lorsque les utilisateurs demandent des morceaux avec la commande !play, ils apparaîtront ici dans le journal d'historique.",
+      "requestedAgo": "Demandé {{time}}"
+    },
+    "de": {
+      "noServerSelected": "Kein Server ausgewählt",
+      "title": "Verlauf der Musikanfragen",
+      "descriptionBefore": "Verlauf der über den Befehl",
+      "descriptionAfter": "auf diesem Server angeforderten Titel.",
+      "emptyTitle": "Noch keine Musikanfragen",
+      "emptyDescription": "Wenn Benutzer Titel mit dem Befehl !play anfordern, erscheinen sie hier als Verlaufsprotokoll.",
+      "requestedAgo": "Angefordert {{time}}"
+    },
+    "es": {
+      "noServerSelected": "Ningún servidor seleccionado",
+      "title": "Historial de solicitudes de música",
+      "descriptionBefore": "Historial de canciones solicitadas mediante el comando",
+      "descriptionAfter": "en este servidor.",
+      "emptyTitle": "Aún no hay solicitudes de música",
+      "emptyDescription": "Cuando los usuarios soliciten canciones con el comando !play, aparecerán aquí como un registro de historial.",
+      "requestedAgo": "Solicitado {{time}}"
+    },
+    "it": {
+      "noServerSelected": "Nessun server selezionato",
+      "title": "Cronologia delle richieste musicali",
+      "descriptionBefore": "Cronologia dei brani richiesti tramite il comando",
+      "descriptionAfter": "su questo server.",
+      "emptyTitle": "Ancora nessuna richiesta musicale",
+      "emptyDescription": "Quando gli utenti richiedono brani con il comando !play, appariranno qui come registro della cronologia.",
+      "requestedAgo": "Richiesto {{time}}"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "namespace": "channelGroups",
+  "keys": {
+    "en": {
+      "noServerSelected": "No server selected",
+      "title": "Channel Groups",
+      "groupsCount": "Groups ({{count}})",
+      "cgidLabel": "CGID: {{cgid}}",
+      "typeLabel": "Type: {{type}}"
+    },
+    "fr": {
+      "noServerSelected": "Aucun serveur sélectionné",
+      "title": "Groupes de canaux",
+      "groupsCount": "Groupes ({{count}})",
+      "cgidLabel": "CGID : {{cgid}}",
+      "typeLabel": "Type : {{type}}"
+    },
+    "de": {
+      "noServerSelected": "Kein Server ausgewählt",
+      "title": "Kanalgruppen",
+      "groupsCount": "Gruppen ({{count}})",
+      "cgidLabel": "CGID: {{cgid}}",
+      "typeLabel": "Typ: {{type}}"
+    },
+    "es": {
+      "noServerSelected": "Ningún servidor seleccionado",
+      "title": "Grupos de canales",
+      "groupsCount": "Grupos ({{count}})",
+      "cgidLabel": "CGID: {{cgid}}",
+      "typeLabel": "Tipo: {{type}}"
+    },
+    "it": {
+      "noServerSelected": "Nessun server selezionato",
+      "title": "Gruppi di canali",
+      "groupsCount": "Gruppi ({{count}})",
+      "cgidLabel": "CGID: {{cgid}}",
+      "typeLabel": "Tipo: {{type}}"
+    }
+  }
+}

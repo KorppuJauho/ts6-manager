@@ -1,0 +1,85 @@
+{
+  "namespace": "settings",
+  "keys": {
+    "en": {
+      "tabs": { "musicCommands": "Music Bot" },
+      "musicCommands": {
+        "title": "Music Bot Commands",
+        "description": "Restrict Music Bot commands to server groups, and enable now-playing notifications in the TeamSpeak channel. Groups are those of the currently selected server.",
+        "noServerHint": "Select a server to list its groups.",
+        "musicGroup": "Group for music commands (!play, !skip, …)",
+        "adminGroup": "Group for admin commands (!move, !moveall, !notif)",
+        "openToAll": "None (open to all)",
+        "notifyNowPlaying": "Announce the current track in the TS channel",
+        "save": "Save",
+        "saving": "Saving...",
+        "toastSaved": "Settings saved",
+        "toastSaveFailed": "Failed to save"
+      }
+    },
+    "fr": {
+      "tabs": { "musicCommands": "Music Bot" },
+      "musicCommands": {
+        "title": "Commandes Music Bot",
+        "description": "Restreindre les commandes du Music Bot à des groupes serveur, et activer la notification du titre en cours dans le canal TeamSpeak. Les groupes sont ceux du serveur actuellement sélectionné.",
+        "noServerHint": "Sélectionnez un serveur pour lister les groupes.",
+        "musicGroup": "Groupe pour les commandes musicales (!play, !skip, …)",
+        "adminGroup": "Groupe pour les commandes d'admin (!move, !moveall, !notif)",
+        "openToAll": "Aucun (ouvert à tous)",
+        "notifyNowPlaying": "Notifier le titre en cours dans le canal TS",
+        "save": "Enregistrer",
+        "saving": "Enregistrement...",
+        "toastSaved": "Réglages enregistrés",
+        "toastSaveFailed": "Échec de l'enregistrement"
+      }
+    },
+    "de": {
+      "tabs": { "musicCommands": "Music-Bot" },
+      "musicCommands": {
+        "title": "Music-Bot-Befehle",
+        "description": "Music-Bot-Befehle auf Servergruppen beschränken und die Wiedergabe-Benachrichtigung im TeamSpeak-Kanal aktivieren. Es gelten die Gruppen des aktuell ausgewählten Servers.",
+        "noServerHint": "Wählen Sie einen Server, um die Gruppen anzuzeigen.",
+        "musicGroup": "Gruppe für Musikbefehle (!play, !skip, …)",
+        "adminGroup": "Gruppe für Admin-Befehle (!move, !moveall, !notif)",
+        "openToAll": "Keine (für alle offen)",
+        "notifyNowPlaying": "Aktuellen Titel im TS-Kanal ankündigen",
+        "save": "Speichern",
+        "saving": "Wird gespeichert...",
+        "toastSaved": "Einstellungen gespeichert",
+        "toastSaveFailed": "Speichern fehlgeschlagen"
+      }
+    },
+    "es": {
+      "tabs": { "musicCommands": "Music Bot" },
+      "musicCommands": {
+        "title": "Comandos del Music Bot",
+        "description": "Restringe los comandos del Music Bot a grupos de servidor y activa la notificación del tema actual en el canal de TeamSpeak. Los grupos son los del servidor seleccionado.",
+        "noServerHint": "Selecciona un servidor para listar los grupos.",
+        "musicGroup": "Grupo para comandos de música (!play, !skip, …)",
+        "adminGroup": "Grupo para comandos de admin (!move, !moveall, !notif)",
+        "openToAll": "Ninguno (abierto a todos)",
+        "notifyNowPlaying": "Anunciar el tema actual en el canal TS",
+        "save": "Guardar",
+        "saving": "Guardando...",
+        "toastSaved": "Ajustes guardados",
+        "toastSaveFailed": "Error al guardar"
+      }
+    },
+    "it": {
+      "tabs": { "musicCommands": "Music Bot" },
+      "musicCommands": {
+        "title": "Comandi Music Bot",
+        "description": "Limita i comandi del Music Bot a gruppi server e attiva la notifica del brano in riproduzione nel canale TeamSpeak. I gruppi sono quelli del server attualmente selezionato.",
+        "noServerHint": "Seleziona un server per elencare i gruppi.",
+        "musicGroup": "Gruppo per i comandi musicali (!play, !skip, …)",
+        "adminGroup": "Gruppo per i comandi admin (!move, !moveall, !notif)",
+        "openToAll": "Nessuno (aperto a tutti)",
+        "notifyNowPlaying": "Annuncia il brano corrente nel canale TS",
+        "save": "Salva",
+        "saving": "Salvataggio...",
+        "toastSaved": "Impostazioni salvate",
+        "toastSaveFailed": "Salvataggio non riuscito"
+      }
+    }
+  }
+}

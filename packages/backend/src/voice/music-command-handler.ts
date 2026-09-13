@@ -2,12 +2,10 @@ import type { PrismaClient } from '../../generated/prisma/index.js';
 import { VoiceBotManager } from './voice-bot-manager.js';
 import type { VoiceBot } from './voice-bot.js';
 import type { QueueItem } from './playlist/queue.js';
-import { downloadAndEnqueue, isSpotifyUrl, loadSpotifyConfig, enqueueSpotify, saveMusicRequest } from './music-ops.js';
-import { isYouTubePlaylistUrl } from './playlist-import-plan.js';
+import { downloadAndEnqueue, isSpotifyUrl, loadSpotifyConfig, enqueueSpotify } from './music-ops.js';
 import type { ConnectionPool } from '../ts-client/connection-pool.js';
 import type { WebQueryClient } from '../ts-client/webquery-client.js';
 import { requiredSgid, parseServerGroupIds, type MusicCommandAccessSettings } from './music-command-access.js';
-import { fetchLyrics, chunkLyrics, lyricsInputFromTrack } from './lyrics.js';
 
 const CMD_PREFIX = '!';
 
@@ -42,14 +40,59 @@ type ReplyFn = (msg: string) => void;
 const MUSIC_COMMANDS = new Set([
   'radio', 'play', 'spotify', 'stop', 'pause', 'skip', 'next', 'prev',
   'vol', 'volume', 'np', 'nowplaying', 'queue', 'add',
-  'stream', 'stopstream', 'viewers',
-  'lyrics', 'paroles',
+  'stream', 'tv', 'stopstream', 'viewers',
   'move', 'moveall', 'channels', 'notif',
   'help', 'aide', 'info',
 ]);
 
 interface MusicCommandSettingsRow extends MusicCommandAccessSettings {
   notifyNowPlaying: boolean;
+}
+
+// --- TV Channel Configuration & Loader ---
+const tvChannels = new Map<string, string>();
+const M3U_URL = "http://192.168.1.42:9191/output/m3u";
+
+// Keywords that MUST be included in the channel name to be loaded
+const ALLOWED_CHANNELS = [
+  'yle tv1',
+  'yle tv2',
+  'mtv 3',
+  'nelonen',
+  'sub',
+  'tv5',
+  'jim',
+  'v sport',
+  'cmore',
+  'mtv urheilu'
+];
+
+async function loadTvChannels(): Promise<void> {
+  try {
+    const res = await fetch(M3U_URL);
+    const text = await res.text();
+    const lines = text.split('\n');
+    let currentName = '';
+
+    tvChannels.clear();
+
+    for (const line of lines) {
+      if (line.startsWith('#EXTINF:')) {
+        const parts = line.split(',');
+        currentName = parts[parts.length - 1].trim().toLowerCase();
+      } else if (line.startsWith('http') && currentName) {
+        const isAllowed = ALLOWED_CHANNELS.some(allowedWord => currentName.includes(allowedWord));
+        
+        if (isAllowed) {
+          tvChannels.set(currentName, line.trim());
+        }
+        currentName = '';
+      }
+    }
+    console.log(`[TV] Loaded ${tvChannels.size} whitelisted channels from Dispatcharr.`);
+  } catch (err) {
+    console.error("[TV] Error loading channels:", err);
+  }
 }
 
 /**
@@ -71,17 +114,11 @@ export class MusicCommandHandler {
   // nowPlaying listeners, kept so they can be detached in unregisterBot.
   private nowPlayingListeners = new Map<number, { bot: VoiceBot; listener: (item: QueueItem) => void }>();
 
-  private playlistImporter: import('./playlist-import.js').PlaylistImporter | null = null;
-
   constructor(
     private prisma: PrismaClient,
     private voiceBotManager: VoiceBotManager,
     private connectionPool: ConnectionPool,
   ) {}
-
-  setPlaylistImporter(importer: import('./playlist-import.js').PlaylistImporter): void {
-    this.playlistImporter = importer;
-  }
 
   /**
    * Register text message listener on a VoiceBot instance.
@@ -153,6 +190,9 @@ export class MusicCommandHandler {
         case 'radio':
           await this.handleRadio(botId, bot, reply, args);
           break;
+        case 'tv':
+          await this.handleTv(bot, reply, args);
+          break;
         case 'play':
           await this.handlePlay(bot, reply, args);
           break;
@@ -183,10 +223,6 @@ export class MusicCommandHandler {
         case 'queue':
         case 'add':
           await this.handleQueue(bot, reply, args);
-          break;
-        case 'lyrics':
-        case 'paroles':
-          await this.handleLyrics(bot, reply, args);
           break;
         case 'stream':
           await this.handleStream(bot, reply, args);
@@ -235,7 +271,7 @@ export class MusicCommandHandler {
 
     const stations = await this.prisma.radioStation.findMany({
       where: { serverConfigId: dbBot.serverConfigId },
-      orderBy: { name: 'asc' },
+      orderBy: { id: 'asc' },
     });
 
     if (stations.length === 0) {
@@ -283,7 +319,7 @@ export class MusicCommandHandler {
         reply('Resumed.');
         return;
       }
-      reply('Usage: !play <youtube-url | lien Spotify>');
+      reply('Usage: !play <youtube-url | spotify link>');
       return;
     }
 
@@ -296,15 +332,6 @@ export class MusicCommandHandler {
     if (!args.startsWith('http://') && !args.startsWith('https://')) {
       reply('Please provide a valid URL. Usage: !play <youtube-url | lien Spotify>');
       return;
-    }
-
-    // Cheap pre-check: only pay a metadata round trip for a URL that *is* a
-    // playlist. Every other !play would otherwise get slower — and a video
-    // opened from a playlist (which carries `&list=` too) would be swallowed
-    // by a 50-track import instead of playing the linked track.
-    if (isYouTubePlaylistUrl(args) && this.playlistImporter) {
-      const handled = await this.playPlaylist(bot, reply, args);
-      if (handled) return;
     }
 
     reply('Loading...');
@@ -321,107 +348,6 @@ export class MusicCommandHandler {
     }
   }
 
-  /**
-   * Import a YouTube playlist, playing the first track as soon as it lands and
-   * queueing the rest as they download. Returns false when the URL turns out
-   * not to be a playlist — or when the import never got off the ground — so
-   * the caller falls back to the single-track path.
-   */
-  private async playPlaylist(bot: VoiceBot, reply: ReplyFn, url: string): Promise<boolean> {
-    const importer = this.playlistImporter!;
-    // Read before start(): the importer replays already-present tracks as soon
-    // as it can, so by the time we compose the reply the bot may already be
-    // playing *because of this command*.
-    const wasPlaying = bot.status === 'playing' || bot.status === 'paused';
-
-    let result;
-    try {
-      result = await importer.start({
-        url,
-        serverConfigId: bot.currentConfig.serverConfigId,
-        musicBotId: bot.currentConfig.id,
-        onTrack: async (song) => {
-          const item: QueueItem = {
-            // Keyed on the video id like every other producer, so
-            // PlayQueue.remove(id) and !queue remove behave the same here.
-            id: `yt_${song.videoId}`,
-            title: song.title,
-            artist: song.artist ?? 'Unknown',
-            duration: song.duration ?? 0,
-            filePath: song.filePath,
-            source: 'youtube' as const,
-            sourceUrl: song.sourceUrl,
-          };
-          bot.queue.add(item);
-          saveMusicRequest(this.prisma, bot, item);
-          if (bot.status !== 'playing' && bot.status !== 'paused') {
-            bot.queue.playAt(bot.queue.length - 1);
-            await bot.play(item);
-          }
-        },
-      });
-    } catch (err: any) {
-      // Nothing has confirmed this is a playlist yet — a metadata hiccup here
-      // must not cost the user the single-video path that would have worked.
-      console.warn(`[MusicCmd] playlist import could not start (${err.message}); falling back to single track`);
-      return false;
-    }
-
-    if (result.kind === 'not-a-playlist') return false;
-    if (result.kind === 'busy') {
-      reply('⏳ An import is already running for this server. Try again when it finishes.');
-      return true;
-    }
-
-    const { job } = result;
-    const parts = [`📥 Importing "${job.playlistName}" — ${job.total} track(s)`];
-    if (job.skipped) parts.push(`${job.skipped} already in the playlist`);
-    if (job.truncated) parts.push(`${job.truncated} beyond the import limit`);
-
-    // Already-present tracks are enqueued too, so a pure re-import still
-    // plays. Only promise playback when a track is actually on its way.
-    const willEnqueue = job.total > 0 || job.skipped > 0;
-    const tail = !willEnqueue
-      ? ' Nothing to play.'
-      : wasPlaying
-        ? ' Queued behind the current track.'
-        : ' Playback starts with the first one.';
-    reply(`${parts.join(', ')}.${tail}`);
-
-    void this.reportWhenDone(job.jobId, reply);
-    return true;
-  }
-
-  /** Poll the job and post a single summary when it finishes. */
-  private async reportWhenDone(jobId: string, reply: ReplyFn): Promise<void> {
-    const importer = this.playlistImporter!;
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 5000));
-      const job = importer.get(jobId);
-      if (!job) return;
-      if (job.status === 'running') continue;
-
-      if (job.status === 'error') {
-        reply(`❌ Import failed: ${job.error ?? 'Unknown error'}`);
-        return;
-      }
-
-      const lines = [`✅ Import finished: ${job.done} track(s) added.`];
-      if (job.failures.length) {
-        // Full detail belongs in the web UI; a TeamSpeak channel gets the first
-        // few, or a long playlist turns into a wall of text.
-        const shown = job.failures.slice(0, 5);
-        lines.push(`⚠️ ${job.failures.length} failed:`);
-        for (const f of shown) lines.push(`• ${f.title} — ${f.reason}`);
-        if (job.failures.length > shown.length) {
-          lines.push(`• and ${job.failures.length - shown.length} more (see the web UI)`);
-        }
-      }
-      reply(lines.join('\n'));
-      return;
-    }
-  }
-
   private async handleSpotify(bot: VoiceBot, reply: ReplyFn, args: string): Promise<void> {
     if (!args) {
       reply('Usage: !spotify <lien-track-ou-album-spotify>');
@@ -430,11 +356,11 @@ export class MusicCommandHandler {
 
     const config = await loadSpotifyConfig(this.prisma);
     if (!config) {
-      reply('Spotify non configuré (Settings → Spotify).');
+      reply('Spotify not configured (Settings → Spotify).');
       return;
     }
 
-    reply('Résolution du lien Spotify...');
+    reply('Resolving Spotify link...');
 
     try {
       const result = await enqueueSpotify(this.prisma, bot, config, args);
@@ -443,10 +369,10 @@ export class MusicCommandHandler {
       } else if (result.added > 0) {
         reply(result.firstStarted ? `Now playing: ${result.name}` : `Queued: ${result.name}`);
       } else {
-        reply(`Échec : ${result.failed[0] || 'aucune piste ajoutée'}`);
+        reply(`Failed: ${result.failed[0] || 'no tracks added'}`);
       }
     } catch (err: any) {
-      reply(`Échec Spotify : ${err.message}`);
+      reply(`Spotify failed: ${err.message}`);
     }
   }
 
@@ -640,62 +566,28 @@ export class MusicCommandHandler {
   private handleInfo(bot: VoiceBot, reply: ReplyFn): void {
     const np = bot.nowPlaying;
     if (!np) {
-      reply('Aucune musique en cours de lecture.');
+      reply('No music is currently playing.');
       return;
     }
 
-    const lines: string[] = ['♪ Musique en cours :'];
-    lines.push(`  Titre  : ${np.title}`);
-    if (np.artist) lines.push(`  Artiste: ${np.artist}`);
+    const lines: string[] = ['♪ Now playing:'];
+    lines.push(`  Title : ${np.title}`);
+    if (np.artist) lines.push(`  Artist: ${np.artist}`);
 
     if (np.duration) {
       const min = Math.floor(np.duration / 60);
       const sec = String(Math.floor(np.duration % 60)).padStart(2, '0');
-      lines.push(`  Durée  : ${min}:${sec}`);
+      lines.push(`  Duration: ${min}:${sec}`);
     }
 
     const progress = this.formatProgress(bot);
-    if (progress) lines.push(`  Progression : ${progress}`);
+    if (progress) lines.push(`  Progress: ${progress}`);
 
-    // Lien direct vers la source (YouTube/Spotify via sourceUrl, radio via streamUrl)
+    // Direct link to source (YouTube/Spotify via sourceUrl, radio via streamUrl)
     const link = np.sourceUrl || np.streamUrl;
-    if (link) lines.push(`  Lien   : [URL]${link}[/URL]`);
+    if (link) lines.push(`  Link   : [URL]${link}[/URL]`);
 
     reply(lines.join('\n'));
-  }
-
-  private async handleLyrics(bot: VoiceBot, reply: ReplyFn, args: string): Promise<void> {
-    let input: { artist?: string; title?: string; query?: string };
-    let label: string;
-
-    if (args) {
-      input = { query: args };
-      label = args;
-    } else {
-      const np = bot.nowPlaying;
-      if (!np) {
-        reply('Aucune musique en cours. Usage : !lyrics [artiste - titre]');
-        return;
-      }
-      ({ input, label } = lyricsInputFromTrack(np));
-    }
-
-    reply('Recherche des paroles…');
-    const result = await fetchLyrics(input);
-    if (!result) {
-      reply(`Paroles introuvables pour « ${label} ».`);
-      return;
-    }
-    if (result.instrumental) {
-      reply(`♪ ${result.artist} — ${result.title} : morceau instrumental.`);
-      return;
-    }
-
-    const header = `🎤 ${result.artist ? `${result.artist} — ` : ''}${result.title}`;
-    // Same per-message budget as !channels (~1KB TS limit).
-    for (const chunk of chunkLyrics(header, result.lyrics, 900)) {
-      reply(chunk);
-    }
   }
 
   // ─── Channel / Client Management ──────────────────────────
@@ -785,7 +677,7 @@ export class MusicCommandHandler {
       entry = Array.isArray(info) ? info[0] : info;
     } catch {
       // Could not resolve the invoker (e.g. just disconnected): fail closed.
-      reply('⛔ Impossible de vérifier vos permissions, commande refusée.');
+      reply('⛔ Unable to verify your permissions, command denied.');
       return false;
     }
 
@@ -793,7 +685,7 @@ export class MusicCommandHandler {
     if (groups.includes(required)) return true;
 
     const name = await this.groupName(client, sid, required);
-    reply(`⛔ Commande réservée au groupe « ${name} ».`);
+    reply(`⛔ Command reserved for group « ${name} ».`);
     return false;
   }
 
@@ -827,7 +719,7 @@ export class MusicCommandHandler {
     if (/^\d+$/.test(query)) {
       const cid = Number(query);
       const byId = channels.find((c) => Number(c.cid) === cid);
-      if (!byId) throw new Error(`Aucun salon avec l'ID ${cid}. Utilisez !channels pour la liste.`);
+      if (!byId) throw new Error(`No channel with ID ${cid}. Use !channels for the list.`);
       return byId;
     }
 
@@ -837,24 +729,24 @@ export class MusicCommandHandler {
     const exact = named.filter((c) => String(c.channel_name).toLowerCase() === lower);
     if (exact.length === 1) return exact[0];
     if (exact.length > 1) {
-      throw new Error(`Plusieurs salons nommés « ${query} ». Précisez avec l'ID (voir !channels).`);
+      throw new Error(`Multiple channels named « ${query} ». Specify with the ID (see !channels).`);
     }
 
     const partial = named.filter((c) => String(c.channel_name).toLowerCase().includes(lower));
     if (partial.length === 1) return partial[0];
     if (partial.length > 1) {
       const ids = partial.slice(0, 6).map((c) => `[${c.cid}] ${c.channel_name}`).join(', ');
-      throw new Error(`Plusieurs salons correspondent à « ${query} » : ${ids}. Précisez avec l'ID.`);
+      throw new Error(`Multiple channels match « ${query} » : ${ids}. Specify with the ID.`);
     }
 
-    throw new Error(`Salon introuvable : « ${query} ». Utilisez !channels pour la liste.`);
+    throw new Error(`Channel not found: « ${query} ». Use !channels for the list.`);
   }
 
   private async handleChannels(botId: number, reply: ReplyFn): Promise<void> {
     const { client, sid } = await this.getServer(botId);
     const channels = await this.fetchChannels(client, sid);
     if (channels.length === 0) {
-      reply('Aucun salon.');
+      reply('No channels.');
       return;
     }
 
@@ -884,10 +776,10 @@ export class MusicCommandHandler {
     };
     walk(0, 0);
 
-    if (norm.length > MAX) lines.push(`  ... et ${norm.length - MAX} de plus`);
+    if (norm.length > MAX) lines.push(`  ... and ${norm.length - MAX} more`);
 
     // Send in chunks to stay under the ~1KB per-message limit on long lists.
-    const header = `Salons (${norm.length}) :`;
+    const header = `Channels (${norm.length}) :`;
     let buf = header;
     for (const line of lines) {
       if (buf.length + 1 + line.length > 900) {
@@ -903,7 +795,7 @@ export class MusicCommandHandler {
   private async handleMove(botId: number, reply: ReplyFn, args: string): Promise<void> {
     const tokens = tokenizeArgs(args);
     if (tokens.length < 2) {
-      reply('Usage : !move <pseudo> <salon|id>  — guillemets pour les noms avec espaces, ex. !move "John Doe" "Salon 1"');
+      reply('Usage: !move <pseudo> <channel|id> — use quotes for names with spaces, e.g., !move "John Doe" "Channel 1"');
       return;
     }
 
@@ -926,7 +818,7 @@ export class MusicCommandHandler {
   private async handleMoveAll(botId: number, bot: VoiceBot, reply: ReplyFn, args: string): Promise<void> {
     const channelRef = tokenizeArgs(args).join(' ').trim();
     if (!channelRef) {
-      reply('Usage : !moveall <salon|id>  — déplace tous les utilisateurs vers ce salon.');
+      reply('Usage: !moveall <channel|id> — move all users to this channel.');
       return;
     }
 
@@ -948,7 +840,7 @@ export class MusicCommandHandler {
     );
 
     if (toMove.length === 0) {
-      reply(`Personne à déplacer vers ${channel.channel_name}.`);
+      reply(`No one to move to ${channel.channel_name}.`);
       return;
     }
 
@@ -964,8 +856,8 @@ export class MusicCommandHandler {
       }
     }
 
-    let msg = `${moved} utilisateur(s) déplacé(s) vers ${channel.channel_name}.`;
-    if (failed.length) msg += ` Échec pour : ${failed.join(', ')}.`;
+    let msg = `${moved} user(s) moved to ${channel.channel_name}.`;
+    if (failed.length) msg += ` Failed for: ${failed.join(', ')}.`;
     reply(msg);
   }
 
@@ -979,8 +871,8 @@ export class MusicCommandHandler {
     }
     this.invalidateSettings();
     reply(next
-      ? '🔔 Notifications du titre en cours : activées (tous les bots).'
-      : '🔕 Notifications du titre en cours : désactivées.');
+      ? '🔔 Now playing notifications: enabled (all bots).'
+      : '🔕 Now playing notifications: disabled.');
   }
 
   /**
@@ -995,43 +887,43 @@ export class MusicCommandHandler {
     const exact = real.filter((c) => String(c.client_nickname).toLowerCase() === lower);
     if (exact.length === 1) return exact[0];
     if (exact.length > 1) {
-      throw new Error(`Plusieurs clients nommés « ${ref} ». Soyez plus précis.`);
+      throw new Error(`Multiple clients named "${ref}". Please be more specific.`);
     }
 
     const partial = real.filter((c) => String(c.client_nickname).toLowerCase().includes(lower));
     if (partial.length === 1) return partial[0];
     if (partial.length > 1) {
       const names = partial.slice(0, 6).map((c) => c.client_nickname).join(', ');
-      throw new Error(`Plusieurs clients correspondent à « ${ref} » : ${names}. Soyez plus précis.`);
+      throw new Error(`Multiple clients match "${ref}": ${names}. Please be more specific.`);
     }
 
-    throw new Error(`Utilisateur introuvable : « ${ref} ».`);
+    throw new Error(`User not found: "${ref}".`);
   }
 
   private handleHelp(reply: ReplyFn): void {
     reply([
-      'Commandes musicales disponibles :',
-      '  !play <url>          Lire une vidéo YouTube ou un lien Spotify',
-      '  !spotify <lien>      Lire une piste/album Spotify',
-      '  !radio [id]          Lister les radios ou en lancer une',
-      '  !queue [..]          Voir/gérer la file (show|play <n>|remove <n>|clear|<url>)',
-      '  !add <url>           Ajouter une piste à la file',
-      '  !skip / !next        Piste suivante',
-      '  !prev                Piste précédente',
-      '  !pause               Mettre en pause / reprendre',
-      '  !stop                Arrêter la lecture',
-      '  !vol <0-100>         Régler ou afficher le volume',
-      '  !np / !nowplaying    Titre en cours de lecture',
-      '  !info                Détails du titre en cours (artiste, titre, lien direct)',
-      '  !lyrics [recherche]  Paroles de la piste en cours ou d\'une recherche (!paroles)',
-      '  !stream <url> [qual] Diffuser une vidéo (presets : 480p, 720p, 1080p)',
-      '  !stopstream          Arrêter la diffusion vidéo',
-      '  !viewers             Lister les spectateurs du stream vidéo',
-      '  !channels            Lister les salons et leur ID',
-      '  !move <user> <salon> Déplacer un utilisateur (nom ou ID ; "guillemets" si espaces)',
-      '  !moveall <salon>     Déplacer tous les utilisateurs vers un salon',
-      '  !notif               Activer/désactiver la notif du titre en cours (canal TS)',
-      '  !help / !aide        Afficher cette aide',
+      'Available bot commands:',
+      '  !play <url>            Play a YouTube video or Spotify link',
+      '  !spotify <link>        Play a Spotify track/album',
+      '  !radio [id]            List radio stations or start one',
+      '  !queue [..]            View/manage the queue (show|play <n>|remove <n>|clear|<url>)',
+      '  !add <url>             Add a track to the queue',
+      '  !skip / !next          Skip to the next track',
+      '  !prev                  Play the previous track',
+      '  !pause                 Pause / Resume playback',
+      '  !stop                  Stop playback',
+      '  !vol <0-100>           Set or display the volume',
+      '  !np / !nowplaying      Currently playing track',
+      '  !info                  Details of the current track (artist, title, direct link)',
+      '  !stream <url> [qual]   Stream a video (presets: 480p, 720p, 1080p)',
+      '  !tv <channel>          Watch live TV (e.g. !tv mtv3)',
+      '  !stopstream            Stop the video stream',
+      '  !viewers               List viewers of the video stream',
+      '  !channels              List channels and their IDs',
+      '  !move <user> <chan>    Move a user (name or ID; use "quotes" for spaces)',
+      '  !moveall <chan>        Move all users to a channel',
+      '  !notif                 Enable/disable current track notification (TS channel)',
+      '  !help                  Show this help menu',
     ].join('\n'));
   }
 
@@ -1069,6 +961,47 @@ export class MusicCommandHandler {
       reply(`Video stream started: ${url}`);
     } catch (err: any) {
       reply(`Failed to start stream: ${err.message}`);
+    }
+  }
+
+  private async handleTv(bot: VoiceBot, reply: ReplyFn, args: string): Promise<void> {
+    if (tvChannels.size === 0) {
+      await loadTvChannels();
+    }
+
+    const query = args.trim().toLowerCase();
+
+    if (!query) {
+      const names = Array.from(tvChannels.keys());
+      // KORJAUS 1: Tulostetaan oikeasti ne nimet, pilkulla erotettuna
+      reply(`📺 Available channels (${names.length}):\n${names.join(', ')}\n\nUsage: !tv <channel> (e.g. !tv mtv3)`);
+      return;
+    }
+
+    if (query === 'reload') {
+      await loadTvChannels();
+      reply(`📺 TV channels reloaded. Available channels: ${tvChannels.size}`);
+      return;
+    }
+
+    // KORJAUS 2: "Fuzzy search", joka poistaa välilyönnit vertailun ajaksi
+    const normalizedQuery = query.replace(/\s+/g, '');
+    const match = Array.from(tvChannels.keys()).find(name => {
+      const normalizedName = name.replace(/\s+/g, '');
+      return normalizedName.includes(normalizedQuery) || normalizedQuery.includes(normalizedName);
+    });
+
+    if (match) {
+      const streamUrl = tvChannels.get(match);
+      reply(`📺 Starting live TV: ${match.toUpperCase()}`);
+      
+      try {
+        await bot.startVideoStream(streamUrl!, '720p'); 
+      } catch (err) {
+        reply(`Error starting TV stream: ${err}`);
+      }
+    } else {
+      reply(`❌ TV channel not found for keyword: "${query}"`);
     }
   }
 

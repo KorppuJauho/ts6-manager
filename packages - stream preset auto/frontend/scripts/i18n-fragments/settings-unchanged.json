@@ -1,0 +1,10 @@
+{
+  "namespace": "settings",
+  "keys": {
+    "en": { "connections": { "unchanged": "(unchanged)" } },
+    "fr": { "connections": { "unchanged": "(inchangé)" } },
+    "de": { "connections": { "unchanged": "(unverändert)" } },
+    "es": { "connections": { "unchanged": "(sin cambios)" } },
+    "it": { "connections": { "unchanged": "(invariato)" } }
+  }
+}

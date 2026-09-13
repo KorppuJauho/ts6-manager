@@ -1,0 +1,10 @@
+{
+  "namespace": "settings",
+  "keys": {
+    "en": { "discord": { "embedStyle": "Embed style (colored card) instead of a plain message" } },
+    "fr": { "discord": { "embedStyle": "Style embed (carte colorée) au lieu d'un message simple" } },
+    "de": { "discord": { "embedStyle": "Embed-Stil (farbige Karte) statt einer einfachen Nachricht" } },
+    "es": { "discord": { "embedStyle": "Estilo embed (tarjeta de color) en lugar de un mensaje simple" } },
+    "it": { "discord": { "embedStyle": "Stile embed (scheda colorata) invece di un messaggio semplice" } }
+  }
+}
