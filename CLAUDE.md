@@ -79,6 +79,12 @@ render node. See the comments in `docker-compose.yml`.
   five languages. Never hardcode display text in a component.
 - Commit messages: conventional-commit subject, then a body explaining the
   reasoning and any trade-off carried. Look at recent history for the register.
+- **Do not put personal identity in the history.** Commit as
+  `korppujauho <130571566+KorppuJauho@users.noreply.github.com>`, never a
+  personal address — this is a public repository and commit metadata is
+  permanent. Do not add `Claude-Session:` trailers or session links to commit
+  messages or pull request descriptions; `Co-Authored-By: Claude` is the
+  disclosure the maintainer wants, and it is enough.
 - Tests are vitest, colocated as `*.test.ts`. Cover the cases real input
   hits, not just the happy path.
 
