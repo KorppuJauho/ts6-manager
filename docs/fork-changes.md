@@ -276,6 +276,15 @@ than in CI:
   appear to do nothing. It is no longer read. The column stays as the seed for
   a per-bot override and must gain a UI before it is consulted again.
 
+- **Switching the encoder to VP9 silently produced VP8.** With hardware
+  acceleration off, `effectiveEncoder` returned an empty string for any VAAPI
+  profile, which the sidecar reads as "no preference" and answers with its own
+  default — `vp8_software`. Selecting VP9 therefore kept encoding VP8 and
+  looked like the setting was being ignored. Turning hardware off now drops
+  the hardware *backend* and keeps the codec: `vp9_vaapi` becomes
+  `vp9_software`. The two controls could contradict each other and the
+  resolution discarded the more specific one.
+
 - **Presets could exceed what TeamSpeak accepts.** The server caps a stream at
   10 Mbit/s and drops one that exceeds it, which presents as an encoder
   failure. 2160p asked for 18000k. It is now 9500k, and `clampBitrate` holds

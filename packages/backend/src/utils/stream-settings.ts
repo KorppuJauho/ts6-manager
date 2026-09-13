@@ -71,15 +71,22 @@ export async function getStreamSettings(prisma: PrismaClient): Promise<StreamSet
 }
 
 /**
- * The encoder to ask the sidecar for.
+ * The encoder profile to ask the sidecar for.
  *
- * Returns "" when hardware acceleration is off and the stored profile is a
- * hardware one — the sidecar then falls back to its own software default,
- * rather than this having to know which software profile pairs with it.
+ * Turning hardware acceleration off drops the hardware *backend*, keeping the
+ * codec the operator picked: vp9_vaapi becomes vp9_software, not the sidecar's
+ * default. Returning an empty string here instead — as this used to — made the
+ * sidecar fall back to its own default of vp8_software, so switching the
+ * encoder to VP9 with the toggle off silently produced VP8 and looked like the
+ * setting was being ignored.
+ *
+ * A hardware profile whose software counterpart is not in the registry maps to
+ * a key the sidecar does not know; it logs that and falls back, which is the
+ * right outcome for a profile combination that cannot run.
  */
 export function effectiveEncoder(settings: StreamSettingsValue): string {
   if (settings.hwAccelEnabled) return settings.encoderProfile;
-  return settings.encoderProfile.endsWith('_vaapi') ? '' : settings.encoderProfile;
+  return settings.encoderProfile.replace(/_(vaapi|nvenc|qsv)$/, '_software');
 }
 
 /** Split the stored comma-separated filter into lowercase substrings. */

@@ -415,7 +415,7 @@
       "encoderProfileHint": "VP9 offre una qualità migliore a parità di bitrate rispetto a VP8, ma costa di più da codificare via software.",
       "encoderUnavailable": "non disponibile su questo host",
       "sidecarUnreachable": "Non è stato possibile contattare il sidecar, quindi la disponibilità dei codificatori è sconosciuta. L'elenco mostra tutti i profili noti.",
-      "hardwareProfileDisabled": "Questo è un profilo hardware ma la codifica hardware è disattivata: lo streaming avverrà via software.",
+      "hardwareProfileDisabled": "La codifica hardware è disattivata: il codec scelto verrà codificato via software.",
       "playbackTitle": "Riproduzione",
       "defaultPreset": "Qualità predefinita",
       "defaultPresetHint": "Usata quando né il comando né il bot ne indicano una. I preset più alti richiedono più banda in upload e un codificatore più potente.",

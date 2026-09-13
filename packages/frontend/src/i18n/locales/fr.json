@@ -415,7 +415,7 @@
       "encoderProfileHint": "VP9 offre une meilleure qualité à débit égal que VP8, mais coûte plus cher à encoder en logiciel.",
       "encoderUnavailable": "indisponible sur cet hôte",
       "sidecarUnreachable": "Le sidecar est injoignable : la disponibilité des encodeurs est inconnue. La liste montre tous les profils connus.",
-      "hardwareProfileDisabled": "C'est un profil matériel mais l'encodage matériel est désactivé : la diffusion se fera en logiciel.",
+      "hardwareProfileDisabled": "L'encodage matériel est désactivé : le codec choisi sera encodé en logiciel.",
       "playbackTitle": "Lecture",
       "defaultPreset": "Qualité par défaut",
       "defaultPresetHint": "Utilisée quand ni la commande ni le bot n'en précise une. Les presets élevés demandent plus de bande passante et un encodeur plus puissant.",

@@ -415,7 +415,7 @@
       "encoderProfileHint": "VP9 gives better quality per bitrate than VP8, but costs more to encode in software.",
       "encoderUnavailable": "unavailable on this host",
       "sidecarUnreachable": "Could not reach the sidecar, so encoder availability is unknown. The list shows every profile the software knows about.",
-      "hardwareProfileDisabled": "This is a hardware profile but hardware encoding is off, so streams will run in software.",
+      "hardwareProfileDisabled": "Hardware encoding is off, so this runs on the software encoder for the same codec.",
       "playbackTitle": "Playback",
       "defaultPreset": "Default quality",
       "defaultPresetHint": "Used when neither the command nor the bot specifies one. Higher presets need more upload bandwidth and a stronger encoder.",
