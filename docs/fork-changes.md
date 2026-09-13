@@ -276,6 +276,14 @@ than in CI:
   appear to do nothing. It is no longer read. The column stays as the seed for
   a per-bot override and must gain a UI before it is consulted again.
 
+- **The encoder settings presented a cross product instead of two choices.**
+  A hardware toggle plus a flat list of vp8/vp9 × software/vaapi let the two
+  controls contradict each other, and made "VP9 (VAAPI hardware)" with the
+  toggle off a reachable, meaningless state. The UI now offers a codec, and
+  the toggle decides the backend; `effectiveEncoder` composes the profile from
+  the two, so they cannot disagree. The codec dropdown marks a codec the GPU
+  cannot encode, using the sidecar's probe rather than FFmpeg's build flags.
+
 - **Switching the encoder to VP9 silently produced VP8.** With hardware
   acceleration off, `effectiveEncoder` returned an empty string for any VAAPI
   profile, which the sidecar reads as "no preference" and answers with its own

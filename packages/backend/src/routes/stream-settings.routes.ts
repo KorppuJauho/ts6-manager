@@ -13,6 +13,8 @@ import { STREAM_PRESETS } from '../voice/streaming/types.js';
 import {
   getStreamSettings,
   invalidateStreamSettings,
+  codecFromProfile,
+  composeProfile,
   IPTV_SORTS,
   STREAM_SETTINGS_DEFAULTS,
 } from '../utils/stream-settings.js';
@@ -52,7 +54,8 @@ function asText(value: unknown, max: number): string | undefined {
 // GET /api/stream-settings
 streamSettingsRoutes.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(await getStreamSettings(req.app.locals.prisma));
+    const settings = await getStreamSettings(req.app.locals.prisma);
+    res.json({ ...settings, videoCodec: codecFromProfile(settings.encoderProfile) });
   } catch (err) { next(err); }
 });
 
@@ -93,7 +96,31 @@ streamSettingsRoutes.get('/options', async (req: Request, res: Response, next: N
       // everything reads as unavailable.
     }
 
-    res.json({ presets, encoders, sidecarReachable, iptvSorts: IPTV_SORTS });
+    // The UI offers a codec and a hardware toggle, not a flat profile list:
+    // those are independent choices, and presenting the cross product invites
+    // picking a combination that contradicts the toggle. Group the probed
+    // profiles so the UI can say which codecs have working hardware support.
+    const byCodec = new Map<string, { codec: string; label: string; softwareAvailable: boolean; hardwareAvailable: boolean }>();
+    for (const enc of encoders) {
+      const codec = codecFromProfile(enc.key);
+      const entry = byCodec.get(codec) ?? {
+        codec,
+        label: codec.toUpperCase(),
+        softwareAvailable: false,
+        hardwareAvailable: false,
+      };
+      if (enc.hwAccel) entry.hardwareAvailable ||= enc.available;
+      else entry.softwareAvailable ||= enc.available;
+      byCodec.set(codec, entry);
+    }
+
+    res.json({
+      presets,
+      encoders,
+      codecs: [...byCodec.values()],
+      sidecarReachable,
+      iptvSorts: IPTV_SORTS,
+    });
   } catch (err) { next(err); }
 });
 
@@ -104,7 +131,14 @@ streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunc
     const current = await getStreamSettings(prisma);
     const body = req.body ?? {};
 
-    const encoderProfile = asText(body.encoderProfile, 64) ?? current.encoderProfile;
+    const hwAccelEnabled = asBool(body.hwAccelEnabled, current.hwAccelEnabled);
+
+    // The UI sends a codec; the backend half comes from the toggle. An older
+    // client sending a whole profile key still works — its codec is taken and
+    // its backend discarded, since the toggle is what decides that.
+    const videoCodec = asText(body.videoCodec, 32)
+      ?? codecFromProfile(asText(body.encoderProfile, 64) ?? current.encoderProfile);
+    const encoderProfile = composeProfile(videoCodec, hwAccelEnabled);
     const defaultPreset = asText(body.defaultPreset, 32) ?? current.defaultPreset;
     if (!STREAM_PRESETS[defaultPreset]) {
       throw new AppError(400, `Unknown preset "${defaultPreset}"`);
@@ -128,7 +162,7 @@ streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunc
     }
 
     const data = {
-      hwAccelEnabled: asBool(body.hwAccelEnabled, current.hwAccelEnabled),
+      hwAccelEnabled,
       hwAccelDevice: hwAccelDevice || STREAM_SETTINGS_DEFAULTS.hwAccelDevice,
       encoderProfile,
       defaultPreset,

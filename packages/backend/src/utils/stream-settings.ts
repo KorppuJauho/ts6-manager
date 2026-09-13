@@ -71,22 +71,41 @@ export async function getStreamSettings(prisma: PrismaClient): Promise<StreamSet
 }
 
 /**
+ * The hardware backend used when acceleration is on.
+ *
+ * Single-valued because the registry has exactly one usable hardware backend.
+ * Adding a second (NVENC, QSV) means this can no longer be inferred and the
+ * settings need to carry which one to prefer.
+ */
+const HARDWARE_BACKEND = 'vaapi';
+
+/** The codec half of a profile key: "vp9_vaapi" -> "vp9". */
+export function codecFromProfile(profile: string): string {
+  const [codec] = profile.split('_');
+  return codec || 'vp8';
+}
+
+/** Build a profile key from its two independent halves. */
+export function composeProfile(codec: string, hardware: boolean): string {
+  return `${codec}_${hardware ? HARDWARE_BACKEND : 'software'}`;
+}
+
+/**
  * The encoder profile to ask the sidecar for.
  *
- * Turning hardware acceleration off drops the hardware *backend*, keeping the
- * codec the operator picked: vp9_vaapi becomes vp9_software, not the sidecar's
- * default. Returning an empty string here instead — as this used to — made the
- * sidecar fall back to its own default of vp8_software, so switching the
- * encoder to VP9 with the toggle off silently produced VP8 and looked like the
- * setting was being ignored.
+ * Codec and backend are independent settings: the stored profile supplies the
+ * codec, and the hardware toggle decides the backend. Composing them here
+ * rather than trusting the stored key whole means the two can never disagree
+ * — which they could before, when a VAAPI profile with the toggle off
+ * resolved to an empty string and the sidecar answered with its own default,
+ * silently changing the codec as well as the backend.
  *
- * A hardware profile whose software counterpart is not in the registry maps to
- * a key the sidecar does not know; it logs that and falls back, which is the
- * right outcome for a profile combination that cannot run.
+ * A combination this host cannot run is not this function's problem: the
+ * sidecar probes each profile and falls back to the software encoder for the
+ * same codec, logging why.
  */
 export function effectiveEncoder(settings: StreamSettingsValue): string {
-  if (settings.hwAccelEnabled) return settings.encoderProfile;
-  return settings.encoderProfile.replace(/_(vaapi|nvenc|qsv)$/, '_software');
+  return composeProfile(codecFromProfile(settings.encoderProfile), settings.hwAccelEnabled);
 }
 
 /** Split the stored comma-separated filter into lowercase substrings. */

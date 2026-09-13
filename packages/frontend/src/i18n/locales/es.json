@@ -411,11 +411,7 @@
       "hwAccelEnabled": "Usar codificación por hardware",
       "hwAccelDevice": "Dispositivo de codificación",
       "hwAccelDeviceHint": "El nodo de render de la GPU, p. ej. /dev/dri/renderD128. El contenedor sidecar necesita acceso a este dispositivo — ver docker-compose.yml.",
-      "encoderProfile": "Codificador",
-      "encoderProfileHint": "VP9 da mejor calidad por bitrate que VP8, pero cuesta más codificar por software.",
-      "encoderUnavailable": "no disponible en este host",
       "sidecarUnreachable": "No se pudo contactar con el sidecar, así que se desconoce la disponibilidad de los codificadores. La lista muestra todos los perfiles conocidos.",
-      "hardwareProfileDisabled": "La codificación por hardware está desactivada: el códec elegido se codificará por software.",
       "playbackTitle": "Reproducción",
       "defaultPreset": "Calidad predeterminada",
       "defaultPresetHint": "Se usa cuando ni el comando ni el bot indican una. Los preajustes altos necesitan más ancho de banda de subida y un codificador más potente.",
@@ -432,7 +428,11 @@
       "iptvSortName": "Alfabético",
       "iptvSortPlaylist": "Como en la lista",
       "toastSaved": "Ajustes de transmisión guardados",
-      "toastSaveFailed": "No se pudieron guardar los ajustes de transmisión"
+      "toastSaveFailed": "No se pudieron guardar los ajustes de transmisión",
+      "codec": "Códec de vídeo",
+      "codecHint": "VP9 da mejor calidad al mismo bitrate que VP8, pero cuesta más codificar por software. Que use la GPU o la CPU lo decide el interruptor de arriba.",
+      "noHardwareForCodec": "sin soporte de GPU",
+      "hardwareUnavailableForCodec": "Esta GPU no puede codificar el códec seleccionado: las transmisiones usarán el codificador por software."
     }
   },
   "channels": {

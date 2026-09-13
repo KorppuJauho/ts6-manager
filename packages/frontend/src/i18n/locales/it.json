@@ -411,11 +411,7 @@
       "hwAccelEnabled": "Usa la codifica hardware",
       "hwAccelDevice": "Dispositivo di codifica",
       "hwAccelDeviceHint": "Il nodo di render della GPU, es. /dev/dri/renderD128. Il container sidecar deve avere accesso a questo dispositivo — vedi docker-compose.yml.",
-      "encoderProfile": "Codificatore",
-      "encoderProfileHint": "VP9 offre una qualità migliore a parità di bitrate rispetto a VP8, ma costa di più da codificare via software.",
-      "encoderUnavailable": "non disponibile su questo host",
       "sidecarUnreachable": "Non è stato possibile contattare il sidecar, quindi la disponibilità dei codificatori è sconosciuta. L'elenco mostra tutti i profili noti.",
-      "hardwareProfileDisabled": "La codifica hardware è disattivata: il codec scelto verrà codificato via software.",
       "playbackTitle": "Riproduzione",
       "defaultPreset": "Qualità predefinita",
       "defaultPresetHint": "Usata quando né il comando né il bot ne indicano una. I preset più alti richiedono più banda in upload e un codificatore più potente.",
@@ -432,7 +428,11 @@
       "iptvSortName": "Alfabetico",
       "iptvSortPlaylist": "Come nella playlist",
       "toastSaved": "Impostazioni di streaming salvate",
-      "toastSaveFailed": "Impossibile salvare le impostazioni di streaming"
+      "toastSaveFailed": "Impossibile salvare le impostazioni di streaming",
+      "codec": "Codec video",
+      "codecHint": "VP9 offre una qualità migliore a parità di bitrate rispetto a VP8, ma costa di più da codificare via software. Se usare la GPU o la CPU lo decide l'interruttore sopra.",
+      "noHardwareForCodec": "nessun supporto GPU",
+      "hardwareUnavailableForCodec": "Questa GPU non può codificare il codec selezionato: lo streaming userà il codificatore software."
     }
   },
   "channels": {

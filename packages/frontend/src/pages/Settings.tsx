@@ -1709,7 +1709,7 @@ function StreamingTab() {
   }
 
   const save = useMutation({
-    mutationFn: () => streamSettingsApi.update(form!),
+    mutationFn: () => streamSettingsApi.update({ ...form!, videoCodec: selectedCodec }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['stream-settings'] });
       toast.success(t('settings.streaming.toastSaved'));
@@ -1722,11 +1722,14 @@ function StreamingTab() {
   const set = <K extends keyof StreamSettings>(key: K, value: StreamSettings[K]) =>
     setForm((f) => (f ? { ...f, [key]: value } : f));
 
-  const encoders = options?.encoders ?? [];
-  const selectedEncoder = encoders.find((e) => e.key === form.encoderProfile);
-  // A hardware profile is only meaningful while acceleration is on; the
-  // software ones stay selectable either way.
-  const hardwareOff = !form.hwAccelEnabled && !!selectedEncoder?.hwAccel;
+  const codecs = options?.codecs ?? [];
+  const selectedCodec = form.videoCodec ?? 'vp8';
+  const codec = codecs.find((c) => c.codec === selectedCodec);
+
+  // Hardware for the chosen codec may simply not exist on this GPU — the
+  // sidecar probes by encoding, so this reflects what will actually happen
+  // rather than what FFmpeg was built with.
+  const hardwareUnavailable = form.hwAccelEnabled && codec !== undefined && !codec.hardwareAvailable;
 
   return (
     <div className="space-y-4">
@@ -1755,14 +1758,18 @@ function StreamingTab() {
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">{t('settings.streaming.encoderProfile')}</Label>
-            <Select value={form.encoderProfile} onValueChange={(v) => set('encoderProfile', v)}>
+            <Label className="text-xs">{t('settings.streaming.codec')}</Label>
+            <Select value={selectedCodec} onValueChange={(v) => set('videoCodec', v)}>
               <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {encoders.map((e) => (
-                  <SelectItem key={e.key} value={e.key} disabled={!e.available}>
-                    {e.label}
-                    {!e.available && ` — ${t('settings.streaming.encoderUnavailable')}`}
+                {codecs.map((c) => (
+                  <SelectItem
+                    key={c.codec}
+                    value={c.codec}
+                    disabled={form.hwAccelEnabled ? !c.hardwareAvailable && !c.softwareAvailable : !c.softwareAvailable}
+                  >
+                    {c.label}
+                    {form.hwAccelEnabled && !c.hardwareAvailable && ` — ${t('settings.streaming.noHardwareForCodec')}`}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1772,12 +1779,12 @@ function StreamingTab() {
                 {t('settings.streaming.sidecarUnreachable')}
               </p>
             )}
-            {hardwareOff && (
+            {hardwareUnavailable && (
               <p className="text-[10px] text-amber-600 dark:text-amber-500">
-                {t('settings.streaming.hardwareProfileDisabled')}
+                {t('settings.streaming.hardwareUnavailableForCodec')}
               </p>
             )}
-            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.encoderProfileHint')}</p>
+            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.codecHint')}</p>
           </div>
         </CardContent>
       </Card>

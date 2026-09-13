@@ -411,11 +411,7 @@
       "hwAccelEnabled": "Use hardware encoding",
       "hwAccelDevice": "Encoding device",
       "hwAccelDeviceHint": "The GPU render node, e.g. /dev/dri/renderD128. The sidecar container needs this device passed through — see docker-compose.yml.",
-      "encoderProfile": "Encoder",
-      "encoderProfileHint": "VP9 gives better quality per bitrate than VP8, but costs more to encode in software.",
-      "encoderUnavailable": "unavailable on this host",
       "sidecarUnreachable": "Could not reach the sidecar, so encoder availability is unknown. The list shows every profile the software knows about.",
-      "hardwareProfileDisabled": "Hardware encoding is off, so this runs on the software encoder for the same codec.",
       "playbackTitle": "Playback",
       "defaultPreset": "Default quality",
       "defaultPresetHint": "Used when neither the command nor the bot specifies one. Higher presets need more upload bandwidth and a stronger encoder.",
@@ -432,7 +428,11 @@
       "iptvSortName": "Alphabetical",
       "iptvSortPlaylist": "As in the playlist",
       "toastSaved": "Streaming settings saved",
-      "toastSaveFailed": "Could not save the streaming settings"
+      "toastSaveFailed": "Could not save the streaming settings",
+      "codec": "Video codec",
+      "codecHint": "VP9 gives better quality at the same bitrate than VP8, but costs more to encode in software. Whether it runs on the GPU or the CPU is the toggle above.",
+      "noHardwareForCodec": "no GPU support",
+      "hardwareUnavailableForCodec": "This GPU cannot encode the selected codec, so streams will fall back to the software encoder."
     }
   },
   "channels": {
