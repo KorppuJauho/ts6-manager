@@ -181,7 +181,7 @@ model MusicBot {
   volume          Int       @default(50)
   identityData    String?
   autoStart       Boolean   @default(false)
-  streamPreset    String    @default("720p")
+  streamPreset    String    @default("1080p")
   sidecarPort     Int       @default(9800)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

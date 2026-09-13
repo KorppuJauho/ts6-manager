@@ -907,7 +907,11 @@ export class VoiceBot extends EventEmitter {
 
     const sidecarBinary = this.config.sidecarBinaryPath || process.env.SIDECAR_BINARY_PATH || 'sidecar';
     const sidecarPort = this.config.sidecarPort || 9800;
-    this._videoPreset = preset ?? this.config.streamPreset ?? DEFAULT_PRESET;
+    // FIXME: this ignores the per-bot streamPreset column, so the value an
+    // operator picks for a bot has no effect — every stream runs at the
+    // DEFAULT_PRESET. Carried over from the deployed fork as-is; replaced by
+    // the configurable default in the settings work.
+    this._videoPreset = preset ?? DEFAULT_PRESET;
     const presetConfig = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     const effectiveFramerate = framerate && framerate > 0
       ? framerate

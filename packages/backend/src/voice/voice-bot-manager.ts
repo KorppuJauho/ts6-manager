@@ -81,7 +81,7 @@ export class VoiceBotManager extends EventEmitter {
         identity,
         sidecarBinaryPath: process.env.SIDECAR_BINARY_PATH,
         sidecarPort: (dbBot as any).sidecarPort ?? 9800,
-        streamPreset: (dbBot as any).streamPreset ?? '720p',
+        streamPreset: (dbBot as any).streamPreset ?? '1080p',
       };
 
       const bot = this.createBotInstance(config);
@@ -246,7 +246,7 @@ export class VoiceBotManager extends EventEmitter {
       identity,
       sidecarBinaryPath: process.env.SIDECAR_BINARY_PATH,
       sidecarPort: 9800,
-      streamPreset: '720p',
+      streamPreset: '1080p',
     };
 
     const bot = this.createBotInstance(config);
