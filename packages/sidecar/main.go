@@ -93,6 +93,10 @@ const sourceSeparator = "|||"
 // needs two; more than that is a caller feeding FFmpeg an input list.
 const maxSourceInputs = 2
 
+// maxPendingICE caps the candidates buffered before the answer arrives, so a
+// peer that never answers cannot grow the buffer without bound.
+const maxPendingICE = 64
+
 // splitSources expands a source string into its individual URLs, dropping
 // empty segments. An empty source yields an empty slice (the test pattern).
 func splitSources(source string) []string {
@@ -336,6 +340,12 @@ type Peer struct {
 	Started    bool
 	mu         sync.Mutex
 	stopSR     chan struct{}
+
+	// Candidates that arrived before the answer. Pion rejects
+	// AddICECandidate until the remote description is set, and the client
+	// trickles candidates as soon as it has the offer, so without this the
+	// earliest — usually the host — candidates are lost.
+	pendingICE []webrtc.ICECandidateInit
 }
 
 type Sidecar struct {
@@ -358,6 +368,13 @@ type Sidecar struct {
 	profileMu sync.RWMutex
 	profile   EncoderProfile
 	hwDevice  string
+
+	// Mirrors the active profile's need for keyframe gating so the RTP
+	// forwarding loop can test it without taking profileMu per packet.
+	// It must be written from setActiveProfile, never latched at start-up:
+	// the forwarding goroutines run from process start, long before the
+	// first source picks a codec.
+	gateKeyframe atomic.Bool
 
 	// Atomic timestamps for RTCP Sender Report generation
 	lastVideoRTPTs  uint64 // atomic: latest video RTP timestamp seen
@@ -521,6 +538,15 @@ func (s *Sidecar) setActiveProfile(p EncoderProfile, device string) {
 	s.profile = p
 	s.hwDevice = device
 	s.profileMu.Unlock()
+	s.gateKeyframe.Store(needsKeyframeGate(p))
+}
+
+// needsKeyframeGate reports whether a joining peer should be held until a
+// frame start this sidecar can recognise. Only VP8 has a payload-descriptor
+// parser here, so every other codec opens on the first packet — as the
+// pre-fork sidecar did for all codecs.
+func needsKeyframeGate(p EncoderProfile) bool {
+	return p.MimeType == webrtc.MimeTypeVP8
 }
 
 func (s *Sidecar) processVideoRTP() {
@@ -528,9 +554,11 @@ func (s *Sidecar) processVideoRTP() {
 	// That pacing was removed during the VP9/VAAPI port and the original
 	// rationale was not recorded — see docs/fork-changes.md. FFmpeg's -re
 	// already paces the source, so packets are forwarded as they arrive.
-	gateOnKeyframe := s.activeProfile().MimeType == webrtc.MimeTypeVP8
-
 	for pkt := range s.videoQueue {
+		// Read per packet: the active profile is only known once a source
+		// has been set, which happens long after this goroutine starts.
+		gateOnKeyframe := s.gateKeyframe.Load()
+
 		s.peersLock.RLock()
 		for _, peer := range s.peers {
 			peer.mu.Lock()
@@ -542,7 +570,9 @@ func (s *Sidecar) processVideoRTP() {
 			// isVP8KeyframeStart reads VP8 payload descriptors, so it only
 			// applies when VP8 is the active codec; VP9 has no detector yet
 			// and opens on the first packet, which can show artefacts until
-			// the next keyframe. See docs/fork-changes.md.
+			// the next keyframe. Feeding VP9 payloads to the VP8 parser
+			// would wedge the gate shut and show black. See
+			// docs/fork-changes.md.
 			if active && !started && (!gateOnKeyframe || isVP8KeyframeStart(pkt.Payload)) {
 				peer.Started = true
 				started = true
@@ -875,10 +905,25 @@ func (s *Sidecar) SetAnswer(id, sdp string) error {
 		return nil
 	}
 
-	return peer.PC.SetRemoteDescription(webrtc.SessionDescription{
+	if err := peer.PC.SetRemoteDescription(webrtc.SessionDescription{
 		Type: webrtc.SDPTypeAnswer,
 		SDP:  sdp,
-	})
+	}); err != nil {
+		return err
+	}
+
+	pending := peer.pendingICE
+	peer.pendingICE = nil
+	for _, c := range pending {
+		if err := peer.PC.AddICECandidate(c); err != nil {
+			log.Printf("[API] Peer %s: buffered ICE candidate rejected: %v", id, err)
+		}
+	}
+	if len(pending) > 0 {
+		debugf("[API] Peer %s: flushed %d buffered ICE candidates", id, len(pending))
+	}
+
+	return nil
 }
 
 func (s *Sidecar) AddICECandidate(id string, candidate string, sdpMid string, sdpMLineIndex uint16) error {
@@ -889,11 +934,28 @@ func (s *Sidecar) AddICECandidate(id string, candidate string, sdpMid string, sd
 		return fmt.Errorf("peer %s not found", id)
 	}
 
-	return peer.PC.AddICECandidate(webrtc.ICECandidateInit{
+	cand := webrtc.ICECandidateInit{
 		Candidate:     candidate,
 		SDPMid:        &sdpMid,
 		SDPMLineIndex: &sdpMLineIndex,
-	})
+	}
+
+	peer.mu.Lock()
+	defer peer.mu.Unlock()
+
+	// Buffer rather than fail: the client trickles candidates from the
+	// moment it has the offer, so some legitimately arrive before its
+	// answer reaches us. SetAnswer flushes them.
+	if peer.PC.RemoteDescription() == nil {
+		if len(peer.pendingICE) < maxPendingICE {
+			peer.pendingICE = append(peer.pendingICE, cand)
+		} else {
+			log.Printf("[API] Peer %s: dropping ICE candidate, buffer full", id)
+		}
+		return nil
+	}
+
+	return peer.PC.AddICECandidate(cand)
 }
 
 func (s *Sidecar) ClosePeer(id string) {

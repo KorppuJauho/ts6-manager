@@ -65,6 +65,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Test
+        run: go test ./...
+
   docker:
     name: Build Docker images
     runs-on: ubuntu-latest
