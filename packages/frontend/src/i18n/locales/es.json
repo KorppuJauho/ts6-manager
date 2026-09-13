@@ -6,7 +6,8 @@
     "edit": "Editar",
     "add": "Añadir",
     "loading": "Cargando...",
-    "language": "Idioma"
+    "language": "Idioma",
+    "saving": "Guardando..."
   },
   "nav": {
     "overview": "Resumen",
@@ -91,7 +92,8 @@
       "discord": "Discord",
       "spotify": "Spotify",
       "musicCommands": "Music Bot",
-      "saml": "SSO / SAML"
+      "saml": "SSO / SAML",
+      "streaming": "Transmisión"
     },
     "account": {
       "changePassword": "Cambiar contraseña",
@@ -381,7 +383,9 @@
       "save": "Guardar",
       "saving": "Guardando...",
       "toastSaved": "Ajustes guardados",
-      "toastSaveFailed": "Error al guardar"
+      "toastSaveFailed": "Error al guardar",
+      "botLanguage": "Idioma del bot",
+      "botLanguageHint": "El idioma en el que el bot responde en TeamSpeak. Independiente del idioma de esta interfaz."
     },
     "saml": {
       "enable": "Activar la autenticación SSO (SAML)",
@@ -400,6 +404,35 @@
       "acsUrl": "URL ACS (Assertion Consumer Service)",
       "saved": "Ajustes de SSO guardados",
       "saveError": "Error al guardar la configuración de SSO"
+    },
+    "streaming": {
+      "encodingTitle": "Codificación de vídeo",
+      "encodingDescription": "Cómo codifica el bot el vídeo antes de enviarlo a TeamSpeak. La codificación por hardware la delega en la GPU, lo que libera un núcleo de CPU y permite resoluciones más altas.",
+      "hwAccelEnabled": "Usar codificación por hardware",
+      "hwAccelDevice": "Dispositivo de codificación",
+      "hwAccelDeviceHint": "El nodo de render de la GPU, p. ej. /dev/dri/renderD128. El contenedor sidecar necesita acceso a este dispositivo — ver docker-compose.yml.",
+      "encoderProfile": "Codificador",
+      "encoderProfileHint": "VP9 da mejor calidad por bitrate que VP8, pero cuesta más codificar por software.",
+      "encoderUnavailable": "no disponible en este host",
+      "sidecarUnreachable": "No se pudo contactar con el sidecar, así que se desconoce la disponibilidad de los codificadores. La lista muestra todos los perfiles conocidos.",
+      "hardwareProfileDisabled": "Es un perfil de hardware pero la codificación por hardware está desactivada: las transmisiones irán por software.",
+      "playbackTitle": "Reproducción",
+      "defaultPreset": "Calidad predeterminada",
+      "defaultPresetHint": "Se usa cuando ni el comando ni el bot indican una. Los preajustes altos necesitan más ancho de banda de subida y un codificador más potente.",
+      "streamPublic": "Transmisiones públicas",
+      "streamPublicHint": "Las transmisiones públicas puede verlas cualquiera en el servidor de TeamSpeak. Desactívalo para aplicar las reglas de acceso del servidor.",
+      "iptvTitle": "TV en directo (IPTV)",
+      "iptvDescription": "Permite al bot transmitir canales de TV en directo desde una lista M3U con el comando !tv.",
+      "iptvEnabled": "Activar !tv",
+      "iptvPlaylistUrl": "URL de la lista",
+      "iptvPlaylistUrlHint": "Una lista M3U o M3U8. La descarga el servidor, así que funciona una dirección de la red local.",
+      "iptvChannelFilter": "Mostrar solo estos canales",
+      "iptvChannelFilterHint": "Separados por comas. Un canal se lista si su nombre contiene alguno de estos términos. Déjalo vacío para ofrecerlos todos.",
+      "iptvSort": "Orden de los canales",
+      "iptvSortName": "Alfabético",
+      "iptvSortPlaylist": "Como en la lista",
+      "toastSaved": "Ajustes de transmisión guardados",
+      "toastSaveFailed": "No se pudieron guardar los ajustes de transmisión"
     }
   },
   "channels": {

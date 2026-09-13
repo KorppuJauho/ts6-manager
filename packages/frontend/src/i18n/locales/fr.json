@@ -6,7 +6,8 @@
     "edit": "Modifier",
     "add": "Ajouter",
     "loading": "Chargement...",
-    "language": "Langue"
+    "language": "Langue",
+    "saving": "Enregistrement..."
   },
   "nav": {
     "overview": "Vue d'ensemble",
@@ -91,7 +92,8 @@
       "discord": "Discord",
       "spotify": "Spotify",
       "musicCommands": "Music Bot",
-      "saml": "SSO / SAML"
+      "saml": "SSO / SAML",
+      "streaming": "Diffusion"
     },
     "account": {
       "changePassword": "Changer le mot de passe",
@@ -381,7 +383,9 @@
       "save": "Enregistrer",
       "saving": "Enregistrement...",
       "toastSaved": "Réglages enregistrés",
-      "toastSaveFailed": "Échec de l'enregistrement"
+      "toastSaveFailed": "Échec de l'enregistrement",
+      "botLanguage": "Langue du bot",
+      "botLanguageHint": "La langue dans laquelle le bot répond sur TeamSpeak. Indépendante de la langue de cette interface."
     },
     "saml": {
       "enable": "Activer l'authentification SSO (SAML)",
@@ -400,6 +404,35 @@
       "acsUrl": "URL ACS (Assertion Consumer Service)",
       "saved": "Réglages SSO enregistrés",
       "saveError": "Échec de l'enregistrement des réglages SSO"
+    },
+    "streaming": {
+      "encodingTitle": "Encodage vidéo",
+      "encodingDescription": "Comment le bot encode la vidéo avant de l'envoyer à TeamSpeak. L'encodage matériel décharge ce travail sur le GPU, ce qui libère un cœur CPU et permet des résolutions plus élevées.",
+      "hwAccelEnabled": "Utiliser l'encodage matériel",
+      "hwAccelDevice": "Périphérique d'encodage",
+      "hwAccelDeviceHint": "Le nœud de rendu du GPU, par ex. /dev/dri/renderD128. Le conteneur sidecar doit avoir accès à ce périphérique — voir docker-compose.yml.",
+      "encoderProfile": "Encodeur",
+      "encoderProfileHint": "VP9 offre une meilleure qualité à débit égal que VP8, mais coûte plus cher à encoder en logiciel.",
+      "encoderUnavailable": "indisponible sur cet hôte",
+      "sidecarUnreachable": "Le sidecar est injoignable : la disponibilité des encodeurs est inconnue. La liste montre tous les profils connus.",
+      "hardwareProfileDisabled": "C'est un profil matériel mais l'encodage matériel est désactivé : la diffusion se fera en logiciel.",
+      "playbackTitle": "Lecture",
+      "defaultPreset": "Qualité par défaut",
+      "defaultPresetHint": "Utilisée quand ni la commande ni le bot n'en précise une. Les presets élevés demandent plus de bande passante et un encodeur plus puissant.",
+      "streamPublic": "Diffusions publiques",
+      "streamPublicHint": "Les diffusions publiques sont visibles par tous sur le serveur TeamSpeak. Désactivez pour appliquer les règles d'accès du serveur.",
+      "iptvTitle": "TV en direct (IPTV)",
+      "iptvDescription": "Permet au bot de diffuser des chaînes TV depuis une playlist M3U avec la commande !tv.",
+      "iptvEnabled": "Activer !tv",
+      "iptvPlaylistUrl": "URL de la playlist",
+      "iptvPlaylistUrlHint": "Une playlist M3U ou M3U8. Elle est récupérée par le serveur, donc une adresse du réseau local fonctionne.",
+      "iptvChannelFilter": "Afficher uniquement ces chaînes",
+      "iptvChannelFilterHint": "Séparées par des virgules. Une chaîne est listée si son nom contient l'un de ces termes. Laissez vide pour toutes les proposer.",
+      "iptvSort": "Ordre des chaînes",
+      "iptvSortName": "Alphabétique",
+      "iptvSortPlaylist": "Comme dans la playlist",
+      "toastSaved": "Paramètres de diffusion enregistrés",
+      "toastSaveFailed": "Impossible d'enregistrer les paramètres de diffusion"
     }
   },
   "channels": {

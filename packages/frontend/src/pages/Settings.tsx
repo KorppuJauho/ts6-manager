@@ -7,6 +7,7 @@ import { settingsApi, proxyApi, limitsApi } from '@/api/settings.api';
 import { discordApi, type DiscordSettings } from '@/api/discord.api';
 import { spotifyApi } from '@/api/spotify.api';
 import { musicCommandSettingsApi } from '@/api/music-command-settings.api';
+import { streamSettingsApi, type StreamSettings } from '@/api/stream-settings.api';
 import { samlApi, type SamlSettings } from '@/api/saml.api';
 import { useServerGroups } from '@/hooks/use-groups';
 import { journalApi } from '@/api/journal.api';
@@ -24,7 +25,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
-import { Users, Server, Plus, Trash2, Pencil, TestTube, Check, Lock, KeyRound, Youtube, Upload, FileText, MessagesSquare, Music, Bot, ShieldCheck, Copy } from 'lucide-react';
+import { Users, Server, Plus, Trash2, Pencil, TestTube, Check, Lock, KeyRound, Youtube, Upload, FileText, MessagesSquare, Music, Bot, ShieldCheck, Copy, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { LANGUAGES, setLanguage } from '@/i18n';
@@ -49,6 +50,7 @@ export default function Settings() {
           {isAdmin && <TabsTrigger value="saml"><ShieldCheck className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.saml')}</TabsTrigger>}
           {isAdmin && <TabsTrigger value="spotify"><Music className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.spotify')}</TabsTrigger>}
           {isAdmin && <TabsTrigger value="musicCommands"><Bot className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.musicCommands')}</TabsTrigger>}
+          {isAdmin && <TabsTrigger value="streaming"><Video className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.streaming')}</TabsTrigger>}
         </TabsList>
 
         {isAdmin && (
@@ -88,6 +90,12 @@ export default function Settings() {
         {isAdmin && (
           <TabsContent value="spotify" className="mt-4">
             <SpotifyTab />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="streaming" className="mt-4">
+            <StreamingTab />
           </TabsContent>
         )}
 
@@ -1425,6 +1433,20 @@ function SpotifyTab() {
 
 // ─── Music Bot Commands Tab ──────────────────────────────────
 
+/**
+ * Display names for the languages the *bot* can speak. Separate from the web
+ * UI's LANGUAGES list: the bot has a Finnish catalogue but the interface is
+ * not translated into Finnish, so the two sets are not the same.
+ */
+const BOT_LANGUAGE_LABELS: Record<string, { label: string; country: string }> = {
+  en: { label: 'English', country: 'gb' },
+  fi: { label: 'Suomi', country: 'fi' },
+  fr: { label: 'Français', country: 'fr' },
+  de: { label: 'Deutsch', country: 'de' },
+  es: { label: 'Español', country: 'es' },
+  it: { label: 'Italiano', country: 'it' },
+};
+
 const NO_GROUP = 'none';
 
 function MusicCommandsTab() {
@@ -1437,8 +1459,8 @@ function MusicCommandsTab() {
   const { data: groupsData } = useServerGroups();
   const groups = Array.isArray(groupsData) ? groupsData : [];
 
-  const [form, setForm] = useState<{ musicCommandSgid: string; adminCommandSgid: string; notifyNowPlaying: boolean }>({
-    musicCommandSgid: NO_GROUP, adminCommandSgid: NO_GROUP, notifyNowPlaying: false,
+  const [form, setForm] = useState<{ musicCommandSgid: string; adminCommandSgid: string; notifyNowPlaying: boolean; language: string }>({
+    musicCommandSgid: NO_GROUP, adminCommandSgid: NO_GROUP, notifyNowPlaying: false, language: 'en',
   });
 
   const [seededSettings, setSeededSettings] = useState<typeof settings>(undefined);
@@ -1448,6 +1470,7 @@ function MusicCommandsTab() {
       musicCommandSgid: settings.musicCommandSgid ? String(settings.musicCommandSgid) : NO_GROUP,
       adminCommandSgid: settings.adminCommandSgid ? String(settings.adminCommandSgid) : NO_GROUP,
       notifyNowPlaying: settings.notifyNowPlaying,
+      language: settings.language || 'en',
     });
   }
 
@@ -1456,6 +1479,7 @@ function MusicCommandsTab() {
       musicCommandSgid: form.musicCommandSgid === NO_GROUP ? null : parseInt(form.musicCommandSgid),
       adminCommandSgid: form.adminCommandSgid === NO_GROUP ? null : parseInt(form.adminCommandSgid),
       notifyNowPlaying: form.notifyNowPlaying,
+      language: form.language,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['music-command-settings'] });
@@ -1489,6 +1513,27 @@ function MusicCommandsTab() {
         {groups.length === 0 && (
           <p className="text-[11px] text-amber-500">{t('settings.musicCommands.noServerHint')}</p>
         )}
+
+        <div className="space-y-1.5">
+          <Label className="text-xs">{t('settings.musicCommands.botLanguage')}</Label>
+          <Select value={form.language} onValueChange={(v) => setForm((f) => ({ ...f, language: v }))}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(settings.availableLanguages ?? ['en']).map((code) => {
+                const lang = BOT_LANGUAGE_LABELS[code];
+                return (
+                  <SelectItem key={code} value={code}>
+                    <span className="flex items-center gap-2">
+                      <Flag code={lang?.country} className="h-3 w-4" />
+                      {lang?.label ?? code}
+                    </span>
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          <p className="text-[10px] text-muted-foreground">{t('settings.musicCommands.botLanguageHint')}</p>
+        </div>
 
         <div className="space-y-1.5">
           <Label className="text-xs">{t('settings.musicCommands.musicGroup')}</Label>
@@ -1647,5 +1692,176 @@ function ReverseProxyCard() {
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+function StreamingTab() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { data: settings, isLoading } = useQuery({ queryKey: ['stream-settings'], queryFn: streamSettingsApi.get });
+  const { data: options } = useQuery({ queryKey: ['stream-settings-options'], queryFn: streamSettingsApi.options });
+
+  const [form, setForm] = useState<StreamSettings | null>(null);
+  const [seeded, setSeeded] = useState<StreamSettings | undefined>(undefined);
+  if (settings && settings !== seeded) {
+    setSeeded(settings);
+    setForm(settings);
+  }
+
+  const save = useMutation({
+    mutationFn: () => streamSettingsApi.update(form!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['stream-settings'] });
+      toast.success(t('settings.streaming.toastSaved'));
+    },
+    onError: (err: any) => toast.error(err.response?.data?.error || t('settings.streaming.toastSaveFailed')),
+  });
+
+  if (isLoading || !form) return <PageLoader />;
+
+  const set = <K extends keyof StreamSettings>(key: K, value: StreamSettings[K]) =>
+    setForm((f) => (f ? { ...f, [key]: value } : f));
+
+  const encoders = options?.encoders ?? [];
+  const selectedEncoder = encoders.find((e) => e.key === form.encoderProfile);
+  // A hardware profile is only meaningful while acceleration is on; the
+  // software ones stay selectable either way.
+  const hardwareOff = !form.hwAccelEnabled && !!selectedEncoder?.hwAccel;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">{t('settings.streaming.encodingTitle')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 max-w-xl">
+          <p className="text-[11px] text-muted-foreground">{t('settings.streaming.encodingDescription')}</p>
+
+          <div className="flex items-center gap-2">
+            <Switch checked={form.hwAccelEnabled} onCheckedChange={(v) => set('hwAccelEnabled', v)} />
+            <Label className="text-xs">{t('settings.streaming.hwAccelEnabled')}</Label>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('settings.streaming.hwAccelDevice')}</Label>
+            <Input
+              className="h-8 text-xs font-mono"
+              placeholder="/dev/dri/renderD128"
+              value={form.hwAccelDevice}
+              disabled={!form.hwAccelEnabled}
+              onChange={(e) => set('hwAccelDevice', e.target.value)}
+            />
+            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.hwAccelDeviceHint')}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('settings.streaming.encoderProfile')}</Label>
+            <Select value={form.encoderProfile} onValueChange={(v) => set('encoderProfile', v)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {encoders.map((e) => (
+                  <SelectItem key={e.key} value={e.key} disabled={!e.available}>
+                    {e.label}
+                    {!e.available && ` — ${t('settings.streaming.encoderUnavailable')}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {options && !options.sidecarReachable && (
+              <p className="text-[10px] text-amber-600 dark:text-amber-500">
+                {t('settings.streaming.sidecarUnreachable')}
+              </p>
+            )}
+            {hardwareOff && (
+              <p className="text-[10px] text-amber-600 dark:text-amber-500">
+                {t('settings.streaming.hardwareProfileDisabled')}
+              </p>
+            )}
+            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.encoderProfileHint')}</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">{t('settings.streaming.playbackTitle')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 max-w-xl">
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('settings.streaming.defaultPreset')}</Label>
+            <Select value={form.defaultPreset} onValueChange={(v) => set('defaultPreset', v)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(options?.presets ?? []).map((p) => (
+                  <SelectItem key={p.key} value={p.key}>
+                    {p.label} — {p.width}x{p.height}, {p.bitrate}, {p.framerate} FPS
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.defaultPresetHint')}</p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Switch checked={form.streamPublic} onCheckedChange={(v) => set('streamPublic', v)} />
+            <Label className="text-xs">{t('settings.streaming.streamPublic')}</Label>
+          </div>
+          <p className="text-[10px] text-muted-foreground -mt-2">{t('settings.streaming.streamPublicHint')}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">{t('settings.streaming.iptvTitle')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 max-w-xl">
+          <p className="text-[11px] text-muted-foreground">{t('settings.streaming.iptvDescription')}</p>
+
+          <div className="flex items-center gap-2">
+            <Switch checked={form.iptvEnabled} onCheckedChange={(v) => set('iptvEnabled', v)} />
+            <Label className="text-xs">{t('settings.streaming.iptvEnabled')}</Label>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('settings.streaming.iptvPlaylistUrl')}</Label>
+            <Input
+              className="h-8 text-xs font-mono"
+              placeholder="http://192.168.1.10:9191/output/m3u"
+              value={form.iptvPlaylistUrl}
+              disabled={!form.iptvEnabled}
+              onChange={(e) => set('iptvPlaylistUrl', e.target.value)}
+            />
+            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.iptvPlaylistUrlHint')}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('settings.streaming.iptvChannelFilter')}</Label>
+            <Input
+              className="h-8 text-xs"
+              placeholder="yle tv1, yle tv2, mtv 3"
+              value={form.iptvChannelFilter}
+              disabled={!form.iptvEnabled}
+              onChange={(e) => set('iptvChannelFilter', e.target.value)}
+            />
+            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.iptvChannelFilterHint')}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('settings.streaming.iptvSort')}</Label>
+            <Select value={form.iptvSort} onValueChange={(v) => set('iptvSort', v)} disabled={!form.iptvEnabled}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">{t('settings.streaming.iptvSortName')}</SelectItem>
+                <SelectItem value="playlist">{t('settings.streaming.iptvSortPlaylist')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Button size="sm" className="h-8 text-xs" onClick={() => save.mutate()} disabled={save.isPending}>
+        {save.isPending ? t('common.saving') : t('common.save')}
+      </Button>
+    </div>
   );
 }
