@@ -8,6 +8,7 @@ import type { ConnectionPool } from '../ts-client/connection-pool.js';
 import type { WebQueryClient } from '../ts-client/webquery-client.js';
 import { requiredSgid, parseServerGroupIds, type MusicCommandAccessSettings } from './music-command-access.js';
 import { fetchLyrics, chunkLyrics, lyricsInputFromTrack } from './lyrics.js';
+import { loadTvChannels, matchChannel, tvPlaylistUrl, type TvChannelMap } from './iptv.js';
 
 const CMD_PREFIX = '!';
 
@@ -42,7 +43,7 @@ type ReplyFn = (msg: string) => void;
 const MUSIC_COMMANDS = new Set([
   'radio', 'play', 'spotify', 'stop', 'pause', 'skip', 'next', 'prev',
   'vol', 'volume', 'np', 'nowplaying', 'queue', 'add',
-  'stream', 'stopstream', 'viewers',
+  'stream', 'tv', 'stopstream', 'viewers',
   'lyrics',
   'move', 'moveall', 'channels', 'notif',
   'help', 'info',
@@ -72,6 +73,9 @@ export class MusicCommandHandler {
   private nowPlayingListeners = new Map<number, { bot: VoiceBot; listener: (item: QueueItem) => void }>();
 
   private playlistImporter: import('./playlist-import.js').PlaylistImporter | null = null;
+
+  /** Parsed IPTV playlist, loaded on first !tv and kept until `!tv reload`. */
+  private tvChannels: TvChannelMap | null = null;
 
   constructor(
     private prisma: PrismaClient,
@@ -189,6 +193,9 @@ export class MusicCommandHandler {
           break;
         case 'stream':
           await this.handleStream(bot, reply, args);
+          break;
+        case 'tv':
+          await this.handleTv(bot, reply, args);
           break;
         case 'stopstream':
           await this.handleStopStream(bot, reply);
@@ -1023,6 +1030,7 @@ export class MusicCommandHandler {
       '  !info                Details of the current track (artist, title, direct link)',
       '  !lyrics [search]     Lyrics for the current track, or for a search',
       '  !stream <url> [qual] Stream a video (presets: 480p, 720p, 1080p)',
+      '  !tv [channel]        List IPTV channels, or start one (!tv reload refetches)',
       '  !stopstream          Stop the video stream',
       '  !viewers             List the video stream viewers',
       '  !channels            List channels and their IDs',
@@ -1067,6 +1075,64 @@ export class MusicCommandHandler {
       reply(`Video stream started: ${url}`);
     } catch (err: any) {
       reply(`Failed to start stream: ${err.message}`);
+    }
+  }
+
+  /**
+   * !tv — start a live TV channel from the configured M3U playlist.
+   *
+   * The parsed list is cached for the process: playlists are large and change
+   * rarely. `!tv reload` refetches it after the operator edits the playlist.
+   */
+  private async handleTv(bot: VoiceBot, reply: ReplyFn, args: string): Promise<void> {
+    if (!tvPlaylistUrl()) {
+      reply('No IPTV playlist is configured.');
+      return;
+    }
+
+    const query = args.trim().toLowerCase();
+
+    if (query === 'reload') {
+      this.tvChannels = null;
+    }
+
+    if (!this.tvChannels) {
+      try {
+        this.tvChannels = await loadTvChannels();
+      } catch (err: any) {
+        reply(`Could not load TV channels: ${err.message}`);
+        return;
+      }
+    }
+
+    if (this.tvChannels.size === 0) {
+      reply('The IPTV playlist has no channels matching the configured filter.');
+      return;
+    }
+
+    if (query === 'reload') {
+      reply(`TV channels reloaded: ${this.tvChannels.size} available.`);
+      return;
+    }
+
+    if (!query) {
+      const names = Array.from(this.tvChannels.keys()).sort();
+      reply(`Available channels (${names.length}):\n${names.join(', ')}\n\nUsage: !tv <channel>`);
+      return;
+    }
+
+    const match = matchChannel(this.tvChannels, query);
+    if (!match) {
+      reply(`No TV channel matches "${query}". Use !tv to list them.`);
+      return;
+    }
+
+    const url = this.tvChannels.get(match)!;
+    reply(`Starting live TV: ${match}`);
+    try {
+      await bot.startVideoStream(url);
+    } catch (err: any) {
+      reply(`Could not start the TV stream: ${err.message}`);
     }
   }
 
