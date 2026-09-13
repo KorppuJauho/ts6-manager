@@ -1,0 +1,22 @@
+# GPU passthrough for the test stack, as an override:
+#
+#   docker compose -p ts6-test \
+#     -f docker-compose.test.yml -f docker-compose.test.gpu.yml up -d --build
+#
+# Only on a real Linux host with a working render node. Under WSL2 this does
+# nothing useful — the device there is a D3D12 shim, not an i915 device — and
+# only produces confusing errors.
+#
+# Sharing the render node with a production sidecar on the same host is fine
+# for decode, but hardware *encode* is a limited fixed-function resource: two
+# concurrent streams will contend. Test while production is not streaming.
+#
+# RENDER_GID must be the group owning the node on this host:
+#   stat -c '%g' /dev/dri/renderD128
+
+services:
+  sidecar:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:?set RENDER_GID in .env - stat -c '%g' /dev/dri/renderD128}"

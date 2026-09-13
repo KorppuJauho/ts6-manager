@@ -80,6 +80,12 @@ detector.**
 Deployment depends on `/dev/dri` passthrough *and* group membership for the
 unprivileged `sidecar` user — see the comments in `docker-compose.yml`.
 
+Known-good reference: a UGREEN NASync DXP4800 Plus running this fork in
+production since 2026-08, with `devices: /dev/dri:/dev/dri` and
+`group_add: "105"` (the `render` group on that host — check yours with
+`stat -c '%g' /dev/dri/renderD128`, it is not the same number everywhere).
+VP9 hardware encoding works there for both IPTV and YouTube sources.
+
 ### A/V pacing removed
 
 | | |
@@ -243,27 +249,29 @@ resolved with version bumps and overrides rather than added to
 
 ## Open follow-ups
 
-1. **Verify hardware encoding and IPTV on real hardware.** Neither has been
-   exercised end to end: CI runners have no GPU, so everything above is
-   verified by type checks, unit tests and image builds only. The settings
-   path changed how the encoder is chosen, so this is the most likely place
-   for a first-deploy surprise.
+1. **Confirm the refactored encoder path still drives the GPU.** The hardware
+   question is settled: VP9 VAAPI encoding has run in production on a UGREEN
+   NASync DXP4800 Plus since 2026-08, with `devices: /dev/dri:/dev/dri` and
+   `group_add: "105"`, streaming both IPTV and YouTube. The GPU is capable and
+   the passthrough config is known good.
 
-   What to check, in order:
+   What is *not* confirmed is the path this fork now takes to reach it. The
+   deployed version hardcoded `vp9_vaapi`; `main` selects it through the
+   encoder registry, the `/capabilities` probe and the `POST /source` body.
+   Same destination, different plumbing — so a failure after upgrading is a
+   code regression against a known-good reference, not a hardware unknown.
 
-   - The sidecar logs the encoder it resolved on every stream start:
-     `[FFmpeg] Starting: source=… encoder=vp9_vaapi`. If it says a software
-     encoder while hardware encoding is enabled in the UI, the profile was
-     unavailable and it fell back — the reason is logged just above as
-     `encoder "…" unavailable, falling back to …`.
-   - `GET /capabilities` on the sidecar lists what its FFmpeg can run. An
-     empty or software-only list means the image lacks the VAAPI drivers.
-   - `No VA display found` at stream start means `/dev/dri` is not passed
-     through, or the unprivileged `sidecar` user is not in the group owning
-     the render node. `stat -c '%g' /dev/dri/renderD128` on the host gives the
-     GID to set as `RENDER_GID`.
-   - `!tv` reporting no playlist means the toggle is off or the URL is empty
-     in Settings → Streaming; a fetch error names the HTTP status.
+   **Upgrading from the pre-settings version silently disables hardware
+   encoding.** `StreamSettings` defaults to `hwAccelEnabled: false` and
+   `vp8_software` — correct for a fresh install on a host with no GPU, wrong
+   for a deployment that was already using the GPU. After deploying, set
+   hardware encoding on, the device to `/dev/dri/renderD128`, and the encoder
+   to VP9 (VAAPI) in Settings → Streaming, or streams quietly fall back to
+   software.
+
+   Verify with the sidecar log on the first stream: `[FFmpeg] Starting: …
+   encoder=vp9_vaapi`. Anything else means the fallback fired, and the line
+   above it says why.
 
 2. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8
    streams gate correctly again.)

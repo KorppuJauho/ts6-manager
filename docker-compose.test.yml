@@ -1,0 +1,104 @@
+# Full local test stack: a TeamSpeak server plus the manager, built from this
+# working tree. Use this before deploying, to catch the Dockerfile and compose
+# problems the native `pnpm dev` loop hides.
+#
+#   docker compose -f docker-compose.test.yml up -d --build
+#   # UI on http://localhost:3000
+#
+# For a fast edit-reload loop instead, run docker-compose.tsserver.yml and
+# `pnpm dev`. See docs/local-testing.md.
+#
+# Every published port is shifted off the production numbers so this can run
+# alongside a real deployment on the same host without colliding: TeamSpeak
+# ports +1, manager ports +10. Container names are prefixed too, since the
+# production compose pins container_name and Docker refuses duplicates.
+#
+# No GPU is passed through here — pointless under WSL2, where the render node
+# is a D3D12 shim. On a real Linux host add the override:
+#   docker compose -f docker-compose.test.yml -f docker-compose.test.gpu.yml up -d
+#
+# Run it under its own project name so `down -v` can never reach production
+# volumes:
+#   docker compose -p ts6-test -f docker-compose.test.yml up -d --build
+
+services:
+  teamspeak:
+    image: "${TS_SERVER_IMAGE:?set TS_SERVER_IMAGE in .env - see docs/local-testing.md}"
+    container_name: ts6-test-server
+    restart: unless-stopped
+    environment:
+      - TS3SERVER_LICENSE=accept
+    ports:
+      - "${TEST_TS_VOICE_PORT:-9988}:9987/udp"
+      - "${TEST_TS_WEBQUERY_PORT:-10081}:10080"
+      - "${TEST_TS_SSH_PORT:-10023}:10022"
+      - "${TEST_TS_FILE_PORT:-30034}:30033"
+    networks:
+      - ts6-test
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: ts6-test-backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=file:/app/packages/backend/data/ts6webui.db
+      - "JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env - generate with openssl rand -hex 32}"
+      - "ENCRYPTION_KEY=${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env, different from JWT_SECRET}"
+      # Must match the port the browser actually uses, or CORS rejects the UI.
+      - FRONTEND_URL=${TEST_FRONTEND_URL:-http://localhost:3010}
+      - MUSIC_DIR=/data/music
+      - SIDECAR_URL=http://ts6-test-sidecar:9800
+      - "SIDECAR_TOKEN=${SIDECAR_TOKEN:?set SIDECAR_TOKEN in .env - generate with openssl rand -hex 32}"
+    volumes:
+      - test-backend-data:/app/packages/backend/data
+      - test-music-data:/data/music
+    ports:
+      - "${TEST_BACKEND_PORT:-3011}:3001"
+    depends_on:
+      - sidecar
+      - teamspeak
+    networks:
+      - ts6-test
+
+  sidecar:
+    build:
+      context: .
+      dockerfile: Dockerfile.sidecar
+    container_name: ts6-test-sidecar
+    restart: unless-stopped
+    environment:
+      - SIDECAR_PORT=9800
+      - SIDECAR_LISTEN_ADDR=0.0.0.0
+      - "SIDECAR_TOKEN=${SIDECAR_TOKEN:?set SIDECAR_TOKEN in .env - generate with openssl rand -hex 32}"
+    # No `devices: /dev/dri` here on purpose. Under WSL2 the render node is a
+    # D3D12 shim rather than a real i915 device, so VAAPI cannot use it and
+    # passing it through only produces confusing errors. Streams run on the
+    # software encoder, which is what this rig is for. To test the hardware
+    # path, deploy to a real Linux host and use docker-compose.yml.
+    networks:
+      - ts6-test
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: ts6-test-frontend
+    restart: unless-stopped
+    ports:
+      - "${TEST_FRONTEND_PORT:-3010}:8080"
+    depends_on:
+      - backend
+    networks:
+      - ts6-test
+
+volumes:
+  test-backend-data:
+  test-music-data:
+
+networks:
+  ts6-test:
+    driver: bridge

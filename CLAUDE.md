@@ -23,6 +23,11 @@ pnpm build                   # all packages
 cd packages/sidecar && go build ./... && go vet ./...
 ```
 
+A local TeamSpeak server to test against, and what a local rig can and cannot
+verify (VAAPI cannot be tested under WSL2): `docs/local-testing.md`.
+Moving a deployment onto a git checkout, and the settings that need
+re-enabling after upgrading from a pre-settings version: `docs/deploying.md`.
+
 **`@ts6/common` must be built before typechecking.** Skipping it produces a
 cascade of `Cannot find module '@ts6/common'` errors that look like broken
 imports but are just a missing build.
