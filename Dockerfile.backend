@@ -60,24 +60,37 @@ FROM base AS production
 ENV NODE_ENV=production
 WORKDIR /app
 
+# Application code is owned by `node`, the user that runs it. COPY preserves
+# the modes a file had in the build context, and a clone made under a
+# restrictive umask (0077) arrives here mode 0600 root-owned — unreadable to
+# `node`, which fails at container start with
+# `EACCES: permission denied, open '/app/packages/backend/package.json'`.
+# Owning the files makes those modes grant access instead of denying it, so a
+# checkout's umask stops being part of the deployment contract. `chmod -R a+rX`
+# on the host is the same fix applied to the wrong side of the build.
+#
+# node_modules stays root-owned and world-readable on purpose: it is installed
+# in-container (excluded from the context by .dockerignore), so it never
+# carries host modes, and leaving it unwritable by the app denies the easiest
+# place to persist code after a compromise.
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
-COPY --from=build /app/packages/common/dist ./packages/common/dist
-COPY --from=build /app/packages/common/package.json ./packages/common/package.json
-COPY --from=build /app/packages/backend/dist ./packages/backend/dist
-COPY --from=build /app/packages/backend/generated ./packages/backend/generated
-COPY --from=build /app/packages/backend/prisma ./packages/backend/prisma
-COPY --from=build /app/packages/backend/prisma.config.ts ./packages/backend/prisma.config.ts
-COPY --from=build /app/packages/backend/package.json ./packages/backend/package.json
+COPY --from=build --chown=node:node /app/package.json ./package.json
+COPY --from=build --chown=node:node /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=build --chown=node:node /app/packages/common/dist ./packages/common/dist
+COPY --from=build --chown=node:node /app/packages/common/package.json ./packages/common/package.json
+COPY --from=build --chown=node:node /app/packages/backend/dist ./packages/backend/dist
+COPY --from=build --chown=node:node /app/packages/backend/generated ./packages/backend/generated
+COPY --from=build --chown=node:node /app/packages/backend/prisma ./packages/backend/prisma
+COPY --from=build --chown=node:node /app/packages/backend/prisma.config.ts ./packages/backend/prisma.config.ts
+COPY --from=build --chown=node:node /app/packages/backend/package.json ./packages/backend/package.json
 COPY --from=build /app/packages/backend/node_modules ./packages/backend/node_modules
 
 WORKDIR /app/packages/backend
 # Run as the unprivileged 'node' user shipped with the base image.
-# Only chown the paths node actually writes to (SQLite data, music, yt-dlp
-# config + venv). The app code / node_modules stay root-owned but are
-# world-readable, so node reads them fine — chowning all of /app recursively
-# (tens of thousands of node_modules files) was the slow build step.
+# Only chown the paths node writes to at runtime (SQLite data, music, yt-dlp
+# config + venv); the code it merely reads is chowned by COPY above.
+# `RUN chown -R` over all of /app (tens of thousands of node_modules files)
+# was the slow build step and is what this avoids.
 RUN mkdir -p data /data/music /home/node/.config/yt-dlp && \
     echo "--js-runtimes node" > /home/node/.config/yt-dlp/config && \
     chown -R node:node data /data/music /home/node/.config /opt/yt-dlp

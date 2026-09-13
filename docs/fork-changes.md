@@ -326,6 +326,19 @@ than in CI:
   upstream behaviour, not a fork regression: connections still formed via the
   later candidates, which is why it read as log noise rather than a fault.
 
+- **A restrictive umask on the checkout broke the backend container.**
+  `Dockerfile.backend` copies the workspace manifests and `prisma/` from the
+  build context, and COPY preserves their modes. A clone made under umask 0077
+  arrives mode 0600 root-owned, and the production stage runs as `node`, so
+  container start died with `EACCES: permission denied, open
+  '/app/packages/backend/package.json'`. `chmod -R a+rX` on the host cleared
+  it, but that made the deployment depend on the umask of whoever cloned the
+  repository. The application code is now copied `--chown=node:node`, so those
+  modes grant access to the user that runs it rather than denying it.
+  `node_modules` stays root-owned: it is installed in-container and never
+  carries host modes, and keeping it unwritable by the app denies the easiest
+  place to persist code after a compromise.
+
 ## Open follow-ups
 
 1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
