@@ -77,6 +77,16 @@ VP9 stream opens the gate on the first packet and a viewer joining mid-frame
 may see artefacts until the next keyframe. **Follow-up: write a VP9 keyframe
 detector.**
 
+Which codec gates is read from `s.gateKeyframe` **per packet**, not latched
+when the forwarding goroutine starts. This is not a style preference: the
+goroutines start with the process, before any source has chosen a codec, so a
+latched value is always the default profile's — VP8's. The first version of
+this fix latched it, and every VP9 payload was then handed to the VP8
+descriptor parser. Those bytes can never satisfy it (a VP9 frame start sets
+bit 0x08, so the VP8 partition index is never zero), the gate never opened,
+and the stream was black while FFmpeg, ICE and the SSRCs all looked healthy.
+`main_test.go` covers both halves.
+
 Deployment depends on `/dev/dri` passthrough *and* group membership for the
 unprivileged `sidecar` user — see the comments in `docker-compose.yml`.
 
@@ -298,6 +308,37 @@ than in CI:
   failure. 2160p asked for 18000k. It is now 9500k, and `clampBitrate` holds
   any caller-supplied value under the ceiling.
 
+### Second deploy: black video, and the ICE candidates nobody kept
+
+- **VP9 streamed black.** The keyframe gate was choosing its parser once, at
+  goroutine start, when the active profile was still the VP8 default. See
+  "Hardware video encoding" above for why that wedges the gate shut and why
+  the check now happens per packet.
+
+- **Candidates arriving before the answer were rejected, not held.** The
+  browser trickles ICE candidates as soon as it has the offer, which is before
+  its answer has made the round trip back to the sidecar. Pion rejects
+  `AddICECandidate` until the remote description is set, so those candidates —
+  usually the host candidates, the ones most likely to give a direct path —
+  were answered with `500 InvalidStateError: remote description is not set`
+  and dropped. They are now buffered on the peer (capped, so a peer that never
+  answers cannot grow it without bound) and flushed by `SetAnswer`. This is
+  upstream behaviour, not a fork regression: connections still formed via the
+  later candidates, which is why it read as log noise rather than a fault.
+
+- **A restrictive umask on the checkout broke the backend container.**
+  `Dockerfile.backend` copies the workspace manifests and `prisma/` from the
+  build context, and COPY preserves their modes. A clone made under umask 0077
+  arrives mode 0600 root-owned, and the production stage runs as `node`, so
+  container start died with `EACCES: permission denied, open
+  '/app/packages/backend/package.json'`. `chmod -R a+rX` on the host cleared
+  it, but that made the deployment depend on the umask of whoever cloned the
+  repository. The application code is now copied `--chown=node:node`, so those
+  modes grant access to the user that runs it rather than denying it.
+  `node_modules` stays root-owned: it is installed in-container and never
+  carries host modes, and keeping it unwritable by the app denies the easiest
+  place to persist code after a compromise.
+
 ## Open follow-ups
 
 1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
@@ -325,7 +366,10 @@ than in CI:
    above it says why.
 
 2. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8
-   streams gate correctly again.)
+   streams gate correctly again.) Note that FFmpeg's VP9 RTP packetizer is not
+   known to set the descriptor's P bit, so "P clear means keyframe" needs
+   checking against a real capture before it can be relied on; gating on the B
+   bit alone would at least align the gate to a frame start.
 3. Confirm whether removing A/V pacing causes audio drift on long streams.
 4. H.264 profiles. The registry has no entry: the RTP handling and keyframe
    detection in `main.go` are VP8/VP9 shaped, and a profile that negotiates
