@@ -6,6 +6,40 @@ Started at the 2026-08-06 security review; earlier history is in the git log.
 
 ## [Unreleased]
 
+### Fork
+
+Imports the changes this fork had been carrying outside version control, each
+as its own reviewable commit. `docs/fork-changes.md` is the register: every
+divergence from upstream, why it exists, and what to preserve when merging
+upstream back in.
+
+- **Hardware video encoding.** VP9 on Intel VAAPI replaces software VP8. The
+  codec has to match in three places (SDP registration, the local track, and
+  FFmpeg's payload type) or the stream negotiates one format and carries
+  another. Needs `/dev/dri` passed through to the sidecar container *and*
+  group membership for its unprivileged user — see `docker-compose.yml`.
+- **DASH source pairs.** yt-dlp is asked for `bestvideo+bestaudio` rather than
+  a progressive format, which YouTube caps at 720p, so the 1080p preset is
+  reachable. The two URLs reach the sidecar as one `|||`-joined string;
+  `validSource` validates each segment, since it was hardened upstream to stop
+  a source smuggling an FFmpeg flag and the split happens after that check.
+- **Live TV.** `!tv` lists and starts channels from an M3U playlist, matching
+  names loosely so `!tv mtv3` finds `MTV 3`. Playlist URL and channel filter
+  come from `IPTV_M3U_URL` / `IPTV_CHANNEL_FILTER`.
+- **Streaming defaults.** 1080p, at 5500k rather than 4500k.
+- **Idle auto-stop.** A stream nobody is watching stops itself after five
+  minutes instead of holding a GPU encode session open.
+- **Streams are created public**, overriding the caller's accessibility.
+- **The bot speaks English** in TeamSpeak; upstream's replies were half French.
+- Radio stations list in insertion order, so `!radio <id>` ids stay stable.
+
+Carried knowingly, and recorded in `docs/fork-changes.md` rather than fixed
+here: the VP8 keyframe gate is disabled (it cannot parse VP9, so a viewer
+joining mid-frame may see artefacts), A/V pacing was removed during the VP9
+port for reasons the author does not recall, and the per-bot `streamPreset`
+column is written by the UI but ignored at stream time.
+
+
 ### Security
 
 Full security review of the codebase. Twelve issues, three of them high severity.
