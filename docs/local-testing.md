@@ -17,7 +17,12 @@ selected falls back to the software encoder and logs why.
 
 That fallback working *is* worth verifying — it is the path that protects a
 misconfigured production host. But confirming that VAAPI itself encodes needs
-real Linux on real hardware. Deploy to the actual server for that.
+real Linux on real hardware.
+
+This is not an open question about the *hardware*: VP9 VAAPI encoding has run
+in production on an Intel-based NAS since 2026-08 (see `docs/fork-changes.md`).
+What a real-Linux run confirms is that the settings-driven encoder path still
+reaches the GPU the way the earlier hardcoded version did.
 
 Everything else this project does can be exercised locally: the settings UI
 and its persistence, software VP8/VP9 streaming end to end, the DASH
