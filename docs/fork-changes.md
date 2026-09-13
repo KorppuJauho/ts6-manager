@@ -257,6 +257,42 @@ so nothing had reported it. Every one had a published fix, so they were
 resolved with version bumps and overrides rather than added to
 `auditConfig.ignoreGhsas`.
 
+A later sweep cleared the advisories *below* that gate — CI only fails at
+`high`, so eleven low and moderate findings had accumulated unreported. Nine
+were fixable inside the majors already in use:
+
+| Advisory | Reached via | Fix |
+|---|---|---|
+| undici ×3 (response desync, CRLF injection, cookie injection) | `discord.js` | override `^6.27.0` → `^6.28.0` |
+| qs ×2 (array-limit bypass, DoS via attacker-controlled `isBuffer`) | `express` | new override `^6.16.0` |
+| body-parser (size enforcement silently disabled) | `express` | new override `^1.20.6` |
+| vitest / @vitest/mocker (path traversal) | direct dev dependency | `^4.1.8` → `^4.1.11` |
+| react-router-dom (open redirect → XSS) | direct dependency | `^6.30.4` → `^6.30.6` |
+
+The undici one is worth remembering: the override pinning it at `^6.27.0` —
+added by the earlier sweep — was itself what held it one patch below the fix.
+An override is a floor *and* a ceiling on attention; it does not age out.
+
+`qs` and `body-parser` need overrides because they arrive through `express`,
+and 4.22.2 is the last of the v4 line — there is no express release carrying
+the fixes.
+
+**Two remain, both `react-router`, both fixed only in >=7.18.0.** Neither is
+reachable here, which is why the v7 major has not been forced:
+
+- `deserializeErrors()` constructor injection (CVE-2026-53666) is an SSR
+  hydration path. There is no SSR — no `renderToString`, `hydrateRoot` or
+  `StaticRouter` anywhere; the frontend is a Vite SPA served by nginx.
+- The `<Link>`/`useNavigate` backslash open redirect (CVE-2026-53669) needs an
+  attacker-controlled target. There are no dynamic `<Link to={…}>`, and every
+  `navigate()` call takes a literal path except `Login.tsx`'s
+  `navigate(location.pathname, { replace: true })`, which returns to the path
+  already open.
+
+React Router 7 peers `react >=18`, so that upgrade does not drag React 19 in
+with it — it is a routing-API migration on its own, not part of the React 19
+cluster.
+
 ### Field fixes from the first production deploy
 
 Four defects the refactor introduced or exposed, found on a real host rather
