@@ -243,9 +243,31 @@ resolved with version bumps and overrides rather than added to
 
 ## Open follow-ups
 
-1. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8
+1. **Verify hardware encoding and IPTV on real hardware.** Neither has been
+   exercised end to end: CI runners have no GPU, so everything above is
+   verified by type checks, unit tests and image builds only. The settings
+   path changed how the encoder is chosen, so this is the most likely place
+   for a first-deploy surprise.
+
+   What to check, in order:
+
+   - The sidecar logs the encoder it resolved on every stream start:
+     `[FFmpeg] Starting: source=… encoder=vp9_vaapi`. If it says a software
+     encoder while hardware encoding is enabled in the UI, the profile was
+     unavailable and it fell back — the reason is logged just above as
+     `encoder "…" unavailable, falling back to …`.
+   - `GET /capabilities` on the sidecar lists what its FFmpeg can run. An
+     empty or software-only list means the image lacks the VAAPI drivers.
+   - `No VA display found` at stream start means `/dev/dri` is not passed
+     through, or the unprivileged `sidecar` user is not in the group owning
+     the render node. `stat -c '%g' /dev/dri/renderD128` on the host gives the
+     GID to set as `RENDER_GID`.
+   - `!tv` reporting no playlist means the toggle is off or the URL is empty
+     in Settings → Streaming; a fetch error names the HTTP status.
+
+2. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8
    streams gate correctly again.)
-2. Confirm whether removing A/V pacing causes audio drift on long streams.
-3. H.264 profiles. The registry has no entry: the RTP handling and keyframe
+3. Confirm whether removing A/V pacing causes audio drift on long streams.
+4. H.264 profiles. The registry has no entry: the RTP handling and keyframe
    detection in `main.go` are VP8/VP9 shaped, and a profile that negotiates
    but never renders would be worse than its absence.
