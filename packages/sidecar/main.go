@@ -660,12 +660,17 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 	profile := s.activeProfile()
 
 	m := &webrtc.MediaEngine{}
+	// The fmtp line is part of the codec's identity for H.264, so it has to be
+	// on both the negotiated codec and the local track — a track whose
+	// capability does not match the registered codec is not bound to it.
+	videoCodec := webrtc.RTPCodecCapability{
+		MimeType:    profile.MimeType,
+		ClockRate:   90000,
+		SDPFmtpLine: profile.SDPFmtpLine,
+	}
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:  profile.MimeType,
-			ClockRate: 90000,
-		},
-		PayloadType: webrtc.PayloadType(profile.PayloadType),
+		RTPCodecCapability: videoCodec,
+		PayloadType:        webrtc.PayloadType(profile.PayloadType),
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return "", err
 	}
@@ -699,10 +704,7 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 		return "", fmt.Errorf("create PeerConnection: %w", err)
 	}
 
-	videoTrack, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{MimeType: profile.MimeType, ClockRate: 90000},
-		"video", "ts6-stream",
-	)
+	videoTrack, err := webrtc.NewTrackLocalStaticRTP(videoCodec, "video", "ts6-stream")
 	if err != nil {
 		pc.Close()
 		return "", err

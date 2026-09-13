@@ -381,6 +381,48 @@ than in CI:
   without saying what of. Ending a video stream restores the queue track's
   nickname if one is playing, rather than wiping it.
 
+### H.264
+
+H.264 was tried in the pre-fork version, produced a black screen, and was
+replaced with VP9. It is now in the registry, and the two things that make it
+work are the two that were missing.
+
+**In-band parameter sets.** FFmpeg gives SPS/PPS to the muxer as extradata.
+When FFmpeg also writes the SDP, they come out as `sprop-parameter-sets`; here
+pion writes the SDP and never sees that extradata, so unless the parameter sets
+are *also* in the bitstream the decoder has nothing to configure itself from.
+It renders nothing while FFmpeg, ICE and the RTP counters all look healthy —
+the same silent black screen the stale keyframe gate produced, from a
+completely different cause. `-bsf:v dump_extra=freq=keyframe` puts them ahead
+of every keyframe. The filter compares before prepending, so it is harmless
+where they are already present.
+
+**Constrained Baseline, and saying so.** TeamSpeak decodes with Cisco's
+OpenH264, which implements Constrained Baseline. Main and High negotiate
+cleanly and then fail to decode. So both profiles encode Constrained Baseline
+with B-frames off, and the offer advertises
+`profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1`.
+
+That fmtp line is a third thing the codec sites must agree on, alongside the
+mime type and the payload type: it is carried on `RegisterCodec` *and* on the
+local track's capability, because a track whose capability does not match the
+registered codec is not bound to it.
+
+The advertised level stays at 3.1 even for 1080p. Every H.264 WebRTC
+implementation offers 42e01f, decoders in practice accept a higher resolution
+than the level advertises, and a level nobody else offers is likelier to fail
+negotiation than to be honoured.
+
+`h264_vaapi` asks the driver for `constrained_baseline`. A GPU that exposes no
+such encode entrypoint fails the probe and falls back to `libx264` — the right
+outcome, since Main or High would encode and not decode. Expect that fallback
+to be common.
+
+**Unverified against a TeamSpeak client.** The reasoning above is why the
+previous attempt failed; whether these two changes are *sufficient* has not
+been observed, only argued. `packages/sidecar/encoders_test.go` pins the
+registry invariants, not the wire behaviour.
+
 ## Open follow-ups
 
 1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
@@ -413,6 +455,7 @@ than in CI:
    checking against a real capture before it can be relied on; gating on the B
    bit alone would at least align the gate to a frame start.
 3. Confirm whether removing A/V pacing causes audio drift on long streams.
-4. H.264 profiles. The registry has no entry: the RTP handling and keyframe
-   detection in `main.go` are VP8/VP9 shaped, and a profile that negotiates
-   but never renders would be worse than its absence.
+4. An H.264 parameter-set detector, so a peer joining mid-stream is held until
+   an SPS rather than opening on the first packet. The same gap VP9 has; less
+   pressing than it looks, because the PLI interceptor asks for a keyframe and
+   the parameter sets are repeated at every one.

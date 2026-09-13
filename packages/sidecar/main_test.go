@@ -33,6 +33,11 @@ func TestNeedsKeyframeGate(t *testing.T) {
 		{"vp8_vaapi", true},
 		{"vp9_software", false},
 		{"vp9_vaapi", false},
+		// H.264 has no parameter-set detector here either, so it opens on the
+		// first packet and relies on the PLI interceptor plus the in-band
+		// SPS/PPS repeated at every keyframe.
+		{"h264_software", false},
+		{"h264_vaapi", false},
 	} {
 		p, ok := profileByKey(tc.key)
 		if !ok {

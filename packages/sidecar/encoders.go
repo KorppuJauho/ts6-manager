@@ -27,6 +27,13 @@ type EncoderProfile struct {
 	MimeType    string `json:"mimeType"`
 	PayloadType uint8  `json:"payloadType"`
 
+	// SDPFmtpLine is the codec's "a=fmtp" parameters. Empty for VP8 and VP9,
+	// which negotiate on the codec name alone. H.264 does not: the profile and
+	// packetization mode are part of what the peer agrees to, and an offer
+	// without them is one the peer can read as a different codec than the one
+	// being sent.
+	SDPFmtpLine string `json:"sdpFmtpLine,omitempty"`
+
 	// HWAccel is "" for software encoding, otherwise the FFmpeg hwaccel name
 	// ("vaapi"). A profile with a backend needs a device path.
 	HWAccel string `json:"hwAccel"`
@@ -45,13 +52,36 @@ type EncoderProfile struct {
 // NeedsDevice reports whether this profile has to be given a DRM render node.
 func (p EncoderProfile) NeedsDevice() bool { return p.HWAccel != "" }
 
-// encoderProfiles is the registry. Order is the order the UI lists them in.
+// h264FmtpLine is what the peer has to agree to for H.264.
 //
-// Only VP8 and VP9 are listed as usable. H.264 is deliberately absent rather
-// than present-and-broken: the RTP depacketiser and the keyframe detection in
-// main.go are VP8/VP9 shaped, and offering an H.264 profile that negotiates
-// but never renders would be worse than not offering it. See
-// docs/fork-changes.md.
+// profile-level-id 42e01f is Constrained Baseline, level 3.1 — the one profile
+// Cisco's OpenH264, which is what TeamSpeak decodes with, actually implements.
+// Offering Main or High negotiates cleanly and then fails to decode, which
+// presents as a black stream rather than as an error.
+//
+// The level is advertised as 3.1 and not raised for 1080p on purpose: every
+// H.264 WebRTC implementation offers 42e01f, decoders in practice accept a
+// higher resolution than the advertised level, and a level nobody else offers
+// is likelier to fail negotiation than to be enforced.
+//
+// packetization-mode=1 is what FFmpeg's RTP muxer emits (STAP-A and FU-A).
+const h264FmtpLine = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
+
+// h264InBandParameterSets re-inserts SPS/PPS ahead of every keyframe.
+//
+// This is the difference between H.264 working and H.264 being a black
+// screen. FFmpeg hands the parameter sets to the muxer as extradata, where an
+// SDP the muxer generates itself would carry them as sprop-parameter-sets. We
+// build the SDP in pion instead and never see that extradata, so unless the
+// parameter sets are also in the bitstream the decoder has nothing to
+// configure itself from and renders nothing — while FFmpeg, ICE and the RTP
+// counters all look healthy.
+//
+// Harmless when redundant: the filter compares against the packet it is about
+// to prepend to and skips if the parameter sets are already there.
+var h264InBandParameterSets = []string{"-bsf:v", "dump_extra=freq=keyframe"}
+
+// encoderProfiles is the registry. Order is the order the UI lists them in.
 var encoderProfiles = []EncoderProfile{
 	{
 		Key: "vp8_software", Label: "VP8 (software)",
@@ -86,6 +116,33 @@ var encoderProfiles = []EncoderProfile{
 		HWAccel: "vaapi", Encoder: "vp9_vaapi", PixelFormat: "nv12",
 		ExtraArgs: []string{"-strict", "experimental"},
 	},
+	{
+		Key: "h264_software", Label: "H.264 (software)",
+		MimeType: webrtc.MimeTypeH264, PayloadType: 102,
+		SDPFmtpLine: h264FmtpLine,
+		Encoder:     "libx264", PixelFormat: "yuv420p",
+		ExtraArgs: append([]string{
+			// Constrained Baseline is what the advertised profile-level-id
+			// promises and what OpenH264 decodes: no B-frames, no CABAC.
+			"-profile:v", "baseline",
+			"-preset", "veryfast",
+			"-tune", "zerolatency",
+			"-bf", "0",
+		}, h264InBandParameterSets...),
+	},
+	{
+		Key: "h264_vaapi", Label: "H.264 (VAAPI hardware)",
+		MimeType: webrtc.MimeTypeH264, PayloadType: 102,
+		SDPFmtpLine: h264FmtpLine,
+		HWAccel:     "vaapi", Encoder: "h264_vaapi", PixelFormat: "nv12",
+		ExtraArgs: append([]string{
+			// A driver that exposes no ConstrainedBaseline encode entrypoint
+			// fails the probe and falls back to libx264, which is the right
+			// outcome: Main or High would encode but not decode.
+			"-profile:v", "constrained_baseline",
+			"-bf", "0",
+		}, h264InBandParameterSets...),
+	},
 }
 
 // defaultProfileKey is what a stream uses when none is requested.
@@ -118,8 +175,11 @@ func availableEncoders() map[string]bool {
 		availableSet = map[string]bool{}
 		out, err := exec.Command(getFfmpegPath(), "-hide_banner", "-encoders").Output()
 		if err != nil {
-			// Treat an unprobeable FFmpeg as "software only" rather than
-			// failing: the software profiles are always compiled in.
+			// Treat an unprobeable FFmpeg as "VP8/VP9 software only" rather
+			// than failing: libvpx is in every build worth deploying.
+			// libx264 is not assumed — it is a GPL build option, and
+			// claiming it is present would offer a profile that fails at
+			// stream start instead of one the UI shows as unavailable.
 			availableSet["libvpx"] = true
 			availableSet["libvpx-vp9"] = true
 			return
