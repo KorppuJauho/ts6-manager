@@ -508,20 +508,11 @@ func (s *Sidecar) readAudioRTP() {
 }
 
 func (s *Sidecar) processVideoRTP() {
-	var lastTS uint32
-	haveTS := false
-
+	// NOTE: upstream paced each new timestamp here via computeTrackDelay.
+	// That pacing was removed during the VP9/VAAPI port and the original
+	// rationale was not recorded — see docs/fork-changes.md. FFmpeg's -re
+	// already paces the source, so packets are forwarded as they arrive.
 	for pkt := range s.videoQueue {
-		if !haveTS || pkt.Timestamp != lastTS {
-			now := time.Now()
-			extraDelay := s.computeTrackDelay("video", pkt.Timestamp, now)
-			if extraDelay > 0 {
-				time.Sleep(extraDelay)
-			}
-			lastTS = pkt.Timestamp
-			haveTS = true
-		}
-
 		s.peersLock.RLock()
 		for _, peer := range s.peers {
 			peer.mu.Lock()
@@ -549,20 +540,11 @@ func (s *Sidecar) processVideoRTP() {
 }
 
 func (s *Sidecar) processAudioRTP() {
-	var lastTS uint32
-	haveTS := false
-
+	// NOTE: upstream paced each new timestamp here via computeTrackDelay.
+	// That pacing was removed during the VP9/VAAPI port and the original
+	// rationale was not recorded — see docs/fork-changes.md. FFmpeg's -re
+	// already paces the source, so packets are forwarded as they arrive.
 	for pkt := range s.audioQueue {
-		if !haveTS || pkt.Timestamp != lastTS {
-			now := time.Now()
-			extraDelay := s.computeTrackDelay("audio", pkt.Timestamp, now)
-			if extraDelay > 0 {
-				time.Sleep(extraDelay)
-			}
-			lastTS = pkt.Timestamp
-			haveTS = true
-		}
-
 		s.peersLock.RLock()
 		for _, peer := range s.peers {
 			peer.mu.Lock()
