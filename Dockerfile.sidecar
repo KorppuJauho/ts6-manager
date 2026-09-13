@@ -3,8 +3,11 @@ FROM golang:1.25-bookworm AS build
 WORKDIR /src
 COPY packages/sidecar/go.mod packages/sidecar/go.sum ./
 RUN go mod download
-COPY packages/sidecar/main.go .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /sidecar main.go
+# Every .go file, and build the package rather than a named file: naming
+# main.go explicitly compiles that file alone, so a second source file is
+# silently left out and only fails once something references it.
+COPY packages/sidecar/*.go ./
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /sidecar .
 
 FROM debian:bookworm-slim
 RUN apt-get update && \
