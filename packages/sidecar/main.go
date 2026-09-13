@@ -64,6 +64,33 @@ func getFfmpegPath() string {
 	return envOrDefault("FFMPEG_PATH", "ffmpeg")
 }
 
+// vaapiDevice names the DRM render node the VAAPI encoder uploads frames to.
+// Empty disables the -vaapi_device flag entirely, which is what a software
+// build wants; the default matches the first render node on a typical host.
+func vaapiDevice() string {
+	return envOrDefault("VAAPI_DEVICE", "/dev/dri/renderD128")
+}
+
+// vaapiBufsize gives the rate controller two seconds of headroom. Input is a
+// bitrate as FFmpeg spells it ("5500k"); anything unparseable falls back to the
+// same default envOrDefault uses for VIDEO_BITRATE, so the flag is never empty.
+func vaapiBufsize(bitrate string) string {
+	trimmed := strings.TrimSpace(bitrate)
+	unit := ""
+	if n := len(trimmed); n > 0 {
+		switch trimmed[n-1] {
+		case 'k', 'K', 'm', 'M':
+			unit = string(trimmed[n-1])
+			trimmed = trimmed[:n-1]
+		}
+	}
+	v, err := strconv.Atoi(trimmed)
+	if err != nil || v <= 0 {
+		return "3000k"
+	}
+	return fmt.Sprintf("%d%s", v*2, unit)
+}
+
 func debugLogsEnabled() bool {
 	return os.Getenv("SIDECAR_DEBUG_LOGS") == "1"
 }
@@ -478,10 +505,13 @@ func (s *Sidecar) processVideoRTP() {
 			started := peer.Started
 			track := peer.VideoTrack
 
-			if active && !started && isVP8KeyframeStart(pkt.Payload) {
+			// TODO(vp9): isVP8KeyframeStart parses VP8 payload descriptors and
+			// cannot read VP9, so the gate opens on the first packet of any kind.
+			// A viewer joining mid-frame may see artefacts until the next keyframe.
+			if active && !started {
 				peer.Started = true
 				started = true
-				log.Printf("[Peer %s] First VP8 keyframe seen at ts=%d - opening stream gate", peer.ID, pkt.Timestamp)
+				log.Printf("[Peer %s] First video packet seen at ts=%d - opening stream gate", peer.ID, pkt.Timestamp)
 			}
 
 			peer.mu.Unlock()
@@ -574,11 +604,10 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 	m := &webrtc.MediaEngine{}
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeVP8,
-			ClockRate:   90000,
-			SDPFmtpLine: "",
+			MimeType:  webrtc.MimeTypeVP9,
+			ClockRate: 90000,
 		},
-		PayloadType: 96,
+		PayloadType: 98,
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return "", err
 	}
@@ -613,7 +642,7 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 	}
 
 	videoTrack, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8, ClockRate: 90000},
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP9, ClockRate: 90000},
 		"video", "ts6-stream",
 	)
 	if err != nil {
@@ -878,6 +907,9 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	}
 
 	args := []string{}
+	if dev := vaapiDevice(); dev != "" {
+		args = append(args, "-vaapi_device", dev)
+	}
 
 	if source != "" {
 		if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
@@ -890,6 +922,7 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	} else {
 		args = append(args, "-re", "-f", "lavfi", "-i", fmt.Sprintf("color=c=black:s=%dx%d:r=1", w, h))
 	}
+	hwUploadOnly := source == ""
 
 	vBitrate := strings.TrimSpace(bitrate)
 		if vBitrate == "" {
@@ -899,7 +932,7 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 
 	if source != "" {
 		vf := fmt.Sprintf(
-			"fps=%d,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+			"fps=%d,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,format=nv12,hwupload",
 			fps, w, h, w, h,
 		)
 		args = append(args,
@@ -907,22 +940,21 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 			"-vf", vf,
 		)
 	}
+	if hwUploadOnly {
+		args = append(args, "-vf", "format=nv12,hwupload")
+	}
 	args = append(args,
-		"-pix_fmt", "yuv420p",
-		"-c:v", "libvpx",
-		"-cpu-used", "6",
-		"-deadline", "realtime",
-		"-lag-in-frames", "0",
-		"-error-resilient", "1",
+		"-c:v", "vp9_vaapi",
 		"-b:v", vBitrate,
 		"-maxrate", vBitrate,
-		"-bufsize", envOrDefault("VIDEO_BUFSIZE", "500k"),
-		"-keyint_min", "15",
-		"-g", "15",
-		"-auto-alt-ref", "0",
-		"-payload_type", "96",
+		"-bufsize", vaapiBufsize(vBitrate),
+		"-g", "30",
+		"-payload_type", "98",
 		"-ssrc", "11111111",
 		"-f", "rtp",
+		// VP9-in-RTP is still flagged experimental in FFmpeg's muxer.
+		"-strict", "experimental",
+		"-pkt_size", "1200",
 		fmt.Sprintf("rtp://127.0.0.1:%d", s.videoPort),
 	)
 
