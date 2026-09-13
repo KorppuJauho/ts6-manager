@@ -37,6 +37,7 @@ import { settingsRoutes } from './routes/settings.routes.js';
 import { discordRoutes } from './routes/discord.routes.js';
 import { spotifyRoutes } from './routes/spotify.routes.js';
 import { musicCommandSettingsRoutes } from './routes/music-command-settings.routes.js';
+import { streamSettingsRoutes } from './routes/stream-settings.routes.js';
 import { journalRoutes } from './routes/journal.routes.js';
 import { samlRoutes } from './routes/saml.routes.js';
 import { requireRole } from './middleware/rbac.js';
@@ -143,6 +144,7 @@ export function createApp(): Express {
   app.use('/api/discord', discordRoutes);
   app.use('/api/spotify', spotifyRoutes);
   app.use('/api/music-command-settings', musicCommandSettingsRoutes);
+  app.use('/api/stream-settings', streamSettingsRoutes);
   app.use('/api/journal', journalRoutes);
   app.use('/api/saml', requireRole('admin'), samlRoutes);
 

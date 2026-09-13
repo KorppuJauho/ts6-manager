@@ -1,0 +1,150 @@
+/**
+ * Video streaming settings — admin only.
+ *
+ * Covers hardware encoding, the default preset, stream visibility and the
+ * IPTV playlist. These were compile-time constants before; the values here
+ * are what the voice bots and the !tv command read at stream time.
+ */
+
+import { Router, type Request, type Response, type NextFunction } from 'express';
+import { AppError } from '../middleware/error-handler.js';
+import { requireRole } from '../middleware/rbac.js';
+import { STREAM_PRESETS } from '../voice/streaming/types.js';
+import {
+  getStreamSettings,
+  invalidateStreamSettings,
+  IPTV_SORTS,
+  STREAM_SETTINGS_DEFAULTS,
+} from '../utils/stream-settings.js';
+import { SidecarClient, type EncoderCapability } from '../voice/streaming/sidecar-client.js';
+
+export const streamSettingsRoutes: Router = Router();
+
+streamSettingsRoutes.use(requireRole('admin'));
+
+/**
+ * Profiles the UI offers when the sidecar cannot be reached.
+ *
+ * Marked unavailable rather than omitted: an operator whose sidecar is down
+ * should see why the list is empty, not an empty dropdown that looks broken.
+ */
+const FALLBACK_ENCODERS: EncoderCapability[] = [
+  { key: 'vp8_software', label: 'VP8 (software)', mimeType: 'video/VP8', payloadType: 96, hwAccel: '', encoder: 'libvpx', available: false },
+  { key: 'vp9_software', label: 'VP9 (software)', mimeType: 'video/VP9', payloadType: 98, hwAccel: '', encoder: 'libvpx-vp9', available: false },
+  { key: 'vp8_vaapi', label: 'VP8 (VAAPI hardware)', mimeType: 'video/VP8', payloadType: 96, hwAccel: 'vaapi', encoder: 'vp8_vaapi', available: false },
+  { key: 'vp9_vaapi', label: 'VP9 (VAAPI hardware)', mimeType: 'video/VP9', payloadType: 98, hwAccel: 'vaapi', encoder: 'vp9_vaapi', available: false },
+];
+
+function asBool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+/** Trim a string field, enforcing a maximum length. */
+function asText(value: unknown, max: number): string | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return '';
+  if (typeof value !== 'string') throw new AppError(400, 'Expected a string');
+  const trimmed = value.trim();
+  if (trimmed.length > max) throw new AppError(400, `Value exceeds ${max} characters`);
+  return trimmed;
+}
+
+// GET /api/stream-settings
+streamSettingsRoutes.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await getStreamSettings(req.app.locals.prisma));
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /api/stream-settings/options — what the UI can offer.
+ *
+ * Presets come from the backend's own table. Encoders are probed from the
+ * sidecar, so the dropdown can distinguish a profile this host can run from
+ * one it merely knows about, instead of letting an operator pick one that
+ * fails at stream time.
+ */
+streamSettingsRoutes.get('/options', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const presets = Object.entries(STREAM_PRESETS).map(([key, p]) => ({
+      key,
+      label: p.label,
+      width: p.width,
+      height: p.height,
+      bitrate: p.bitrate,
+      framerate: p.framerate,
+    }));
+
+    let encoders = FALLBACK_ENCODERS;
+    let sidecarReachable = false;
+    try {
+      const client = new SidecarClient(process.env.SIDECAR_URL || 9800);
+      const caps = await client.getCapabilities();
+      if (Array.isArray(caps?.encoders) && caps.encoders.length > 0) {
+        encoders = caps.encoders;
+        sidecarReachable = true;
+      }
+    } catch {
+      // Leave the fallback list in place; sidecarReachable tells the UI why
+      // everything reads as unavailable.
+    }
+
+    res.json({ presets, encoders, sidecarReachable, iptvSorts: IPTV_SORTS });
+  } catch (err) { next(err); }
+});
+
+// PUT /api/stream-settings
+streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const prisma = req.app.locals.prisma;
+    const current = await getStreamSettings(prisma);
+    const body = req.body ?? {};
+
+    const encoderProfile = asText(body.encoderProfile, 64) ?? current.encoderProfile;
+    const defaultPreset = asText(body.defaultPreset, 32) ?? current.defaultPreset;
+    if (!STREAM_PRESETS[defaultPreset]) {
+      throw new AppError(400, `Unknown preset "${defaultPreset}"`);
+    }
+
+    const hwAccelDevice = asText(body.hwAccelDevice, 200) ?? current.hwAccelDevice;
+    // Mirrors the sidecar's own check: the device must be a path under /dev,
+    // so a settings value cannot point FFmpeg at an arbitrary host file.
+    if (hwAccelDevice && !/^\/dev\/[A-Za-z0-9._/-]{1,120}$/.test(hwAccelDevice)) {
+      throw new AppError(400, 'Encoding device must be a path under /dev');
+    }
+
+    const iptvPlaylistUrl = asText(body.iptvPlaylistUrl, 2000) ?? current.iptvPlaylistUrl;
+    if (iptvPlaylistUrl && !/^https?:\/\//i.test(iptvPlaylistUrl)) {
+      throw new AppError(400, 'Playlist URL must start with http:// or https://');
+    }
+
+    const iptvSort = asText(body.iptvSort, 32) ?? current.iptvSort;
+    if (!(IPTV_SORTS as readonly string[]).includes(iptvSort)) {
+      throw new AppError(400, `Unknown sort "${iptvSort}"`);
+    }
+
+    const data = {
+      hwAccelEnabled: asBool(body.hwAccelEnabled, current.hwAccelEnabled),
+      hwAccelDevice: hwAccelDevice || STREAM_SETTINGS_DEFAULTS.hwAccelDevice,
+      encoderProfile,
+      defaultPreset,
+      streamPublic: asBool(body.streamPublic, current.streamPublic),
+      iptvEnabled: asBool(body.iptvEnabled, current.iptvEnabled),
+      iptvPlaylistUrl,
+      iptvChannelFilter: asText(body.iptvChannelFilter, 2000) ?? current.iptvChannelFilter,
+      iptvSort,
+    };
+
+    const existing = await prisma.streamSettings.findFirst();
+    if (existing) {
+      await prisma.streamSettings.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.streamSettings.create({ data });
+    }
+
+    invalidateStreamSettings();
+    res.json(await getStreamSettings(prisma));
+  } catch (err) { next(err); }
+});
+
+export default streamSettingsRoutes;

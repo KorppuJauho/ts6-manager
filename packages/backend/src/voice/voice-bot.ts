@@ -10,6 +10,11 @@ import { SidecarProcess, type SidecarConfig } from './streaming/sidecar-process.
 import { STREAM_PRESETS, DEFAULT_PRESET, SOURCE_SEPARATOR, type VideoViewerInfo, type VideoStreamStatus } from './streaming/types.js';
 import { getCookieArgs, runYtDlp, assertSafeUrl } from './audio/youtube.js';
 import { validateUrl } from '../utils/url-validator.js';
+import {
+  STREAM_SETTINGS_DEFAULTS,
+  effectiveEncoder,
+  type StreamSettingsValue,
+} from '../utils/stream-settings.js';
 
 /** Resolve a YouTube/yt-dlp-compatible URL to a direct stream URL */
 async function resolveVideoUrl(url: string, maxHeight: number = 720): Promise<string> {
@@ -79,6 +84,12 @@ export interface VoiceBotConfig {
   sidecarBinaryPath?: string;
   sidecarPort?: number;
   streamPreset?: string;
+  /**
+   * Reads the current streaming settings. Supplied by VoiceBotManager, which
+   * owns the Prisma client; called at stream start so a change made in the
+   * web UI applies to the next stream without restarting the bot.
+   */
+  getStreamSettings?: () => Promise<StreamSettingsValue>;
 }
 
 export class VoiceBot extends EventEmitter {
@@ -142,6 +153,8 @@ export class VoiceBot extends EventEmitter {
   private _videoBitrate: string = STREAM_PRESETS[DEFAULT_PRESET]?.bitrate ?? '2500k';
   private _videoStartedAt: number | null = null;
   private _viewers: Map<number, VideoViewerInfo> = new Map();
+  private _videoEncoder = '';
+  private _videoHwDevice = '';
   private _videoIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly VIDEO_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -909,12 +922,20 @@ export class VoiceBot extends EventEmitter {
 
     const sidecarBinary = this.config.sidecarBinaryPath || process.env.SIDECAR_BINARY_PATH || 'sidecar';
     const sidecarPort = this.config.sidecarPort || 9800;
-    // FIXME: this ignores the per-bot streamPreset column, so the value an
-    // operator picks for a bot has no effect — every stream runs at the
-    // DEFAULT_PRESET. Carried over from the deployed fork as-is; replaced by
-    // the configurable default in the settings work.
-    this._videoPreset = preset ?? DEFAULT_PRESET;
+    const settings = (await this.config.getStreamSettings?.()) ?? STREAM_SETTINGS_DEFAULTS;
+
+    // Precedence: what the caller asked for, then this bot's own column, then
+    // the configured default. An unknown key falls through to DEFAULT_PRESET
+    // rather than failing the stream.
+    this._videoPreset = preset ?? this.config.streamPreset ?? settings.defaultPreset;
     const presetConfig = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
+    if (!STREAM_PRESETS[this._videoPreset]) {
+      console.warn(`[VoiceBot ${this.config.id}] Unknown preset "${this._videoPreset}", using ${DEFAULT_PRESET}`);
+      this._videoPreset = DEFAULT_PRESET;
+    }
+
+    this._videoEncoder = effectiveEncoder(settings);
+    this._videoHwDevice = settings.hwAccelEnabled ? settings.hwAccelDevice : '';
     const effectiveFramerate = framerate && framerate > 0
       ? framerate
       : presetConfig.framerate;
@@ -996,7 +1017,9 @@ export class VoiceBot extends EventEmitter {
       name: `${this.config.nickname} Stream`,
       type: 3,
       bitrate: 4608,
-      accessibility: 0, // public — see stream-signaling.ts
+      // Public streams admit any client on the TeamSpeak server; restricted
+      // defers to the server's own access rules.
+      accessibility: settings.streamPublic ? 0 : 1,
       mode: 1,
       viewerLimit: 0,
       audio: true,
@@ -1016,6 +1039,8 @@ export class VoiceBot extends EventEmitter {
       presetConfig.height,
       effectiveFramerate,
       effectiveBitrate,
+      this._videoEncoder,
+      this._videoHwDevice,
     );
 
     console.log(`[VoiceBot ${this.config.id}] Video stream started: ${stream.id}, source: ${source}`);
@@ -1117,12 +1142,16 @@ export class VoiceBot extends EventEmitter {
     const currentPreset = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     const resolvedSource = await resolveVideoUrl(source, currentPreset.height);
 
+    // Reuses the encoder resolved at stream start: changing it here would
+    // renegotiate the codec under peers that are already connected.
     await this.sidecarHttp.setSource(
       resolvedSource,
       currentPreset.width,
       currentPreset.height,
       this._videoFramerate,
       this._videoBitrate,
+      this._videoEncoder,
+      this._videoHwDevice,
     );
     console.log(`[VoiceBot ${this.config.id}] Video source changed: ${source}`);
     this.emit('videoSourceChanged', source);

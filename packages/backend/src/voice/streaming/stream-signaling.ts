@@ -240,10 +240,7 @@ export class StreamSignaling extends EventEmitter {
       name: params.name || 'Bot Stream',
       type: String(params.type ?? 3),
       bitrate: String(params.bitrate ?? 4608),
-      // NOTE: the caller's accessibility is deliberately overridden — every
-      // stream is created public. See docs/fork-changes.md; this becomes a
-      // configurable setting rather than a hardcoded override.
-      accessibility: '0',
+      accessibility: String(params.accessibility ?? 1),
       mode: String(params.mode ?? 1),
       viewer_limit: String(params.viewerLimit ?? 0),
       audio: params.audio === false ? '0' : '1',

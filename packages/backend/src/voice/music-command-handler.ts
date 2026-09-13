@@ -8,7 +8,8 @@ import type { ConnectionPool } from '../ts-client/connection-pool.js';
 import type { WebQueryClient } from '../ts-client/webquery-client.js';
 import { requiredSgid, parseServerGroupIds, type MusicCommandAccessSettings } from './music-command-access.js';
 import { fetchLyrics, chunkLyrics, lyricsInputFromTrack } from './lyrics.js';
-import { loadTvChannels, matchChannel, tvPlaylistUrl, type TvChannelMap } from './iptv.js';
+import { loadTvChannels, matchChannel, sortChannelNames, type TvChannelMap, type TvSort } from './iptv.js';
+import { getStreamSettings, parseChannelFilter } from '../utils/stream-settings.js';
 import { messages, type BotMessages } from './bot-i18n/index.js';
 
 const CMD_PREFIX = '!';
@@ -1080,20 +1081,21 @@ export class MusicCommandHandler {
    * rarely. `!tv reload` refetches it after the operator edits the playlist.
    */
   private async handleTv(bot: VoiceBot, reply: ReplyFn, args: string): Promise<void> {
-    if (!tvPlaylistUrl()) {
+    const settings = await getStreamSettings(this.prisma);
+    if (!settings.iptvEnabled || !settings.iptvPlaylistUrl) {
       reply(this.m.tvNotConfigured);
       return;
     }
 
     const query = args.trim().toLowerCase();
-
-    if (query === 'reload') {
-      this.tvChannels = null;
-    }
+    if (query === 'reload') this.tvChannels = null;
 
     if (!this.tvChannels) {
       try {
-        this.tvChannels = await loadTvChannels();
+        this.tvChannels = await loadTvChannels(
+          settings.iptvPlaylistUrl,
+          parseChannelFilter(settings.iptvChannelFilter),
+        );
       } catch (err: any) {
         reply(this.m.tvLoadFailed(err.message));
         return;
@@ -1111,7 +1113,7 @@ export class MusicCommandHandler {
     }
 
     if (!query) {
-      const names = Array.from(this.tvChannels.keys()).sort();
+      const names = sortChannelNames(this.tvChannels, settings.iptvSort as TvSort);
       reply(this.m.tvAvailable(names.length, names.join(', ')));
       return;
     }
@@ -1122,10 +1124,9 @@ export class MusicCommandHandler {
       return;
     }
 
-    const url = this.tvChannels.get(match)!;
     reply(this.m.tvStarting(match));
     try {
-      await bot.startVideoStream(url);
+      await bot.startVideoStream(this.tvChannels.get(match)!);
     } catch (err: any) {
       reply(this.m.tvStartFailed(err.message));
     }

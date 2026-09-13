@@ -64,17 +64,10 @@ func getFfmpegPath() string {
 	return envOrDefault("FFMPEG_PATH", "ffmpeg")
 }
 
-// vaapiDevice names the DRM render node the VAAPI encoder uploads frames to.
-// Empty disables the -vaapi_device flag entirely, which is what a software
-// build wants; the default matches the first render node on a typical host.
-func vaapiDevice() string {
-	return envOrDefault("VAAPI_DEVICE", "/dev/dri/renderD128")
-}
-
-// vaapiBufsize gives the rate controller two seconds of headroom. Input is a
+// encoderBufsize gives the rate controller two seconds of headroom. Input is a
 // bitrate as FFmpeg spells it ("5500k"); anything unparseable falls back to the
 // same default envOrDefault uses for VIDEO_BITRATE, so the flag is never empty.
-func vaapiBufsize(bitrate string) string {
+func encoderBufsize(bitrate string) string {
 	trimmed := strings.TrimSpace(bitrate)
 	unit := ""
 	if n := len(trimmed); n > 0 {
@@ -360,6 +353,12 @@ type Sidecar struct {
 	source     string
 	running    bool
 
+	// Encoder selection, resolved when the source is set and read by
+	// CreatePeer so SDP, the local track and FFmpeg cannot disagree.
+	profileMu sync.RWMutex
+	profile   EncoderProfile
+	hwDevice  string
+
 	// Atomic timestamps for RTCP Sender Report generation
 	lastVideoRTPTs uint64 // atomic: latest video RTP timestamp seen
 	lastAudioRTPTs uint64 // atomic: latest audio RTP timestamp seen
@@ -507,11 +506,31 @@ func (s *Sidecar) readAudioRTP() {
 	}
 }
 
+// activeProfile returns the encoder profile in force, defaulting before any
+// source has been set.
+func (s *Sidecar) activeProfile() EncoderProfile {
+	s.profileMu.RLock()
+	defer s.profileMu.RUnlock()
+	if s.profile.Key == "" {
+		return defaultProfile()
+	}
+	return s.profile
+}
+
+func (s *Sidecar) setActiveProfile(p EncoderProfile, device string) {
+	s.profileMu.Lock()
+	s.profile = p
+	s.hwDevice = device
+	s.profileMu.Unlock()
+}
+
 func (s *Sidecar) processVideoRTP() {
 	// NOTE: upstream paced each new timestamp here via computeTrackDelay.
 	// That pacing was removed during the VP9/VAAPI port and the original
 	// rationale was not recorded — see docs/fork-changes.md. FFmpeg's -re
 	// already paces the source, so packets are forwarded as they arrive.
+	gateOnKeyframe := s.activeProfile().MimeType == webrtc.MimeTypeVP8
+
 	for pkt := range s.videoQueue {
 		s.peersLock.RLock()
 		for _, peer := range s.peers {
@@ -520,13 +539,15 @@ func (s *Sidecar) processVideoRTP() {
 			started := peer.Started
 			track := peer.VideoTrack
 
-			// TODO(vp9): isVP8KeyframeStart parses VP8 payload descriptors and
-			// cannot read VP9, so the gate opens on the first packet of any kind.
-			// A viewer joining mid-frame may see artefacts until the next keyframe.
-			if active && !started {
+			// The gate holds a joining peer until a frame it can decode from.
+			// isVP8KeyframeStart reads VP8 payload descriptors, so it only
+			// applies when VP8 is the active codec; VP9 has no detector yet
+			// and opens on the first packet, which can show artefacts until
+			// the next keyframe. See docs/fork-changes.md.
+			if active && !started && (!gateOnKeyframe || isVP8KeyframeStart(pkt.Payload)) {
 				peer.Started = true
 				started = true
-				log.Printf("[Peer %s] First video packet seen at ts=%d - opening stream gate", peer.ID, pkt.Timestamp)
+				log.Printf("[Peer %s] Stream gate opened at ts=%d", peer.ID, pkt.Timestamp)
 			}
 
 			peer.mu.Unlock()
@@ -607,13 +628,15 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 		iceServers = append(iceServers, webrtc.ICEServer{URLs: []string{stun}})
 	}
 
+	profile := s.activeProfile()
+
 	m := &webrtc.MediaEngine{}
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:  webrtc.MimeTypeVP9,
+			MimeType:  profile.MimeType,
 			ClockRate: 90000,
 		},
-		PayloadType: 98,
+		PayloadType: webrtc.PayloadType(profile.PayloadType),
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return "", err
 	}
@@ -648,7 +671,7 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 	}
 
 	videoTrack, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP9, ClockRate: 90000},
+		webrtc.RTPCodecCapability{MimeType: profile.MimeType, ClockRate: 90000},
 		"video", "ts6-stream",
 	)
 	if err != nil {
@@ -885,7 +908,7 @@ func (s *Sidecar) ClosePeer(id string) {
 	s.peersLock.Unlock()
 }
 
-func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate int, bitrate string) {
+func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate int, bitrate string, profile EncoderProfile, device string) {
 	s.ffmpegLock.Lock()
 	defer s.ffmpegLock.Unlock()
 
@@ -895,6 +918,7 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	s.resetPeerStreamState()
 
 	s.source = source
+	s.setActiveProfile(profile, device)
 
 	w := width
 	h := height
@@ -913,8 +937,8 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	}
 
 	args := []string{}
-	if dev := vaapiDevice(); dev != "" {
-		args = append(args, "-vaapi_device", dev)
+	if profile.NeedsDevice() && device != "" {
+		args = append(args, "-vaapi_device", device)
 	}
 
 	// A DASH source arrives as video and audio URLs joined by sourceSeparator;
@@ -937,16 +961,23 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	}
 	hwUploadOnly := len(sources) == 0
 
+	// Hardware encoders take frames from GPU memory, so the filter chain has
+	// to upload after the pixel-format conversion. Software encoders must not.
+	hwUpload := ""
+	if profile.NeedsDevice() {
+		hwUpload = ",hwupload"
+	}
+
 	vBitrate := strings.TrimSpace(bitrate)
-		if vBitrate == "" {
-			vBitrate = envOrDefault("VIDEO_BITRATE", "1500k")
-		}
+	if vBitrate == "" {
+		vBitrate = envOrDefault("VIDEO_BITRATE", "1500k")
+	}
 	audioDelayMs := envIntOrDefault("AUDIO_DELAY_MS", 0)
 
 	if len(sources) > 0 {
 		vf := fmt.Sprintf(
-			"fps=%d,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,format=nv12,hwupload",
-			fps, w, h, w, h,
+			"fps=%d,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,format=%s%s",
+			fps, w, h, w, h, profile.PixelFormat, hwUpload,
 		)
 		args = append(args,
 			"-map", "0:v:0",
@@ -954,19 +985,20 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 		)
 	}
 	if hwUploadOnly {
-		args = append(args, "-vf", "format=nv12,hwupload")
+		args = append(args, "-vf", fmt.Sprintf("format=%s%s", profile.PixelFormat, hwUpload))
 	}
 	args = append(args,
-		"-c:v", "vp9_vaapi",
+		"-c:v", profile.Encoder,
 		"-b:v", vBitrate,
 		"-maxrate", vBitrate,
-		"-bufsize", vaapiBufsize(vBitrate),
+		"-bufsize", encoderBufsize(vBitrate),
 		"-g", "30",
-		"-payload_type", "98",
+	)
+	args = append(args, profile.ExtraArgs...)
+	args = append(args,
+		"-payload_type", fmt.Sprintf("%d", profile.PayloadType),
 		"-ssrc", "11111111",
 		"-f", "rtp",
-		// VP9-in-RTP is still flagged experimental in FFmpeg's muxer.
-		"-strict", "experimental",
 		"-pkt_size", "1200",
 		fmt.Sprintf("rtp://127.0.0.1:%d", s.videoPort),
 	)
@@ -1003,7 +1035,7 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	}
 
 
-	log.Printf("[FFmpeg] Starting: source=%s video=:%d audio=:%d", source, s.videoPort, s.audioPort)
+	log.Printf("[FFmpeg] Starting: source=%s video=:%d audio=:%d encoder=%s", source, s.videoPort, s.audioPort, profile.Encoder)
 
 	cmd := exec.Command(getFfmpegPath(), args...)
 	cmd.Stdout = nil
@@ -1072,6 +1104,10 @@ func (s *Sidecar) Stop() {
 
 var peerIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 var bitrateRe = regexp.MustCompile(`^[0-9]{1,6}[kKmM]?$`)
+
+// devicePathRe constrains the DRM render node to a path under /dev, so a
+// settings value cannot point FFmpeg at an arbitrary file on the host.
+var devicePathRe = regexp.MustCompile(`^/dev/[A-Za-z0-9._/-]{1,120}$`)
 
 // validSource accepts an empty source (test pattern) or an http(s) URL, nothing
 // else. A leading '-' would be parsed as an extra FFmpeg flag; any other
@@ -1225,7 +1261,13 @@ func main() {
 			Width     int    `json:"width"`
 			Height    int    `json:"height"`
 			Framerate int    `json:"framerate"`
-			Bitrate   string `json:"bitrate"` 
+			Bitrate   string `json:"bitrate"`
+			// Encoder selection travels per stream rather than through the
+			// environment: in a container deployment the sidecar is long-lived
+			// and its env is fixed at container start, so a setting changed in
+			// the web UI could never reach it any other way.
+			Encoder  string `json:"encoder"`
+			HWDevice string `json:"hwDevice"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), 400)
@@ -1243,9 +1285,24 @@ func main() {
 			http.Error(w, "invalid dimensions", 400)
 			return
 		}
-		log.Printf("[API] Setting source: %s (%dx%d @ %dfps, bitrate=%s)", req.Source, req.Width, req.Height, req.Framerate, req.Bitrate)
-		sidecar.StartFFmpeg(req.Source, req.Width, req.Height, req.Framerate, req.Bitrate)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		if req.HWDevice != "" && !devicePathRe.MatchString(req.HWDevice) {
+			http.Error(w, "invalid hwDevice", 400)
+			return
+		}
+
+		profile, warning := resolveProfile(req.Encoder)
+		if warning != "" {
+			log.Printf("[API] %s", warning)
+		}
+
+		log.Printf("[API] Setting source: %s (%dx%d @ %dfps, bitrate=%s, encoder=%s)",
+			req.Source, req.Width, req.Height, req.Framerate, req.Bitrate, profile.Key)
+		sidecar.StartFFmpeg(req.Source, req.Width, req.Height, req.Framerate, req.Bitrate, profile, req.HWDevice)
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":  "ok",
+			"encoder": profile.Key,
+			"warning": warning,
+		})
 	})
 
 	mux.HandleFunc("POST /source/stop", func(w http.ResponseWriter, r *http.Request) {
@@ -1257,6 +1314,13 @@ func main() {
 		sidecar.ffmpegLock.Unlock()
 
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
+	// What this host can actually encode with, so the web UI can offer the
+	// profiles that will work and show the rest as unavailable rather than
+	// letting an operator pick one that fails at stream time.
+	mux.HandleFunc("GET /capabilities", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"encoders": encoderCapabilities()})
 	})
 
 	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {

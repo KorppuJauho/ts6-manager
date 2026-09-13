@@ -1,11 +1,11 @@
 /**
  * IPTV channel list, loaded from an M3U/M3U8 playlist.
  *
- * The playlist URL is supplied by the operator, not by a TeamSpeak user: !tv
- * only picks a name out of the parsed list, and never passes a URL of its own
- * to the fetcher. It is therefore deliberately *not* run through
- * `validateUrl` — that helper refuses private addresses, and the usual
- * deployment points this at an IPTV proxy on the LAN. What is enforced
+ * The playlist URL is configured by an admin in the web UI, not supplied by a
+ * TeamSpeak user: !tv only picks a name out of the parsed list, and never
+ * passes a URL of its own to the fetcher. It is therefore deliberately *not*
+ * run through `validateUrl` — that helper refuses private addresses, and the
+ * usual deployment points this at an IPTV proxy on the LAN. What is enforced
  * instead is the scheme, a request timeout and a cap on the response body, so
  * a wrong or hostile URL cannot hang the bot or exhaust memory.
  */
@@ -16,20 +16,19 @@ export type TvChannelMap = Map<string, string>;
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_PLAYLIST_BYTES = 5 * 1024 * 1024;
 
-/** Playlist URL, empty when the operator has not configured one. */
-export function tvPlaylistUrl(): string {
-  return (process.env.IPTV_M3U_URL ?? '').trim();
-}
+/** How a channel list is ordered for display. */
+export type TvSort = 'name' | 'playlist';
 
 /**
- * Comma-separated substrings a channel name must contain to be listed.
- * Empty means "no filter": every channel in the playlist is offered.
+ * Order channel names for listing.
+ *
+ * "playlist" keeps the order the provider published, which usually groups
+ * related channels together; "name" sorts alphabetically, which is easier to
+ * scan when the list is long.
  */
-export function tvChannelFilter(): string[] {
-  return (process.env.IPTV_CHANNEL_FILTER ?? '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
+export function sortChannelNames(channels: TvChannelMap, sort: TvSort): string[] {
+  const names = Array.from(channels.keys());
+  return sort === 'name' ? names.sort((a, b) => a.localeCompare(b)) : names;
 }
 
 /**
@@ -67,12 +66,9 @@ export function parseM3u(text: string, filter: string[] = []): TvChannelMap {
 }
 
 /** Fetch and parse the configured playlist. Throws with a usable message. */
-export async function loadTvChannels(
-  url: string = tvPlaylistUrl(),
-  filter: string[] = tvChannelFilter(),
-): Promise<TvChannelMap> {
+export async function loadTvChannels(url: string, filter: string[] = []): Promise<TvChannelMap> {
   if (!url) {
-    throw new Error('No IPTV playlist configured (set IPTV_M3U_URL).');
+    throw new Error('No IPTV playlist configured.');
   }
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     throw new Error('IPTV playlist URL must be http(s).');

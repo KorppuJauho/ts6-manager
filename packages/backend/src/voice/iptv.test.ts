@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseM3u, matchChannel } from './iptv.js';
+import { parseM3u, matchChannel, sortChannelNames } from './iptv.js';
 
 const PLAYLIST = `#EXTM3U
 #EXTINF:-1 tvg-id="yle1" group-title="FI",Yle TV1
@@ -64,5 +64,17 @@ describe('matchChannel', () => {
 
   it('returns null for an empty query', () => {
     expect(matchChannel(channels, '   ')).toBeNull();
+  });
+});
+
+describe('sortChannelNames', () => {
+  const channels = parseM3u(PLAYLIST);
+
+  it('keeps playlist order when asked to', () => {
+    expect(sortChannelNames(channels, 'playlist')).toEqual(['yle tv1', 'mtv 3', 'v sport 1']);
+  });
+
+  it('sorts alphabetically when asked to', () => {
+    expect(sortChannelNames(channels, 'name')).toEqual(['mtv 3', 'v sport 1', 'yle tv1']);
   });
 });
