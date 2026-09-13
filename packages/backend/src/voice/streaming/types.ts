@@ -18,6 +18,14 @@ export const STREAM_PRESETS: Record<string, VideoStreamPreset> = {
 
 export const DEFAULT_PRESET = '720p';
 
+/**
+ * Joins the video and audio URLs of a DASH source into the single `source`
+ * string the sidecar's HTTP API carries. The sidecar splits on it and gives
+ * FFmpeg one `-i` per segment; it must stay in sync with `sourceSeparator`
+ * in packages/sidecar/main.go.
+ */
+export const SOURCE_SEPARATOR = '|||';
+
 export interface VideoViewerInfo {
   clid: number;
   joinedAt: number;

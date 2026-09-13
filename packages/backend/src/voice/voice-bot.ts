@@ -7,7 +7,7 @@ import { fetchIcyMetadata } from './audio/icy-metadata.js';
 import { StreamSignaling, type ActiveStream, type SignalingMessage } from './streaming/stream-signaling.js';
 import { SidecarClient } from './streaming/sidecar-client.js';
 import { SidecarProcess, type SidecarConfig } from './streaming/sidecar-process.js';
-import { STREAM_PRESETS, DEFAULT_PRESET, type VideoViewerInfo, type VideoStreamStatus } from './streaming/types.js';
+import { STREAM_PRESETS, DEFAULT_PRESET, SOURCE_SEPARATOR, type VideoViewerInfo, type VideoStreamStatus } from './streaming/types.js';
 import { getCookieArgs, runYtDlp, assertSafeUrl } from './audio/youtube.js';
 import { validateUrl } from '../utils/url-validator.js';
 
@@ -26,10 +26,17 @@ async function resolveVideoUrl(url: string, maxHeight: number = 720): Promise<st
     return url;
   }
 
-  // Request best combined format (video+audio) up to the target height.
+  // Prefer a separate video+audio (DASH) pair over a combined progressive
+  // format: YouTube caps progressive at 720p, so asking for `best` puts a hard
+  // ceiling on the 1080p preset. The `+` makes yt-dlp print one URL per line,
+  // which we hand to the sidecar joined by SOURCE_SEPARATOR.
+  //
+  // dynamic_range=SDR excludes HDR formats — VP9 HDR tone-maps poorly through
+  // the VAAPI path and arrives washed out.
+  //
   // runYtDlp adds the cookie args' siblings (timeout, full stderr logging);
   // normal CPU priority — the user is waiting for the stream to start.
-  const formatFilter = `best[height<=${maxHeight}][ext=mp4]/best[height<=${maxHeight}]/best[ext=mp4]/best`;
+  const formatFilter = `bestvideo[height<=${maxHeight}][dynamic_range=SDR]+bestaudio/best[height<=${maxHeight}][dynamic_range=SDR]/best[height<=${maxHeight}]/best`;
   const stdout = await runYtDlp([
     ...getCookieArgs(),
     '-f', formatFilter,
@@ -39,8 +46,10 @@ async function resolveVideoUrl(url: string, maxHeight: number = 720): Promise<st
     url,
   ], 60_000, { lowPriority: false });
 
-  // yt-dlp -g returns the direct URL(s), take the first one
-  const directUrl = stdout.trim().split('\n')[0];
+  // yt-dlp -g prints one URL per stream: a single line for a progressive
+  // format, two (video then audio) for a DASH pair.
+  const urls = stdout.trim().split('\n').map((u) => u.trim()).filter(Boolean);
+  const directUrl = urls.join(SOURCE_SEPARATOR);
   if (!directUrl) {
     throw new Error('yt-dlp returned no URL');
   }

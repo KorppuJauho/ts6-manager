@@ -91,6 +91,30 @@ func vaapiBufsize(bitrate string) string {
 	return fmt.Sprintf("%d%s", v*2, unit)
 }
 
+// sourceSeparator joins the video and audio URLs of a DASH stream into the
+// single source string the HTTP API carries. yt-dlp hands back one URL per
+// line for formats whose tracks are stored separately.
+const sourceSeparator = "|||"
+
+// maxSourceInputs caps how many inputs one source may expand to. A DASH pair
+// needs two; more than that is a caller feeding FFmpeg an input list.
+const maxSourceInputs = 2
+
+// splitSources expands a source string into its individual URLs, dropping
+// empty segments. An empty source yields an empty slice (the test pattern).
+func splitSources(source string) []string {
+	if strings.TrimSpace(source) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(source, sourceSeparator) {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
 func debugLogsEnabled() bool {
 	return os.Getenv("SIDECAR_DEBUG_LOGS") == "1"
 }
@@ -911,18 +935,25 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 		args = append(args, "-vaapi_device", dev)
 	}
 
-	if source != "" {
-		if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+	// A DASH source arrives as video and audio URLs joined by sourceSeparator;
+	// a progressive source is a single URL and splits to a one-element slice.
+	sources := splitSources(source)
+
+	if len(sources) > 0 {
+		if strings.HasPrefix(sources[0], "http://") || strings.HasPrefix(sources[0], "https://") {
 			args = append(args, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5")
 		} else {
 			args = append(args, "-stream_loop", "-1")
 		}
 
-		args = append(args, "-fflags", "+genpts+discardcorrupt", "-re", "-i", source)
+		args = append(args, "-fflags", "+genpts+discardcorrupt", "-re")
+		for _, src := range sources {
+			args = append(args, "-i", src)
+		}
 	} else {
 		args = append(args, "-re", "-f", "lavfi", "-i", fmt.Sprintf("color=c=black:s=%dx%d:r=1", w, h))
 	}
-	hwUploadOnly := source == ""
+	hwUploadOnly := len(sources) == 0
 
 	vBitrate := strings.TrimSpace(bitrate)
 		if vBitrate == "" {
@@ -930,7 +961,7 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 		}
 	audioDelayMs := envIntOrDefault("AUDIO_DELAY_MS", 0)
 
-	if source != "" {
+	if len(sources) > 0 {
 		vf := fmt.Sprintf(
 			"fps=%d,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,format=nv12,hwupload",
 			fps, w, h, w, h,
@@ -958,11 +989,17 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 		fmt.Sprintf("rtp://127.0.0.1:%d", s.videoPort),
 	)
 
-	if source != "" {
+	if len(sources) > 0 {
 		aBitrate := envOrDefault("AUDIO_BITRATE", "128k")
 
+		// With a DASH pair the audio is its own input; a progressive file
+		// carries both streams in input 0.
+		audioInput := "0:a:0?"
+		if len(sources) > 1 {
+			audioInput = "1:a:0?"
+		}
 		args = append(args,
-			"-map", "0:a:0?",
+			"-map", audioInput,
 		)
 
 		if audioDelayMs > 0 {
@@ -1062,14 +1099,25 @@ func validSource(source string) bool {
 	if source == "" {
 		return true
 	}
-	if strings.HasPrefix(source, "-") {
+	// Every segment is passed to FFmpeg as its own -i, so each one has to
+	// clear the same bar the whole string used to. Validating only the first
+	// would let "https://ok|||-flag" smuggle an argument past this check.
+	parts := splitSources(source)
+	if len(parts) == 0 || len(parts) > maxSourceInputs {
 		return false
 	}
-	if !strings.HasPrefix(source, "http://") && !strings.HasPrefix(source, "https://") {
-		return false
+	for _, part := range parts {
+		if strings.HasPrefix(part, "-") {
+			return false
+		}
+		if !strings.HasPrefix(part, "http://") && !strings.HasPrefix(part, "https://") {
+			return false
+		}
+		if _, err := url.Parse(part); err != nil {
+			return false
+		}
 	}
-	_, err := url.Parse(source)
-	return err == nil
+	return true
 }
 
 // secureAPI caps request bodies and requires "Authorization: Bearer <token>"
