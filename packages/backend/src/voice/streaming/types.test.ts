@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clampBitrate, STREAM_PRESETS, MAX_STREAM_BITRATE_KBPS } from './types.js';
+import { clampBitrate, presetForHeight, STREAM_PRESETS, MAX_STREAM_BITRATE_KBPS } from './types.js';
 
 describe('clampBitrate', () => {
   it('leaves a bitrate under the ceiling alone', () => {
@@ -39,5 +39,44 @@ describe('stream presets', () => {
       const kbps = Number(preset.bitrate.replace(/[kK]$/, ''));
       expect(kbps, `preset ${key} (${preset.bitrate})`).toBeLessThanOrEqual(MAX_STREAM_BITRATE_KBPS);
     }
+  });
+});
+
+describe('presetForHeight', () => {
+  it('leaves the request alone when the source can fill it', () => {
+    expect(presetForHeight('1080p', 1080)).toBe('1080p');
+    expect(presetForHeight('1080p', 2160)).toBe('1080p');
+  });
+
+  it('drops to the source resolution rather than upscaling', () => {
+    // The case this exists for: a 720p TV channel asked to stream at 1080p.
+    expect(presetForHeight('1080p', 720)).toBe('720p');
+    expect(presetForHeight('2160p', 1080)).toBe('1080p');
+  });
+
+  it('never raises the operator-chosen ceiling', () => {
+    expect(presetForHeight('720p', 2160)).toBe('720p');
+    expect(presetForHeight('480p', 1080)).toBe('480p');
+  });
+
+  it('picks the largest preset the source can fill, not the nearest', () => {
+    // 900 lines fills 720p but not 1080p.
+    expect(presetForHeight('2160p', 900)).toBe('720p');
+    expect(presetForHeight('1440p', 1439)).toBe('1080p');
+  });
+
+  it('uses the smallest preset for a source below all of them', () => {
+    expect(presetForHeight('1080p', 240)).toBe('480p');
+  });
+
+  it('keeps the request when the height is unknown', () => {
+    // A probe that could not measure the source is not a reason to guess.
+    expect(presetForHeight('1080p', null)).toBe('1080p');
+    expect(presetForHeight('1080p', 0)).toBe('1080p');
+    expect(presetForHeight('1080p', NaN)).toBe('1080p');
+  });
+
+  it('passes an unknown preset through untouched', () => {
+    expect(presetForHeight('potato', 720)).toBe('potato');
   });
 });

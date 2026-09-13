@@ -327,3 +327,34 @@ export async function searchYouTube(query: string, maxResults: number = 10): Pro
     return [];
   }
 }
+
+/**
+ * Fetch just the title of a yt-dlp-supported URL, for the bot's "now
+ * streaming" nickname.
+ *
+ * Deliberately a second yt-dlp call rather than another `--print` on the URL
+ * resolution: that call is what makes streaming work at all, and a cosmetic
+ * feature must not be able to change its output shape. The cost is one extra
+ * metadata request per stream start, which counts against YouTube's
+ * bot-detection budget like any other.
+ *
+ * Never throws. No title is a cosmetic loss, not a reason to fail a stream.
+ */
+export async function fetchVideoTitle(url: string): Promise<string | null> {
+  try {
+    assertSafeUrl(url);
+    const stdout = await runYtDlp([
+      ...getCookieArgs(),
+      "--no-playlist",
+      "--print", "%(title)s",
+      "--", // nothing past this point is parsed as an option
+      url,
+    ], 20_000, { lowPriority: false });
+
+    const title = stdout.split("\n")[0]?.trim();
+    return title ? title : null;
+  } catch (err: any) {
+    console.warn(`[VideoTitle] Could not read title: ${err.message}`);
+    return null;
+  }
+}
