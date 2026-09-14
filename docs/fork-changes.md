@@ -442,22 +442,43 @@ with B-frames off, and the offer advertises
 That fmtp line is a third thing the codec sites must agree on, alongside the
 mime type and the payload type: it is carried on `RegisterCodec` *and* on the
 local track's capability, because a track whose capability does not match the
-registered codec is not bound to it.
+registered codec is not bound to it. Both come from one `videoCodec()` call so
+they cannot drift apart.
 
-The advertised level stays at 3.1 even for 1080p. Every H.264 WebRTC
-implementation offers 42e01f, decoders in practice accept a higher resolution
-than the level advertises, and a level nobody else offers is likelier to fail
-negotiation than to be honoured.
+**The level is computed from the frame size, not hardcoded.** The first
+version advertised `42e01f` — Constrained Baseline *level 3.1*, which caps at
+1280x720 — on the reasoning that every WebRTC implementation offers that string
+and decoders do not enforce it. That reasoning was wrong, and a deploy proved
+it: at 1080p, `h264_vaapi` stamps level 4.0 into the SPS (`00 00 00 01 67 42 40
+28`, where `28` is level_idc 40) while the SDP promised 3.1. The peer
+negotiated, connected, counted packets and rendered nothing — the third
+variation of the same silent failure.
+
+`h264LevelIdc` now walks Table A-1 and returns the lowest level whose frame and
+macroblock-rate limits the stream fits inside, so 720p30 offers 3.1, 1080p30
+offers 4.0 and 2160p30 offers 5.1. The frame *rate* has to bind as well as the
+size: 720p60 needs a higher level than 720p30 even though the frame is
+identical. The constraint bits stay at `e0`, the spelling every H.264 WebRTC
+implementation uses; only the level byte moves.
+
+Because the level depends on the resolution, the fmtp line cannot live in the
+registry as a constant — the sidecar records the dimensions alongside the
+active profile and `videoCodec()` builds the capability that the SDP and the
+local track both use. An unknown size deliberately over-advertises (5.2): too
+*low* a level is what breaks decoding.
 
 `h264_vaapi` asks the driver for `constrained_baseline`. A GPU that exposes no
 such encode entrypoint fails the probe and falls back to `libx264` — the right
 outcome, since Main or High would encode and not decode. Expect that fallback
 to be common.
 
-**Unverified against a TeamSpeak client.** The reasoning above is why the
-previous attempt failed; whether these two changes are *sufficient* has not
-been observed, only argued. `packages/sidecar/encoders_test.go` pins the
-registry invariants, not the wire behaviour.
+**Partly verified against a TeamSpeak client.** A deploy confirmed that the GPU
+does expose a ConstrainedBaseline encode entrypoint (the fallback to libx264
+never fired), that the parameter sets reach the bitstream, and that the per-peer
+gate opens. It also produced the level mismatch described above. Whether fixing
+the level is *sufficient* has still not been observed, only argued.
+`packages/sidecar/encoders_test.go` pins the registry and level invariants, not
+the wire behaviour.
 
 ### Images published to GHCR
 

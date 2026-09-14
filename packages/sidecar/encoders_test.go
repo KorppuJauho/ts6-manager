@@ -41,8 +41,8 @@ func TestPayloadTypeAndFmtpAgreePerCodec(t *testing.T) {
 		if p.PayloadType != first.PayloadType {
 			t.Errorf("%s: payload type %d != %d on %s", p.Key, p.PayloadType, first.PayloadType, first.Key)
 		}
-		if p.SDPFmtpLine != first.SDPFmtpLine {
-			t.Errorf("%s: fmtp line differs from %s", p.Key, first.Key)
+		if p.NeedsFmtp != first.NeedsFmtp {
+			t.Errorf("%s: fmtp requirement differs from %s", p.Key, first.Key)
 		}
 	}
 }
@@ -74,11 +74,12 @@ func TestH264ProfilesCarryWhatOpenH264Needs(t *testing.T) {
 			t.Errorf("%s: B-frames are not allowed in Constrained Baseline", p.Key)
 		}
 
-		if !strings.Contains(p.SDPFmtpLine, "profile-level-id=42e01f") {
-			t.Errorf("%s: fmtp does not advertise Constrained Baseline: %q", p.Key, p.SDPFmtpLine)
+		fmtp := p.FmtpFor(1920, 1080, 30)
+		if !strings.Contains(fmtp, "profile-level-id=42e0") {
+			t.Errorf("%s: fmtp does not advertise Constrained Baseline: %q", p.Key, fmtp)
 		}
-		if !strings.Contains(p.SDPFmtpLine, "packetization-mode=1") {
-			t.Errorf("%s: fmtp must match FFmpeg's STAP-A/FU-A packetisation: %q", p.Key, p.SDPFmtpLine)
+		if !strings.Contains(fmtp, "packetization-mode=1") {
+			t.Errorf("%s: fmtp must match FFmpeg's STAP-A/FU-A packetisation: %q", p.Key, fmtp)
 		}
 	}
 
@@ -94,8 +95,8 @@ func TestVpxProfilesCarryNoFmtp(t *testing.T) {
 		if p.MimeType == webrtc.MimeTypeH264 {
 			continue
 		}
-		if p.SDPFmtpLine != "" {
-			t.Errorf("%s: unexpected fmtp line %q", p.Key, p.SDPFmtpLine)
+		if got := p.FmtpFor(1920, 1080, 30); got != "" {
+			t.Errorf("%s: unexpected fmtp line %q", p.Key, got)
 		}
 	}
 }
@@ -113,5 +114,48 @@ func TestEveryCodecHasASoftwareProfile(t *testing.T) {
 		if !software[p.MimeType] {
 			t.Errorf("%s has no software fallback for %s", p.Key, p.MimeType)
 		}
+	}
+}
+
+// The level advertised in the SDP has to cover the stream actually sent. A
+// hardcoded 42e01f (level 3.1, which caps at 1280x720) was offered while
+// h264_vaapi stamped level 4.0 into the SPS of a 1080p stream; the peer
+// connected, received packets and rendered nothing.
+func TestH264LevelCoversEveryPreset(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		w, h, fps     int
+		wantLevelByte string
+	}{
+		{"480p24", 854, 480, 24, "1e"},    // 3.0
+		{"720p30", 1280, 720, 30, "1f"},   // 3.1, exactly at the limit
+		{"1080p30", 1920, 1080, 30, "28"}, // 4.0, what the GPU stamped
+		{"1440p30", 2560, 1440, 30, "32"}, // 5.0
+		{"2160p30", 3840, 2160, 30, "33"}, // 5.1
+	} {
+		got := h264FmtpLine(tc.w, tc.h, tc.fps)
+		want := "profile-level-id=42e0" + tc.wantLevelByte
+		if !strings.Contains(got, want) {
+			t.Errorf("%s: got %q, want it to contain %q", tc.name, got, want)
+		}
+	}
+}
+
+// 720p at 60 needs more macroblocks per second than level 3.1 sustains, even
+// though the frame itself fits — the rate limit has to bind too, or a high
+// frame rate silently under-advertises again.
+func TestH264LevelRespectsFrameRate(t *testing.T) {
+	at30 := h264LevelIdc(1280, 720, 30)
+	at60 := h264LevelIdc(1280, 720, 60)
+	if at60 <= at30 {
+		t.Errorf("720p60 level 0x%02x should exceed 720p30 level 0x%02x", at60, at30)
+	}
+}
+
+// An unknown size must over-advertise rather than under-advertise: too low a
+// level is what breaks decoding.
+func TestH264LevelWithoutDimensions(t *testing.T) {
+	if got := h264LevelIdc(0, 0, 0); got != 0x34 {
+		t.Errorf("got 0x%02x, want the highest level 0x34", got)
 	}
 }

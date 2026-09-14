@@ -58,9 +58,11 @@ files; edit `schema.prisma` and let db push apply it.
 `NewTrackLocalStaticRTP` capability, and FFmpeg's `-payload_type`. Change one
 and the stream negotiates one format while carrying another — which fails
 silently, as a black or frozen video. All three derive from one record in
-`encoders.go`; keep it that way. For H.264 the `SDPFmtpLine` is part of that
-identity too, and its encoder arguments must keep the in-band SPS/PPS
-bitstream filter — without it the stream connects and shows nothing.
+`encoders.go`; keep it that way. For H.264 the fmtp line is part of that
+identity too — built by `FmtpFor` from the frame size, because the advertised
+level has to cover the stream actually sent — and its encoder arguments must
+keep the in-band SPS/PPS bitstream filter. Get either wrong and the stream
+connects, counts packets, and shows nothing.
 
 **`SOURCE_SEPARATOR` is a wire format between two processes.** A DASH source
 is video and audio URLs joined by `|||`: declared in

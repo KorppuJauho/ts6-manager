@@ -369,6 +369,13 @@ type Sidecar struct {
 	profile   EncoderProfile
 	hwDevice  string
 
+	// The dimensions the active profile is encoding at. H.264 carries the
+	// level in its SDP, and the level depends on frame size and rate, so the
+	// offer cannot be built without them.
+	encWidth  int
+	encHeight int
+	encFPS    int
+
 	// Mirrors the active profile's need for keyframe gating so the RTP
 	// forwarding loop can test it without taking profileMu per packet.
 	// It must be written from setActiveProfile, never latched at start-up:
@@ -533,12 +540,32 @@ func (s *Sidecar) activeProfile() EncoderProfile {
 	return s.profile
 }
 
-func (s *Sidecar) setActiveProfile(p EncoderProfile, device string) {
+func (s *Sidecar) setActiveProfile(p EncoderProfile, device string, width, height, fps int) {
 	s.profileMu.Lock()
 	s.profile = p
 	s.hwDevice = device
+	s.encWidth = width
+	s.encHeight = height
+	s.encFPS = fps
 	s.profileMu.Unlock()
 	s.gateKeyframe.Store(needsKeyframeGate(p))
+}
+
+// videoCodec is the capability the SDP offers and the local track carries.
+// Both must be identical: a track whose capability does not match the
+// registered codec is not bound to it.
+func (s *Sidecar) videoCodec() webrtc.RTPCodecCapability {
+	s.profileMu.RLock()
+	p, w, h, fps := s.profile, s.encWidth, s.encHeight, s.encFPS
+	s.profileMu.RUnlock()
+	if p.Key == "" {
+		p = defaultProfile()
+	}
+	return webrtc.RTPCodecCapability{
+		MimeType:    p.MimeType,
+		ClockRate:   90000,
+		SDPFmtpLine: p.FmtpFor(w, h, fps),
+	}
 }
 
 // needsKeyframeGate reports whether a joining peer should be held until a
@@ -660,14 +687,7 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 	profile := s.activeProfile()
 
 	m := &webrtc.MediaEngine{}
-	// The fmtp line is part of the codec's identity for H.264, so it has to be
-	// on both the negotiated codec and the local track — a track whose
-	// capability does not match the registered codec is not bound to it.
-	videoCodec := webrtc.RTPCodecCapability{
-		MimeType:    profile.MimeType,
-		ClockRate:   90000,
-		SDPFmtpLine: profile.SDPFmtpLine,
-	}
+	videoCodec := s.videoCodec()
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: videoCodec,
 		PayloadType:        webrtc.PayloadType(profile.PayloadType),
@@ -981,7 +1001,6 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	s.resetPeerStreamState()
 
 	s.source = source
-	s.setActiveProfile(profile, device)
 
 	w := width
 	h := height
@@ -998,6 +1017,10 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	if fps <= 0 {
 		fps = envIntOrDefault("VIDEO_FRAMERATE", 30)
 	}
+
+	// After the defaults, not before: the H.264 level in the SDP is derived
+	// from these, and a zero would describe a stream nobody is sending.
+	s.setActiveProfile(profile, device, w, h, fps)
 
 	args := []string{}
 	if profile.NeedsDevice() && device != "" {

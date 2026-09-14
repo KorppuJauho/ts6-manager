@@ -27,12 +27,11 @@ type EncoderProfile struct {
 	MimeType    string `json:"mimeType"`
 	PayloadType uint8  `json:"payloadType"`
 
-	// SDPFmtpLine is the codec's "a=fmtp" parameters. Empty for VP8 and VP9,
-	// which negotiate on the codec name alone. H.264 does not: the profile and
-	// packetization mode are part of what the peer agrees to, and an offer
-	// without them is one the peer can read as a different codec than the one
-	// being sent.
-	SDPFmtpLine string `json:"sdpFmtpLine,omitempty"`
+	// NeedsFmtp marks a codec whose "a=fmtp" parameters are part of what the
+	// peer agrees to. VP8 and VP9 negotiate on the codec name alone; H.264
+	// does not, and the line it needs depends on the resolution being sent,
+	// so it is built per stream by FmtpFor rather than stored here.
+	NeedsFmtp bool `json:"needsFmtp,omitempty"`
 
 	// HWAccel is "" for software encoding, otherwise the FFmpeg hwaccel name
 	// ("vaapi"). A profile with a backend needs a device path.
@@ -52,20 +51,77 @@ type EncoderProfile struct {
 // NeedsDevice reports whether this profile has to be given a DRM render node.
 func (p EncoderProfile) NeedsDevice() bool { return p.HWAccel != "" }
 
-// h264FmtpLine is what the peer has to agree to for H.264.
+// h264Level is one row of Table A-1: the level_idc byte, the largest frame it
+// allows in macroblocks, and the macroblocks per second it can sustain.
+type h264Level struct {
+	idc     uint8
+	maxFS   int
+	maxMBPS int
+}
+
+// Ascending, so the first row a stream fits in is the lowest level that can
+// carry it. 4.1 is omitted: it has the same frame and rate limits as 4.0 and
+// differs only in bitrate and buffer size, so it can never be the first fit.
+var h264Levels = []h264Level{
+	{idc: 0x1e, maxFS: 1620, maxMBPS: 40500},    // 3.0
+	{idc: 0x1f, maxFS: 3600, maxMBPS: 108000},   // 3.1  - 720p30 exactly
+	{idc: 0x20, maxFS: 5120, maxMBPS: 216000},   // 3.2
+	{idc: 0x28, maxFS: 8192, maxMBPS: 245760},   // 4.0  - 1080p30 exactly
+	{idc: 0x2a, maxFS: 8704, maxMBPS: 522240},   // 4.2
+	{idc: 0x32, maxFS: 22080, maxMBPS: 589824},  // 5.0  - 1440p30
+	{idc: 0x33, maxFS: 36864, maxMBPS: 983040},  // 5.1  - 2160p30
+	{idc: 0x34, maxFS: 36864, maxMBPS: 2073600}, // 5.2
+}
+
+// h264LevelIdc returns the lowest level that can actually carry this stream.
 //
-// profile-level-id 42e01f is Constrained Baseline, level 3.1 — the one profile
-// Cisco's OpenH264, which is what TeamSpeak decodes with, actually implements.
-// Offering Main or High negotiates cleanly and then fails to decode, which
-// presents as a black stream rather than as an error.
+// Getting this wrong is not cosmetic. A hardcoded 42e01f (level 3.1, which
+// caps at 1280x720) was advertised while h264_vaapi stamped level 4.0 into the
+// SPS of a 1080p stream. The peer negotiated, connected, received packets and
+// rendered nothing — the SDP promised a stream the decoder was then not
+// prepared for.
+func h264LevelIdc(width, height, fps int) uint8 {
+	if width <= 0 || height <= 0 {
+		return h264Levels[len(h264Levels)-1].idc
+	}
+	if fps <= 0 {
+		fps = 30
+	}
+
+	// A macroblock is 16x16, and a partial one still counts.
+	mbs := ((width + 15) / 16) * ((height + 15) / 16)
+	for _, l := range h264Levels {
+		if mbs <= l.maxFS && mbs*fps <= l.maxMBPS {
+			return l.idc
+		}
+	}
+	return h264Levels[len(h264Levels)-1].idc
+}
+
+// h264FmtpLine builds the "a=fmtp" parameters for a stream of this size.
 //
-// The level is advertised as 3.1 and not raised for 1080p on purpose: every
-// H.264 WebRTC implementation offers 42e01f, decoders in practice accept a
-// higher resolution than the advertised level, and a level nobody else offers
-// is likelier to fail negotiation than to be enforced.
+// 42e0 is Constrained Baseline — the one profile Cisco's OpenH264, which is
+// what TeamSpeak decodes with, implements. Main or High negotiate cleanly and
+// then fail to decode, which presents as a black stream rather than an error.
+// The constraint bits stay at e0, the spelling every H.264 WebRTC
+// implementation uses; only the level byte is computed.
 //
 // packetization-mode=1 is what FFmpeg's RTP muxer emits (STAP-A and FU-A).
-const h264FmtpLine = "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
+func h264FmtpLine(width, height, fps int) string {
+	return fmt.Sprintf(
+		"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e0%02x",
+		h264LevelIdc(width, height, fps),
+	)
+}
+
+// FmtpFor returns the fmtp line this profile needs for a stream of this size,
+// or "" for a codec that negotiates on its name alone.
+func (p EncoderProfile) FmtpFor(width, height, fps int) string {
+	if !p.NeedsFmtp {
+		return ""
+	}
+	return h264FmtpLine(width, height, fps)
+}
 
 // h264InBandParameterSets re-inserts SPS/PPS ahead of every keyframe.
 //
@@ -119,8 +175,8 @@ var encoderProfiles = []EncoderProfile{
 	{
 		Key: "h264_software", Label: "H.264 (software)",
 		MimeType: webrtc.MimeTypeH264, PayloadType: 102,
-		SDPFmtpLine: h264FmtpLine,
-		Encoder:     "libx264", PixelFormat: "yuv420p",
+		NeedsFmtp: true,
+		Encoder:   "libx264", PixelFormat: "yuv420p",
 		ExtraArgs: append([]string{
 			// Constrained Baseline is what the advertised profile-level-id
 			// promises and what OpenH264 decodes: no B-frames, no CABAC.
@@ -133,8 +189,8 @@ var encoderProfiles = []EncoderProfile{
 	{
 		Key: "h264_vaapi", Label: "H.264 (VAAPI hardware)",
 		MimeType: webrtc.MimeTypeH264, PayloadType: 102,
-		SDPFmtpLine: h264FmtpLine,
-		HWAccel:     "vaapi", Encoder: "h264_vaapi", PixelFormat: "nv12",
+		NeedsFmtp: true,
+		HWAccel:   "vaapi", Encoder: "h264_vaapi", PixelFormat: "nv12",
 		ExtraArgs: append([]string{
 			// A driver that exposes no ConstrainedBaseline encode entrypoint
 			// fails the probe and falls back to libx264, which is the right
