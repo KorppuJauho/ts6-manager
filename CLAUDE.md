@@ -57,7 +57,10 @@ files; edit `schema.prisma` and let db push apply it.
 `packages/sidecar/main.go`: `MediaEngine.RegisterCodec` (SDP), the
 `NewTrackLocalStaticRTP` capability, and FFmpeg's `-payload_type`. Change one
 and the stream negotiates one format while carrying another — which fails
-silently, as a black or frozen video.
+silently, as a black or frozen video. All three derive from one record in
+`encoders.go` via `videoCodec()`; keep it that way. A codec that carries more
+identity than its name — H.264's fmtp line, for one — has to agree there too.
+See `docs/fork-changes.md` on why H.264 is not in the registry.
 
 **`SOURCE_SEPARATOR` is a wire format between two processes.** A DASH source
 is video and audio URLs joined by `|||`: declared in

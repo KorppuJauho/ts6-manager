@@ -12,10 +12,13 @@ import {
   DEFAULT_PRESET,
   SOURCE_SEPARATOR,
   clampBitrate,
+  presetForHeight,
   type VideoViewerInfo,
   type VideoStreamStatus,
 } from './streaming/types.js';
-import { getCookieArgs, runYtDlp, assertSafeUrl } from './audio/youtube.js';
+import { probeVideoHeight } from './streaming/probe.js';
+import { nowPlayingNickname, streamingNickname, MAX_NICKNAME_LENGTH } from './nickname.js';
+import { getCookieArgs, runYtDlp, assertSafeUrl, fetchVideoTitle } from './audio/youtube.js';
 import { validateUrl } from '../utils/url-validator.js';
 import {
   STREAM_SETTINGS_DEFAULTS,
@@ -24,6 +27,11 @@ import {
 } from '../utils/stream-settings.js';
 
 /** Resolve a YouTube/yt-dlp-compatible URL to a direct stream URL */
+/** Sites whose URLs are page addresses yt-dlp must turn into media URLs. */
+function isYtDlpSource(url: string): boolean {
+  return url.includes('youtube.com/') || url.includes('youtu.be/') || url.includes('twitch.tv/');
+}
+
 async function resolveVideoUrl(
   url: string,
   maxHeight: number = 720,
@@ -32,7 +40,7 @@ async function resolveVideoUrl(
   assertSafeUrl(url);
 
   // Only resolve YouTube and other yt-dlp-supported sites
-  if (!url.includes('youtube.com/') && !url.includes('youtu.be/') && !url.includes('twitch.tv/')) {
+  if (!isYtDlpSource(url)) {
     // Anything else goes straight to the sidecar's ffmpeg, so apply the same
     // SSRF guard the radio path uses before handing a URL to a fetcher.
     //
@@ -167,6 +175,7 @@ export class VoiceBot extends EventEmitter {
   private sidecarProc: SidecarProcess | null = null;
   private sidecarHttp: SidecarClient | null = null;
   private _videoStreaming: boolean = false;
+  private _videoTitle: string | null = null;
   private _activeStreamId: string | null = null;
   private _videoSource: string | null = null;
   private _videoPreset: string = DEFAULT_PRESET;
@@ -295,28 +304,41 @@ export class VoiceBot extends EventEmitter {
     if (partial.nickname) this._originalNickname = partial.nickname;
   }
 
-  /** Update the TS3 nickname to show what's playing. Max 30 chars. */
-  private updateNowPlayingNickname(title: string): void {
+  private setNickname(nick: string): void {
     if (this._status === 'stopped') return;
-    const prefix = this._originalNickname;
-    const sep = ' \u266A '; // ♪
-    const maxLen = 30;
-    let nick = prefix + sep + title;
-    if (nick.length > maxLen) {
-      const available = maxLen - prefix.length - sep.length - 1; // -1 for …
-      nick = prefix + sep + (available > 0 ? title.substring(0, available) + '\u2026' : '\u2026');
-    }
     try {
       this.client.sendCommand(buildCommand('clientupdate', { client_nickname: nick }));
     } catch { }
   }
 
-  /** Reset TS3 nickname to original. */
+  /** Show the queue track the bot is playing. */
+  private updateNowPlayingNickname(title: string): void {
+    this.setNickname(nowPlayingNickname(this._originalNickname, title));
+  }
+
+  /** Show the video source the bot is streaming. */
+  private updateStreamingNickname(title: string): void {
+    this._videoTitle = title;
+    this.setNickname(streamingNickname(this._originalNickname, title));
+  }
+
+  /**
+   * Recompute the nickname from what the bot is still doing.
+   *
+   * A bot can stream video and play its queue at the same time, so ending one
+   * must not wipe the other's label off the nickname. Call this only after
+   * clearing the state of whatever just ended.
+   */
   private resetNickname(): void {
-    if (this._status === 'stopped') return;
-    try {
-      this.client.sendCommand(buildCommand('clientupdate', { client_nickname: this._originalNickname }));
-    } catch { }
+    if (this._videoStreaming && this._videoTitle) {
+      this.setNickname(streamingNickname(this._originalNickname, this._videoTitle));
+      return;
+    }
+    if (this._nowPlaying?.title) {
+      this.setNickname(nowPlayingNickname(this._originalNickname, this._nowPlaying.title));
+      return;
+    }
+    this.setNickname(this._originalNickname);
   }
 
   /** Start polling ICY metadata for a radio stream. */
@@ -390,7 +412,9 @@ export class VoiceBot extends EventEmitter {
   async stop(): Promise<void> {
     this._manuallyStopped = true;
     this.stopIcyPolling();
-    this.resetNickname();
+    // Not resetNickname(): that recomputes from what is still playing, and
+    // here the bot is leaving, so the plain name is the right one.
+    this.setNickname(this._originalNickname);
     this.stopPlayback();
     this._nowPlaying = null;
     // Stop video stream if active
@@ -933,13 +957,36 @@ export class VoiceBot extends EventEmitter {
     };
   }
 
+  /**
+   * A human-readable name for what is being streamed.
+   *
+   * An explicit title wins: !tv knows the channel name the viewer asked for,
+   * which beats anything derivable from the playlist URL behind it. Falling
+   * back to the host at least names where the stream comes from.
+   */
+  private async resolveStreamTitle(source: string, explicit?: string): Promise<string> {
+    const given = explicit?.trim();
+    if (given) return given;
+
+    if (isYtDlpSource(source)) {
+      const title = await fetchVideoTitle(source);
+      if (title) return title;
+    }
+
+    try {
+      return new URL(source).hostname;
+    } catch {
+      return source.slice(0, MAX_NICKNAME_LENGTH);
+    }
+  }
+
   /** Start video streaming to TS6 via WebRTC */
   async startVideoStream(
     source: string,
     preset?: string,
     framerate?: number,
     bitrate?: string,
-    opts: { operatorConfigured?: boolean } = {},
+    opts: { operatorConfigured?: boolean; title?: string } = {},
   ): Promise<void> {
     if (this._status !== 'connected' && this._status !== 'playing' && this._status !== 'paused') {
       throw new Error('Bot is not connected');
@@ -1063,18 +1110,47 @@ export class VoiceBot extends EventEmitter {
     this._videoSource = source;
     this._videoStartedAt = Date.now();
 
-    // Resolve YouTube/streaming URLs via yt-dlp, then start ffmpeg
+    // Resolve YouTube/streaming URLs via yt-dlp, then start ffmpeg.
+    // The display title resolves alongside: it may need its own yt-dlp call,
+    // and running the two together keeps that off the stream-start path.
     this._videoOperatorConfigured = opts.operatorConfigured === true;
-    const resolvedSource = await resolveVideoUrl(source, presetConfig.height, this._videoOperatorConfigured);
+    const [resolvedSource, title] = await Promise.all([
+      resolveVideoUrl(source, presetConfig.height, this._videoOperatorConfigured),
+      this.resolveStreamTitle(source, opts.title),
+    ]);
+
+    // Encode at the source's own resolution rather than upscaling to the
+    // preset: a 720p channel gains nothing from a 1080p encode but spends the
+    // higher bitrate carrying interpolated pixels, and arrives softer than the
+    // source. This matters for yt-dlp sources too — the format filter caps
+    // height at the preset, so a video whose best format is 720p arrives at
+    // 720p however high the preset is set.
+    const sourceHeight = await probeVideoHeight(resolvedSource);
+    const encodePreset = presetForHeight(this._videoPreset, sourceHeight);
+    if (encodePreset !== this._videoPreset) {
+      console.log(
+        `[VoiceBot ${this.config.id}] Source is ${sourceHeight}p, encoding at ${encodePreset} instead of ${this._videoPreset}`,
+      );
+      this._videoPreset = encodePreset;
+    }
+
+    // Preset-derived settings follow the downgrade; an explicit framerate or
+    // bitrate from the caller is their decision and survives it.
+    const encodeConfig = STREAM_PRESETS[this._videoPreset] ?? presetConfig;
+    this._videoFramerate = framerate && framerate > 0 ? framerate : encodeConfig.framerate;
+    this._videoBitrate = clampBitrate(bitrate?.trim() || encodeConfig.bitrate);
+
     await this.sidecarHttp.setSource(
       resolvedSource,
-      presetConfig.width,
-      presetConfig.height,
-      effectiveFramerate,
-      effectiveBitrate,
+      encodeConfig.width,
+      encodeConfig.height,
+      this._videoFramerate,
+      this._videoBitrate,
       this._videoEncoder,
       this._videoHwDevice,
     );
+
+    this.updateStreamingNickname(title);
 
     console.log(`[VoiceBot ${this.config.id}] Video stream started: ${stream.id}, source: ${source}`);
     this.emit('videoStreamStarted', { streamId: stream.id, source, preset: this._videoPreset });
@@ -1118,9 +1194,11 @@ export class VoiceBot extends EventEmitter {
     this._activeStreamId = null;
     this._videoSource = null;
     this._videoStreaming = false;
+    this._videoTitle = null;
     this._videoStartedAt = null;
     this.signaling?.dispose();
     this.signaling = null;
+    this.resetNickname();
 
     console.log(`[VoiceBot ${this.config.id}] Video stream stopped`);
     this.emit('videoStreamStopped');
@@ -1188,6 +1266,12 @@ export class VoiceBot extends EventEmitter {
       this._videoEncoder,
       this._videoHwDevice,
     );
+    // The preset stays as it is: renegotiating dimensions under peers that
+    // are already connected is a bigger change than this path should make.
+    // A source whose resolution differs is therefore encoded at the preset
+    // chosen for the previous one.
+    this.updateStreamingNickname(await this.resolveStreamTitle(source));
+
     console.log(`[VoiceBot ${this.config.id}] Video source changed: ${source}`);
     this.emit('videoSourceChanged', source);
   }

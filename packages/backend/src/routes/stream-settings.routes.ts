@@ -37,6 +37,7 @@ const FALLBACK_ENCODERS: EncoderCapability[] = [
   { key: 'vp9_vaapi', label: 'VP9 (VAAPI hardware)', mimeType: 'video/VP9', payloadType: 98, hwAccel: 'vaapi', encoder: 'vp9_vaapi', available: false },
 ];
 
+
 function asBool(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }

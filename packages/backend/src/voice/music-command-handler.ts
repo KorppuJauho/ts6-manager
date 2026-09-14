@@ -1130,6 +1130,9 @@ export class MusicCommandHandler {
       // see resolveVideoUrl. The user supplied only the channel name.
       await bot.startVideoStream(this.tvChannels.get(match)!, undefined, undefined, undefined, {
         operatorConfigured: true,
+        // The channel name the viewer asked for reads better in the bot's
+        // nickname than the playlist URL behind it.
+        title: match,
       });
     } catch (err: any) {
       reply(this.m.tvStartFailed(err.message));

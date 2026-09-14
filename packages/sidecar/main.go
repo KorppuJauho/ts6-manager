@@ -541,6 +541,16 @@ func (s *Sidecar) setActiveProfile(p EncoderProfile, device string) {
 	s.gateKeyframe.Store(needsKeyframeGate(p))
 }
 
+// videoCodec is the capability the SDP offers and the local track carries.
+// Both must be identical: a track whose capability does not match the
+// registered codec is not bound to it.
+func (s *Sidecar) videoCodec() webrtc.RTPCodecCapability {
+	return webrtc.RTPCodecCapability{
+		MimeType:  s.activeProfile().MimeType,
+		ClockRate: 90000,
+	}
+}
+
 // needsKeyframeGate reports whether a joining peer should be held until a
 // frame start this sidecar can recognise. Only VP8 has a payload-descriptor
 // parser here, so every other codec opens on the first packet — as the
@@ -660,12 +670,10 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 	profile := s.activeProfile()
 
 	m := &webrtc.MediaEngine{}
+	videoCodec := s.videoCodec()
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{
-			MimeType:  profile.MimeType,
-			ClockRate: 90000,
-		},
-		PayloadType: webrtc.PayloadType(profile.PayloadType),
+		RTPCodecCapability: videoCodec,
+		PayloadType:        webrtc.PayloadType(profile.PayloadType),
 	}, webrtc.RTPCodecTypeVideo); err != nil {
 		return "", err
 	}
@@ -699,10 +707,7 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 		return "", fmt.Errorf("create PeerConnection: %w", err)
 	}
 
-	videoTrack, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{MimeType: profile.MimeType, ClockRate: 90000},
-		"video", "ts6-stream",
-	)
+	videoTrack, err := webrtc.NewTrackLocalStaticRTP(videoCodec, "video", "ts6-stream")
 	if err != nil {
 		pc.Close()
 		return "", err
@@ -786,6 +791,12 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 	s.peersLock.Unlock()
 
 	sdp = pc.LocalDescription().SDP
+	// Both halves of the negotiation, behind SIDECAR_DEBUG_LOGS=1. A codec
+	// that negotiates and renders nothing leaves no error anywhere else: the
+	// only place the disagreement is visible is the offer and the answer side
+	// by side. Off by default because an SDP carries ICE credentials and the
+	// host's addresses.
+	debugf("[SDP] Offer to %s:\n%s", id, sdp)
 	return sdp, nil
 }
 
@@ -905,6 +916,8 @@ func (s *Sidecar) SetAnswer(id, sdp string) error {
 		return nil
 	}
 
+	debugf("[SDP] Answer from %s:\n%s", id, sdp)
+
 	if err := peer.PC.SetRemoteDescription(webrtc.SessionDescription{
 		Type: webrtc.SDPTypeAnswer,
 		SDP:  sdp,
@@ -979,7 +992,6 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	s.resetPeerStreamState()
 
 	s.source = source
-	s.setActiveProfile(profile, device)
 
 	w := width
 	h := height
@@ -996,6 +1008,8 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	if fps <= 0 {
 		fps = envIntOrDefault("VIDEO_FRAMERATE", 30)
 	}
+
+	s.setActiveProfile(profile, device)
 
 	args := []string{}
 	if profile.NeedsDevice() && device != "" {

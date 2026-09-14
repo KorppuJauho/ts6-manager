@@ -257,6 +257,42 @@ so nothing had reported it. Every one had a published fix, so they were
 resolved with version bumps and overrides rather than added to
 `auditConfig.ignoreGhsas`.
 
+A later sweep cleared the advisories *below* that gate — CI only fails at
+`high`, so eleven low and moderate findings had accumulated unreported. Nine
+were fixable inside the majors already in use:
+
+| Advisory | Reached via | Fix |
+|---|---|---|
+| undici ×3 (response desync, CRLF injection, cookie injection) | `discord.js` | override `^6.27.0` → `^6.28.0` |
+| qs ×2 (array-limit bypass, DoS via attacker-controlled `isBuffer`) | `express` | new override `^6.16.0` |
+| body-parser (size enforcement silently disabled) | `express` | new override `^1.20.6` |
+| vitest / @vitest/mocker (path traversal) | direct dev dependency | `^4.1.8` → `^4.1.11` |
+| react-router-dom (open redirect → XSS) | direct dependency | `^6.30.4` → `^6.30.6` |
+
+The undici one is worth remembering: the override pinning it at `^6.27.0` —
+added by the earlier sweep — was itself what held it one patch below the fix.
+An override is a floor *and* a ceiling on attention; it does not age out.
+
+`qs` and `body-parser` need overrides because they arrive through `express`,
+and 4.22.2 is the last of the v4 line — there is no express release carrying
+the fixes.
+
+**Two remain, both `react-router`, both fixed only in >=7.18.0.** Neither is
+reachable here, which is why the v7 major has not been forced:
+
+- `deserializeErrors()` constructor injection (CVE-2026-53666) is an SSR
+  hydration path. There is no SSR — no `renderToString`, `hydrateRoot` or
+  `StaticRouter` anywhere; the frontend is a Vite SPA served by nginx.
+- The `<Link>`/`useNavigate` backslash open redirect (CVE-2026-53669) needs an
+  attacker-controlled target. There are no dynamic `<Link to={…}>`, and every
+  `navigate()` call takes a literal path except `Login.tsx`'s
+  `navigate(location.pathname, { replace: true })`, which returns to the path
+  already open.
+
+React Router 7 peers `react >=18`, so that upgrade does not drag React 19 in
+with it — it is a routing-API migration on its own, not part of the React 19
+cluster.
+
 ### Field fixes from the first production deploy
 
 Four defects the refactor introduced or exposed, found on a real host rather
@@ -339,6 +375,237 @@ than in CI:
   carries host modes, and keeping it unwritable by the app denies the easiest
   place to persist code after a compromise.
 
+### Quality of life: source-matched quality, and a bot that says what it plays
+
+- **The encode follows the source's resolution.** A 720p TV channel streamed at
+  the 1080p preset was upscaled: no more detail, 5500k spent carrying
+  interpolated pixels, and a softer picture than the source. The backend now
+  probes the resolved source with `ffprobe` and drops the preset to the largest
+  one the source can fill. It only ever goes *down* — the configured preset is
+  a ceiling an operator chose, so a 4K source does not pull a deliberate 720p
+  stream up to 2160p — and an unmeasurable source keeps the configured preset
+  rather than being guessed at.
+
+  This applies to YouTube too, and not redundantly: the yt-dlp format filter
+  caps height *at* the preset, so a video whose best format is 720p already
+  arrived as 720p however high the preset was set.
+
+  The probe opens its own short-lived connection to the source before FFmpeg
+  opens one. `STREAM_PROBE_TIMEOUT_MS=0` disables it, for an IPTV subscription
+  that permits only one concurrent connection.
+
+  `setVideoSource` (changing source mid-stream) deliberately keeps the preset
+  it started with: renegotiating dimensions under connected peers is a larger
+  change than that path should make.
+
+- **The bot's nickname says what it is streaming** — `Boten Anna - Streaming
+  'MTV3'`. This extends the existing music/ICY nickname rather than restoring
+  something: the pre-fork snapshot renamed the bot for queue tracks and radio
+  metadata, never for video.
+
+  `!tv` passes the channel name the viewer asked for, which reads better than
+  the playlist URL behind it. A YouTube source gets its title from a second,
+  parallel yt-dlp call — deliberately not another `--print` on the URL
+  resolution, because that call is what makes streaming work and a cosmetic
+  feature must not be able to change its output shape. The cost is one extra
+  metadata request per stream start, counting against YouTube's bot-detection
+  budget like any other. Anything else falls back to the source's hostname.
+
+  TeamSpeak caps a nickname at 30 characters, and `" - Streaming ''"` spends 15
+  of them. A bot name long enough to crowd out the title drops to the compact
+  `Boten Anna ▶ MTV3` form instead, so the nickname never announces a stream
+  without saying what of. Ending a video stream restores the queue track's
+  nickname if one is playing, rather than wiping it.
+
+### H.264: attempted, not shipped
+
+H.264 was tried before the fork, produced a black screen, and was replaced with
+VP9. It was attempted again here and **is not in the registry**, for the same
+reason it was absent before: a codec that negotiates, connects, delivers every
+packet and renders nothing is worse than one that is missing, because no log
+anywhere says it failed.
+
+The work and the evidence are preserved on `claude/h264-investigation`, and
+`docs/h264-findings.md` on that branch records what four rounds of testing on
+real hardware ruled out — the encoder, the parameter sets, the profile, the
+keyframe gate, the resolution and the level are all eliminated, and the client
+demonstrably accepts H.264 in its answer. The untested lead is that TeamSpeak
+natively uses AV1 and H.264, so a working H.264 stream exists to capture and
+diff against.
+
+What did survive into `main` from that work is `SIDECAR_DEBUG_LOGS=1` logging
+the full SDP offer and answer. It is what finally made the negotiation legible
+after two wrong guesses, and it is useful for any codec. Off by default: an SDP
+carries ICE credentials and every address the host gathered.
+
+### Quality of life: source-matched quality, and a bot that says what it plays
+
+- **The encode follows the source's resolution.** A 720p TV channel streamed at
+  the 1080p preset was upscaled: no more detail, 5500k spent carrying
+  interpolated pixels, and a softer picture than the source. The backend now
+  probes the resolved source with `ffprobe` and drops the preset to the largest
+  one the source can fill. It only ever goes *down* — the configured preset is
+  a ceiling an operator chose, so a 4K source does not pull a deliberate 720p
+  stream up to 2160p — and an unmeasurable source keeps the configured preset
+  rather than being guessed at.
+
+  This applies to YouTube too, and not redundantly: the yt-dlp format filter
+  caps height *at* the preset, so a video whose best format is 720p already
+  arrived as 720p however high the preset was set.
+
+  The probe opens its own short-lived connection to the source before FFmpeg
+  opens one. `STREAM_PROBE_TIMEOUT_MS=0` disables it, for an IPTV subscription
+  that permits only one concurrent connection.
+
+  `setVideoSource` (changing source mid-stream) deliberately keeps the preset
+  it started with: renegotiating dimensions under connected peers is a larger
+  change than that path should make.
+
+- **The bot's nickname says what it is streaming** — `Boten Anna - Streaming
+  'MTV3'`. This extends the existing music/ICY nickname rather than restoring
+  something: the pre-fork snapshot renamed the bot for queue tracks and radio
+  metadata, never for video.
+
+  `!tv` passes the channel name the viewer asked for, which reads better than
+  the playlist URL behind it. A YouTube source gets its title from a second,
+  parallel yt-dlp call — deliberately not another `--print` on the URL
+  resolution, because that call is what makes streaming work and a cosmetic
+  feature must not be able to change its output shape. The cost is one extra
+  metadata request per stream start, counting against YouTube's bot-detection
+  budget like any other. Anything else falls back to the source's hostname.
+
+  TeamSpeak caps a nickname at 30 characters, and `" - Streaming ''"` spends 15
+  of them. A bot name long enough to crowd out the title drops to the compact
+  `Boten Anna ▶ MTV3` form instead, so the nickname never announces a stream
+  without saying what of. Ending a video stream restores the queue track's
+  nickname if one is playing, rather than wiping it.
+
+### H.264
+
+H.264 was tried in the pre-fork version, produced a black screen, and was
+replaced with VP9. It is now in the registry, and the two things that make it
+work are the two that were missing.
+
+**In-band parameter sets.** FFmpeg gives SPS/PPS to the muxer as extradata.
+When FFmpeg also writes the SDP, they come out as `sprop-parameter-sets`; here
+pion writes the SDP and never sees that extradata, so unless the parameter sets
+are *also* in the bitstream the decoder has nothing to configure itself from.
+It renders nothing while FFmpeg, ICE and the RTP counters all look healthy —
+the same silent black screen the stale keyframe gate produced, from a
+completely different cause. `-bsf:v dump_extra=freq=keyframe` puts them ahead
+of every keyframe. The filter compares before prepending, so it is harmless
+where they are already present.
+
+**Constrained Baseline, and saying so.** TeamSpeak decodes with Cisco's
+OpenH264, which implements Constrained Baseline. Main and High negotiate
+cleanly and then fail to decode. So both profiles encode Constrained Baseline
+with B-frames off, and the offer advertises
+`profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1`.
+
+That fmtp line is a third thing the codec sites must agree on, alongside the
+mime type and the payload type: it is carried on `RegisterCodec` *and* on the
+local track's capability, because a track whose capability does not match the
+registered codec is not bound to it. Both come from one `videoCodec()` call so
+they cannot drift apart.
+
+**The level is computed from the frame size, not hardcoded.** The first
+version advertised `42e01f` — Constrained Baseline *level 3.1*, which caps at
+1280x720 — on the reasoning that every WebRTC implementation offers that string
+and decoders do not enforce it. That reasoning was wrong, and a deploy proved
+it: at 1080p, `h264_vaapi` stamps level 4.0 into the SPS (`00 00 00 01 67 42 40
+28`, where `28` is level_idc 40) while the SDP promised 3.1. The peer
+negotiated, connected, counted packets and rendered nothing — the third
+variation of the same silent failure.
+
+`h264LevelIdc` now walks Table A-1 and returns the lowest level whose frame and
+macroblock-rate limits the stream fits inside, so 720p30 offers 3.1, 1080p30
+offers 4.0 and 2160p30 offers 5.1. The frame *rate* has to bind as well as the
+size: 720p60 needs a higher level than 720p30 even though the frame is
+identical. The constraint bits stay at `e0`, the spelling every H.264 WebRTC
+implementation uses; only the level byte moves.
+
+Because the level depends on the resolution, the fmtp line cannot live in the
+registry as a constant — the sidecar records the dimensions alongside the
+active profile and `videoCodec()` builds the capability that the SDP and the
+local track both use. An unknown size deliberately over-advertises (5.2): too
+*low* a level is what breaks decoding.
+
+`h264_vaapi` asks the driver for `constrained_baseline`. A GPU that exposes no
+such encode entrypoint fails the probe and falls back to `libx264` — the right
+outcome, since Main or High would encode and not decode. Expect that fallback
+to be common.
+
+**Debugging aid.** `SIDECAR_DEBUG_LOGS=1` now logs the SDP offer and the
+answer in full. A codec that negotiates and then renders nothing leaves no
+error anywhere — the disagreement is only visible with both halves side by
+side, which is how two wrong guesses were made before it existed. Off by
+default: an SDP carries ICE credentials and host addresses.
+
+**The client caps H.264 at 720p, and says so in the answer.** With both
+halves of the SDP visible the cause was immediate:
+
+```
+Offer  a=fmtp:102 …profile-level-id=42e028    level 4.0, what a 1080p encode is
+Answer a=fmtp:102 …profile-level-id=42e01f    level 3.1, what the client accepts
+```
+
+The TeamSpeak client does support H.264 — the answer carries the m-line,
+`recvonly`, `rtpmap:102 H264/90000` — but it answers 42e01f *whatever level is
+offered*. Level 3.1 allows 3600 macroblocks at 108000 per second: exactly
+1280x720 at 30fps. A 1080p H.264 stream is one the receiver has already
+refused, and it presents as black.
+
+`presetForCodec` and `framerateForCodec` hold H.264 to 720p30. They only ever
+reduce, so they compose with the source probe — whichever binds harder wins.
+This is why VP9 streams 1080p happily: VPx carries no level in its SDP, so
+there is nothing to exceed. It also explains the earlier level fix: that made
+the *offer* honest, which is what made the answer's disagreement legible.
+
+The cap is a property of this client, not of H.264. If a future TeamSpeak
+answers with a higher level, the ceiling in `types.ts` is the one place to
+raise.
+
+**Partly verified against a TeamSpeak client.** A deploy confirmed that the GPU
+does expose a ConstrainedBaseline encode entrypoint (the fallback to libx264
+never fired), that the parameter sets reach the bitstream, and that the per-peer
+gate opens. It also produced the level mismatch described above. Whether fixing
+the level is *sufficient* has still not been observed, only argued.
+`packages/sidecar/encoders_test.go` pins the registry and level invariants, not
+the wire behaviour.
+
+### Images published to GHCR
+
+`.github/workflows/publish.yml` builds the three images on every push and
+pushes them to `ghcr.io/korppujauho/ts6-manager-{backend,frontend,sidecar}`,
+tagged by branch, by commit SHA, and `latest` on the default branch.
+`docker-compose.ghcr.yml` runs them.
+
+Upstream has no equivalent, and `docker-compose.hub.yml` — which does exist
+upstream — points at `clusterzx/ts6-manager:*`, so a deployment using it runs
+**upstream's** code, not this fork's. That file is left alone; the new one
+is separate rather than a rewrite of it.
+
+The motive is that building on the deployment host has failed twice in ways CI
+could not reproduce: a `cpu-features` toolchain error, and the umask problem
+under "Second deploy" above. Both were properties of the host, not the commit.
+Pulling an image CI already built removes the host's toolchain from the
+deployment path entirely.
+
+CI's own Docker job now reads the same build cache (`cache-from`, read-only —
+both workflows writing one scope would evict each other). The cache scope is
+keyed on the *Dockerfile* name because that is what CI's matrix carries; the
+two must agree or neither reuses the other's layers.
+
+The publish half is verified: the workflow's first run built and pushed all
+three images, and all three manifests are readable from GHCR with an
+anonymously-obtained token, so a deployment needs no `docker login`. That
+corrects an expectation written into the first draft of this section —
+packages inherit the *repository's* visibility rather than defaulting to
+private.
+
+What remains unverified is the other half: nothing here has run a container
+from one of these images.
+
 ## Open follow-ups
 
 1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
@@ -371,6 +638,7 @@ than in CI:
    checking against a real capture before it can be relied on; gating on the B
    bit alone would at least align the gate to a frame start.
 3. Confirm whether removing A/V pacing causes audio drift on long streams.
-4. H.264 profiles. The registry has no entry: the RTP handling and keyframe
-   detection in `main.go` are VP8/VP9 shaped, and a profile that negotiates
-   but never renders would be worse than its absence.
+4. An H.264 parameter-set detector, so a peer joining mid-stream is held until
+   an SPS rather than opening on the first packet. The same gap VP9 has; less
+   pressing than it looks, because the PLI interceptor asks for a keyframe and
+   the parameter sets are repeated at every one.

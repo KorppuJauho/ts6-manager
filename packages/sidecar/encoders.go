@@ -46,12 +46,6 @@ type EncoderProfile struct {
 func (p EncoderProfile) NeedsDevice() bool { return p.HWAccel != "" }
 
 // encoderProfiles is the registry. Order is the order the UI lists them in.
-//
-// Only VP8 and VP9 are listed as usable. H.264 is deliberately absent rather
-// than present-and-broken: the RTP depacketiser and the keyframe detection in
-// main.go are VP8/VP9 shaped, and offering an H.264 profile that negotiates
-// but never renders would be worse than not offering it. See
-// docs/fork-changes.md.
 var encoderProfiles = []EncoderProfile{
 	{
 		Key: "vp8_software", Label: "VP8 (software)",
@@ -119,7 +113,7 @@ func availableEncoders() map[string]bool {
 		out, err := exec.Command(getFfmpegPath(), "-hide_banner", "-encoders").Output()
 		if err != nil {
 			// Treat an unprobeable FFmpeg as "software only" rather than
-			// failing: the software profiles are always compiled in.
+			// failing: libvpx is in every build worth deploying.
 			availableSet["libvpx"] = true
 			availableSet["libvpx-vp9"] = true
 			return

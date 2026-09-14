@@ -600,9 +600,11 @@ musicBotRoutes.post('/:id/stream/start', async (req: Request, res: Response, nex
     const manager: VoiceBotManager = req.app.locals.voiceBotManager;
     const bot = manager.getBot(parseInt(req.params.id as string));
     if (!bot) throw new AppError(404, 'Music bot not found');
-    const { source, preset, framerate, bitrate } = req.body;
+    const { source, preset, framerate, bitrate, title } = req.body;
     if (!source) throw new AppError(400, 'source is required');
-    await bot.startVideoStream(source, preset, framerate, bitrate);
+    await bot.startVideoStream(source, preset, framerate, bitrate, {
+      title: typeof title === 'string' ? title : undefined,
+    });
     res.json({ success: true, status: bot.videoStreamStatus });
   } catch (err) { next(err); }
 });
