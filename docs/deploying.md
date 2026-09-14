@@ -133,18 +133,17 @@ images** workflow builds all three images on every push and pushes them to
 GHCR, so the host pulls a build that has already been tested instead of
 repeating it.
 
-### One-time: make the packages pullable
+### Pulling needs no setup
 
-The first push creates three packages, **private by default**. Either make
-them public, or give the NAS a login:
+A package inherits the visibility of the repository that published it, and
+this repository is public, so the images are public too — verified by fetching
+a GHCR token with no credentials and reading all three manifests. The NAS
+needs no `docker login`.
 
-- **Public** (simplest for a public repository): on GitHub, *Your profile →
-  Packages → `ts6-manager-backend` → Package settings → Change visibility →
-  Public*. Repeat for `-frontend` and `-sidecar`. Nothing then needs
-  credentials.
-- **Private**: create a personal access token with the `read:packages` scope
-  and run `docker login ghcr.io -u <your-github-username>` on the NAS, pasting
-  the token as the password.
+That changes if the repository is ever made private. The images follow it, and
+the host then needs a personal access token with the `read:packages` scope:
+`docker login ghcr.io -u <your-github-username>`, pasting the token as the
+password.
 
 ### Deploying
 

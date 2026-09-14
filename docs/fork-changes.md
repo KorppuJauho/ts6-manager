@@ -482,9 +482,15 @@ both workflows writing one scope would evict each other). The cache scope is
 keyed on the *Dockerfile* name because that is what CI's matrix carries; the
 two must agree or neither reuses the other's layers.
 
-Not verified end to end: nothing here has pulled a published image. The
-workflow is unrun until this branch is pushed, and the packages it creates are
-private until someone makes them public — `docs/deploying.md` covers both.
+The publish half is verified: the workflow's first run built and pushed all
+three images, and all three manifests are readable from GHCR with an
+anonymously-obtained token, so a deployment needs no `docker login`. That
+corrects an expectation written into the first draft of this section —
+packages inherit the *repository's* visibility rather than defaulting to
+private.
+
+What remains unverified is the other half: nothing here has run a container
+from one of these images.
 
 ## Open follow-ups
 
