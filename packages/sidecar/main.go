@@ -808,6 +808,12 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 	s.peersLock.Unlock()
 
 	sdp = pc.LocalDescription().SDP
+	// Both halves of the negotiation, behind SIDECAR_DEBUG_LOGS=1. A codec
+	// that negotiates and renders nothing leaves no error anywhere else: the
+	// only place the disagreement is visible is the offer and the answer side
+	// by side. Off by default because an SDP carries ICE credentials and the
+	// host's addresses.
+	debugf("[SDP] Offer to %s:\n%s", id, sdp)
 	return sdp, nil
 }
 
@@ -926,6 +932,8 @@ func (s *Sidecar) SetAnswer(id, sdp string) error {
 		debugf("[API] Ignoring answer in signaling state %s for peer: %s", peer.PC.SignalingState(), id)
 		return nil
 	}
+
+	debugf("[SDP] Answer from %s:\n%s", id, sdp)
 
 	if err := peer.PC.SetRemoteDescription(webrtc.SessionDescription{
 		Type: webrtc.SDPTypeAnswer,

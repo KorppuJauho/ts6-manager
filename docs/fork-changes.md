@@ -472,6 +472,12 @@ such encode entrypoint fails the probe and falls back to `libx264` — the right
 outcome, since Main or High would encode and not decode. Expect that fallback
 to be common.
 
+**Debugging aid.** `SIDECAR_DEBUG_LOGS=1` now logs the SDP offer and the
+answer in full. A codec that negotiates and then renders nothing leaves no
+error anywhere — the disagreement is only visible with both halves side by
+side, which is how two wrong guesses were made before it existed. Off by
+default: an SDP carries ICE credentials and host addresses.
+
 **Partly verified against a TeamSpeak client.** A deploy confirmed that the GPU
 does expose a ConstrainedBaseline encode entrypoint (the fallback to libx264
 never fired), that the parameter sets reach the bitstream, and that the per-peer
