@@ -69,6 +69,28 @@ The client's own H.264 defaults, worth matching in an experiment: `tune` = ll
 (low latency), `zerolatency` = 1, `forced-idr` = 1, `preset` = p6, 2-pass with
 `multipass` = qres.
 
+## Confirmed: the client decodes 1080p H.264, in hardware
+
+Connection Info on an H.264 stream from another TeamSpeak client:
+
+```
+Quality (Current)  1920x1080 29fps
+Decoder            FFmpeg (h264_cuvid)
+```
+
+This settles two things. There is **no resolution ceiling** — 1080p H.264
+arrives and renders — so the 720p cap that was briefly shipped was wrong, and
+the level theory is dead beyond argument. And the decoder is **`h264_cuvid`**,
+NVIDIA's NVDEC through FFmpeg. OpenH264 is not in this path at all, so nothing
+needed constraining to Constrained Baseline.
+
+It also raises the odds on the IDR question below. `cuvid` is a *hardware*
+decoder, and hardware decoders are markedly stricter than software ones about
+needing a clean IDR access point before they will start: a software decoder can
+often muddle along from a non-IDR I-frame, NVDEC generally will not. A stream
+whose keyframes are I-but-not-IDR would plausibly play in a browser and show
+nothing here — which is the shape of this whole bug.
+
 ## The next thing to check: are our keyframes IDR?
 
 `forced-idr` exists in NVENC because an encoder can emit an I-frame that is not
