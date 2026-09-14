@@ -85,3 +85,8 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           push: false
+          # Read the cache the publish workflow writes, so building the same
+          # commit twice (once here for the PR, once there to push the image)
+          # costs one slow build rather than two. Read-only on purpose: two
+          # workflows writing the same scope would evict each other's layers.
+          cache-from: type=gha,scope=${{ matrix.dockerfile }}

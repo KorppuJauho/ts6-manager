@@ -1,0 +1,94 @@
+# Run this fork from images built by CI, instead of compiling on the host.
+#
+# Deploying a branch is then a tag change and a pull:
+#   TS6_IMAGE_TAG=claude-my-branch docker compose -f docker-compose.ghcr.yml up -d
+#
+# The tag is the branch name with slashes turned into dashes — the Publish
+# images workflow prints the exact tags it pushed. `sha-<full commit>` pins a
+# deployment to one commit; a branch tag moves under you on the next push.
+#
+# Everything else matches docker-compose.yml: same ports, same volumes, same
+# GPU passthrough. Only the source of the images differs, so the two files
+# must be kept in step.
+
+services:
+  backend:
+    image: ghcr.io/korppujauho/ts6-manager-backend:${TS6_IMAGE_TAG:-main}
+    container_name: ts6-backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=file:/app/packages/backend/data/ts6webui.db
+      - "JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env - generate with openssl rand -hex 32}"
+      - "ENCRYPTION_KEY=${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env, different from JWT_SECRET - generate with openssl rand -hex 32}"
+      - TS_ALLOW_SELF_SIGNED=${TS_ALLOW_SELF_SIGNED:-false}
+      - JWT_ACCESS_EXPIRY=15m
+      - JWT_REFRESH_EXPIRY=7d
+      # Must match the origin the browser actually uses — it is the CORS
+      # allow-list value. Set FRONTEND_URL in .env for anything but localhost.
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - MUSIC_DIR=/data/music
+      - SIDECAR_URL=http://ts6-sidecar:9800
+      - "SIDECAR_TOKEN=${SIDECAR_TOKEN:?set SIDECAR_TOKEN in .env - generate with openssl rand -hex 32}"
+      # 0 disables the source resolution probe — see .env.example.
+      - STREAM_PROBE_TIMEOUT_MS=${STREAM_PROBE_TIMEOUT_MS:-6000}
+    volumes:
+      - backend-data:/app/packages/backend/data
+      - music-data:/data/music
+    ports:
+      - "3001:3001"
+    depends_on:
+      - sidecar
+    networks:
+      - ts6-network
+
+  sidecar:
+    image: ghcr.io/korppujauho/ts6-manager-sidecar:${TS6_IMAGE_TAG:-main}
+    container_name: ts6-sidecar
+    restart: unless-stopped
+    environment:
+      - SIDECAR_PORT=9800
+      # Reachable by the backend over the internal bridge network only —
+      # do not publish this port: the API has no per-user authentication.
+      - SIDECAR_LISTEN_ADDR=0.0.0.0
+      - "SIDECAR_TOKEN=${SIDECAR_TOKEN:?set SIDECAR_TOKEN in .env - generate with openssl rand -hex 32}"
+    # Hardware encoding needs the host GPU inside the container. Without this
+    # the sidecar starts, then every stream dies with "No VA display found".
+    #
+    # The device path itself is NOT set here — it is a setting, configured in
+    # Settings -> Streaming and sent with each stream, because a long-lived
+    # sidecar container cannot pick up an environment change made in the UI.
+    # The container runs as the unprivileged `sidecar` user, so it also needs
+    # membership of the group owning the render node — check the host with
+    # `stat -c '%g' /dev/dri/renderD128` and set RENDER_GID in .env if the
+    # default does not match (commonly 104 on Debian, 44/109 elsewhere).
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:-104}"
+    networks:
+      - ts6-network
+
+  frontend:
+    image: ghcr.io/korppujauho/ts6-manager-frontend:${TS6_IMAGE_TAG:-main}
+    container_name: ts6-frontend
+    restart: unless-stopped
+    ports:
+      # Host port is configurable so a deployment never has to patch this
+      # tracked file — set FRONTEND_PORT in .env instead.
+      - "${FRONTEND_PORT:-3000}:8080"
+    depends_on:
+      - backend
+    networks:
+      - ts6-network
+
+volumes:
+  backend-data:
+    driver: local
+  music-data:
+    driver: local
+
+networks:
+  ts6-network:
+    driver: bridge

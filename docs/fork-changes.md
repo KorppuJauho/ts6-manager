@@ -459,6 +459,33 @@ previous attempt failed; whether these two changes are *sufficient* has not
 been observed, only argued. `packages/sidecar/encoders_test.go` pins the
 registry invariants, not the wire behaviour.
 
+### Images published to GHCR
+
+`.github/workflows/publish.yml` builds the three images on every push and
+pushes them to `ghcr.io/korppujauho/ts6-manager-{backend,frontend,sidecar}`,
+tagged by branch, by commit SHA, and `latest` on the default branch.
+`docker-compose.ghcr.yml` runs them.
+
+Upstream has no equivalent, and `docker-compose.hub.yml` — which does exist
+upstream — points at `clusterzx/ts6-manager:*`, so a deployment using it runs
+**upstream's** code, not this fork's. That file is left alone; the new one
+is separate rather than a rewrite of it.
+
+The motive is that building on the deployment host has failed twice in ways CI
+could not reproduce: a `cpu-features` toolchain error, and the umask problem
+under "Second deploy" above. Both were properties of the host, not the commit.
+Pulling an image CI already built removes the host's toolchain from the
+deployment path entirely.
+
+CI's own Docker job now reads the same build cache (`cache-from`, read-only —
+both workflows writing one scope would evict each other). The cache scope is
+keyed on the *Dockerfile* name because that is what CI's matrix carries; the
+two must agree or neither reuses the other's layers.
+
+Not verified end to end: nothing here has pulled a published image. The
+workflow is unrun until this branch is pushed, and the packages it creates are
+private until someone makes them public — `docs/deploying.md` covers both.
+
 ## Open follow-ups
 
 1. **Confirm VP9 hardware encoding on the refactored path.** The hardware

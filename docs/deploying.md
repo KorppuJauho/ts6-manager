@@ -123,3 +123,65 @@ git checkout <commit>
 ```
 
 `git checkout main && git pull` returns to tracking the branch.
+
+## Deploying a branch from CI-built images
+
+Building on the NAS compiles `@discordjs/opus` and `cpu-features` from source
+every time the dependency layer changes. It is slow, and it fails in ways CI
+never sees — the host toolchain is not the one CI tested. The **Publish
+images** workflow builds all three images on every push and pushes them to
+GHCR, so the host pulls a build that has already been tested instead of
+repeating it.
+
+### One-time: make the packages pullable
+
+The first push creates three packages, **private by default**. Either make
+them public, or give the NAS a login:
+
+- **Public** (simplest for a public repository): on GitHub, *Your profile →
+  Packages → `ts6-manager-backend` → Package settings → Change visibility →
+  Public*. Repeat for `-frontend` and `-sidecar`. Nothing then needs
+  credentials.
+- **Private**: create a personal access token with the `read:packages` scope
+  and run `docker login ghcr.io -u <your-github-username>` on the NAS, pasting
+  the token as the password.
+
+### Deploying
+
+`docker-compose.ghcr.yml` is `docker-compose.yml` with `image:` in place of
+`build:` — same ports, same volumes, same GPU passthrough. Point it at a tag:
+
+```bash
+cd /volume2/docker/ts6-manager
+TS6_IMAGE_TAG=claude-my-branch docker compose -f docker-compose.ghcr.yml pull
+TS6_IMAGE_TAG=claude-my-branch docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Set `TS6_IMAGE_TAG` in `.env` instead to avoid repeating it. Back to the
+default branch: `TS6_IMAGE_TAG=main`, pull, up.
+
+### Which tag
+
+| Tag | Moves? | Use for |
+|---|---|---|
+| `main` | On every push to main | Normal running |
+| `latest` | Same as `main` | Same as `main` |
+| `<branch>` | On every push to that branch | Testing a branch |
+| `sha-<full commit>` | Never | Pinning, and rollback |
+
+A branch tag has slashes replaced by dashes: `claude/my-branch` publishes as
+`claude-my-branch`. The workflow run's log prints the exact tags it pushed.
+
+Rolling back is a tag change and a pull — the previous `sha-` tag is still in
+the registry, so nothing has to be rebuilt.
+
+**The database is not part of this.** Images carry code; `backend-data` is a
+volume. Moving between branches does not revert a schema change that
+`prisma db push` already applied, so take the backup described above before
+deploying a branch that touches `schema.prisma`.
+
+### Building on the host is still supported
+
+`docker-compose.yml` still builds from the working tree, and is the right
+choice when testing an uncommitted change. The two files must be kept in step
+when one gains a service, a port or an environment variable.
