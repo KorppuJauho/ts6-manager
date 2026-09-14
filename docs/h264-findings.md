@@ -51,6 +51,44 @@ RTP is written to the track.
 - **AV1.** Named alongside H.264 as a codec TeamSpeak uses natively. Untried
   here; would need an encoder the host can run.
 
+## What the client actually runs
+
+Its settings expose both paths. There is a "Use Cisco OpenH264" toggle, which
+is why OpenH264 was the starting assumption — that was accurate reporting of
+what the client advertises. But the same settings screen exposes an **NVIDIA
+NVENC H.264 encoder (h264_nvenc)** page whose options are FFmpeg's AVOption
+names verbatim: `forced-idr`, `rc-lookahead`, `spatial-aq`, `multipass`,
+`tune`, `zerolatency`, `nonref_p`, `dpb_size`. And its Connection Info reports
+`Decoder: FFmpeg (av1_cuvid)`.
+
+So FFmpeg is in the client's H.264 path on both sides, with OpenH264 as a
+separate software option. Constraining our encode to what OpenH264 supports was
+therefore constraining it to the wrong thing.
+
+The client's own H.264 defaults, worth matching in an experiment: `tune` = ll
+(low latency), `zerolatency` = 1, `forced-idr` = 1, `preset` = p6, 2-pass with
+`multipass` = qres.
+
+## The next thing to check: are our keyframes IDR?
+
+`forced-idr` exists in NVENC because an encoder can emit an I-frame that is not
+an **IDR** — a picture that refreshes the decoder completely. Without an IDR, a
+decoder joining an ongoing stream has no clean entry point: it receives data,
+finds nothing it can start from, and displays nothing. That is precisely the
+symptom here, and it fits every elimination so far.
+
+`h264_vaapi` was run with `-g 30` and no equivalent flag. Nobody has checked
+whether the keyframes it produces are IDR. The earlier bitstream dump confirmed
+an SPS (`0x67`) at the head of the file but was not read past that.
+
+**The check:** encode a few seconds through the same path and look for NAL unit
+type 5 (byte `0x65` after a start code) rather than only type 1. If there are
+none, that is the bug, and the fix is whatever makes VAAPI emit IDR at each
+keyframe.
+
+This costs one command and no deployment, and it should be the first thing
+tried — before any further reasoning about profiles, levels or SDP.
+
 ## The premise this was built on was wrong
 
 TeamSpeak's own Connection Info panel, on a stream from another client, reports:
