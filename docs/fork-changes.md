@@ -478,6 +478,30 @@ error anywhere — the disagreement is only visible with both halves side by
 side, which is how two wrong guesses were made before it existed. Off by
 default: an SDP carries ICE credentials and host addresses.
 
+**The client caps H.264 at 720p, and says so in the answer.** With both
+halves of the SDP visible the cause was immediate:
+
+```
+Offer  a=fmtp:102 …profile-level-id=42e028    level 4.0, what a 1080p encode is
+Answer a=fmtp:102 …profile-level-id=42e01f    level 3.1, what the client accepts
+```
+
+The TeamSpeak client does support H.264 — the answer carries the m-line,
+`recvonly`, `rtpmap:102 H264/90000` — but it answers 42e01f *whatever level is
+offered*. Level 3.1 allows 3600 macroblocks at 108000 per second: exactly
+1280x720 at 30fps. A 1080p H.264 stream is one the receiver has already
+refused, and it presents as black.
+
+`presetForCodec` and `framerateForCodec` hold H.264 to 720p30. They only ever
+reduce, so they compose with the source probe — whichever binds harder wins.
+This is why VP9 streams 1080p happily: VPx carries no level in its SDP, so
+there is nothing to exceed. It also explains the earlier level fix: that made
+the *offer* honest, which is what made the answer's disagreement legible.
+
+The cap is a property of this client, not of H.264. If a future TeamSpeak
+answers with a higher level, the ceiling in `types.ts` is the one place to
+raise.
+
 **Partly verified against a TeamSpeak client.** A deploy confirmed that the GPU
 does expose a ConstrainedBaseline encode entrypoint (the fallback to libx264
 never fired), that the parameter sets reach the bitstream, and that the per-peer

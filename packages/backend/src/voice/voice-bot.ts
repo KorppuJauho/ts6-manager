@@ -13,6 +13,8 @@ import {
   SOURCE_SEPARATOR,
   clampBitrate,
   presetForHeight,
+  presetForCodec,
+  framerateForCodec,
   type VideoViewerInfo,
   type VideoStreamStatus,
 } from './streaming/types.js';
@@ -23,6 +25,7 @@ import { validateUrl } from '../utils/url-validator.js';
 import {
   STREAM_SETTINGS_DEFAULTS,
   effectiveEncoder,
+  codecFromProfile,
   type StreamSettingsValue,
 } from '../utils/stream-settings.js';
 
@@ -1134,10 +1137,27 @@ export class VoiceBot extends EventEmitter {
       this._videoPreset = encodePreset;
     }
 
+    // Then the receiver's own ceiling. The TeamSpeak client answers an H.264
+    // offer with Constrained Baseline level 3.1 whatever level was offered,
+    // and 3.1 stops at 720p — sending 1080p H.264 is sending something it has
+    // already said it cannot decode, which shows as a black stream.
+    const codec = codecFromProfile(this._videoEncoder);
+    const codecPreset = presetForCodec(this._videoPreset, codec);
+    if (codecPreset !== this._videoPreset) {
+      console.log(
+        `[VoiceBot ${this.config.id}] ${codec} receivers cap at ${codecPreset}, encoding there instead of ${this._videoPreset}`,
+      );
+      this._videoPreset = codecPreset;
+    }
+
     // Preset-derived settings follow the downgrade; an explicit framerate or
-    // bitrate from the caller is their decision and survives it.
+    // bitrate from the caller is their decision and survives it — except the
+    // codec ceiling, which is the receiver's limit rather than a preference.
     const encodeConfig = STREAM_PRESETS[this._videoPreset] ?? presetConfig;
-    this._videoFramerate = framerate && framerate > 0 ? framerate : encodeConfig.framerate;
+    this._videoFramerate = framerateForCodec(
+      framerate && framerate > 0 ? framerate : encodeConfig.framerate,
+      codec,
+    );
     this._videoBitrate = clampBitrate(bitrate?.trim() || encodeConfig.bitrate);
 
     await this.sidecarHttp.setSource(
