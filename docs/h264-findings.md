@@ -51,6 +51,45 @@ RTP is written to the track.
 - **AV1.** Named alongside H.264 as a codec TeamSpeak uses natively. Untried
   here; would need an encoder the host can run.
 
+## The premise this was built on was wrong
+
+TeamSpeak's own Connection Info panel, on a stream from another client, reports:
+
+```
+Quality (Current)  2560x1440 30fps
+Decoder            FFmpeg (av1_cuvid)
+```
+
+Two things follow.
+
+**The client decodes with FFmpeg**, not with Cisco's OpenH264. Everything above
+that constrained the encode to Constrained Baseline, and then to level 3.1,
+came from assuming OpenH264's limits. FFmpeg decodes High profile at any level.
+If H.264 decoding goes through FFmpeg too — likely, though only AV1 is
+confirmed — then profile and level were never the constraint, and the `42e01f`
+in the client's answer is a default in its SDP generation rather than a
+statement of what it can handle.
+
+**The client happily renders 1440p**, so there is no general resolution ceiling
+either.
+
+A next attempt should therefore *not* start by constraining the encode. Try
+Main or High profile at the native resolution, and look at the RTP framing
+instead — the FU-A/STAP-A packetisation and the marker bit are the part nobody
+has inspected.
+
+## AV1 is blocked, for two reasons
+
+AV1 is the other codec TeamSpeak uses natively, and the panel above proves it
+works at 1440p. It is still not a route from here:
+
+- The deployment host decodes AV1 but cannot encode it. Software encoding
+  (libaom, SVT-AV1) is not realistic for realtime on that CPU.
+- More fundamentally, **check whether FFmpeg can packetise AV1 into RTP at
+  all** before investing anything. The AV1 RTP payload format is recent, and
+  the sidecar image ships FFmpeg 5.1. If `-f rtp` cannot carry AV1, no encoder
+  makes a difference.
+
 ## Why VP9 is unaffected
 
 VP8 and VP9 carry no level, profile or parameter sets in their SDP, so none of
