@@ -91,6 +91,13 @@ often muddle along from a non-IDR I-frame, NVDEC generally will not. A stream
 whose keyframes are I-but-not-IDR would plausibly play in a browser and show
 nothing here — which is the shape of this whole bug.
 
+## The 720p cap is removed
+
+Now that 1080p is confirmed working into `h264_cuvid`, `presetForCodec` and
+`framerateForCodec` are gone from this branch. H.264 encodes at the configured
+preset like every other codec. The theory they implemented is recorded above;
+the code implementing it is not worth keeping.
+
 ## The next thing to check: are our keyframes IDR?
 
 `forced-idr` exists in NVENC because an encoder can emit an I-frame that is not
