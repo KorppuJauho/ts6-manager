@@ -39,12 +39,9 @@ RTP is written to the track.
 
 ## What has not been examined
 
-- **The RTP payload itself** — now the only remaining surface, so it has a
-  section of its own at the end of this file. Nobody has captured the packets
-  the client receives and checked the FU-A/STAP-A framing, the marker bit on
-  the last packet of each access unit, or whether SPS/PPS survive into RTP.
-  Every sampled packet logged `marker=false`, though the sampling interval
-  (every 600th) makes that weak evidence either way.
+- ~~**The RTP payload itself.**~~ Checked and clean: SPS, PPS and the IDR all
+  survive the packetiser, recovered from the bitstream rather than from the
+  SDP. See the section below.
 - **What TeamSpeak's own client sends.** The most direct comparison available:
   capture a TeamSpeak-to-TeamSpeak video stream and diff its SDP and RTP
   against this one. TeamSpeak natively uses **AV1 and H.264**, so a working
@@ -136,7 +133,7 @@ message. It is not an anomaly and it is not stripped anywhere in the pipeline.
 
 So the encoder output is correct. The bug is downstream of it.
 
-## What is left: the RTP framing
+## Checked: the RTP framing carries everything
 
 Every stage from the source to the encoder's output bitstream is now
 eliminated with evidence. The bitstream is well-formed H.264 that a hardware
@@ -210,7 +207,75 @@ One caveat on what this proves: it tests FFmpeg's depacketiser, not
 TeamSpeak's. It can find a fault but cannot fully clear one — a stream FFmpeg
 reassembles may still be framed in a way the client will not accept.
 
-## A second route, if the framing is clean
+### It was run, and RTP carries everything
+
+```
+ 30 00 00 01 06     SEI
+ 29 00 00 01 21     non-IDR slices
+  1 00 00 01 65     IDR slice
+  1 00 00 01 67     SPS
+  1 00 00 01 68     PPS
+```
+
+Out the far side of the packetiser: 30 frames, one IDR, and the SPS and PPS
+that go with it. FU-A fragmentation, aggregation and reassembly all work.
+
+**The control that makes this meaningful is the SDP.** FFmpeg's RTP reader
+will happily take parameter sets from `sprop-parameter-sets` in the SDP
+instead of from the bitstream, which would have made a clean result worthless
+— pion writes our real SDP and never sees FFmpeg's extradata. The generated
+SDP was:
+
+```
+m=video 5999 RTP/AVP 102
+a=rtpmap:102 H264/90000
+a=fmtp:102 packetization-mode=1
+```
+
+No `sprop-parameter-sets`. The SPS and PPS above were recovered from the RTP
+stream itself and from nowhere else.
+
+Two things about the run, neither of which changes the answer. The reader
+captured 30 frames rather than the 180 that six seconds implies, because the
+`lavfi` source has no `-re` and the encode runs flat out — it had mostly
+finished before the reader joined. And the earlier run's flood of
+`non-existing PPS 0 referenced` / `no frame!` errors was join-time noise, not
+a fault: roughly 22 frames of complaints from a reader that joined one second
+in, ending when the next keyframe arrived with its parameter sets, which is
+exactly what `-g 30` predicts.
+
+The caveat above still stands — this is FFmpeg's depacketiser, not
+TeamSpeak's. But there is no fault here to find.
+
+## The strongest remaining lead: we offer one codec, TeamSpeak offers several
+
+Observed on a client-to-client stream: **a viewer whose hardware cannot decode
+AV1 gets H.264 instead, mid-stream, without the stream restarting.**
+
+That is not something WebRTC does by accident. Switching payload type without
+renegotiation means both codecs were in the same `m=` line from the start, and
+the sender moves between them in-band. Every working TeamSpeak video stream is
+therefore a multi-codec offer.
+
+The sidecar registers **exactly one** video codec — `RegisterCodec` is called
+once, with the active profile — so our `m=` line carries a single payload
+type. That is a structural difference from every stream the client is known to
+render, and it is now the least-examined thing left.
+
+It suggests an experiment that costs one deploy: register VP9 *and* H.264,
+and read the answer. Either the client picks one and renders it, which tells
+us what it prefers when given the choice, or it behaves differently from the
+single-codec case, which is itself the finding.
+
+A related gap, noticed while looking: the registered capability carries no
+`RTCPFeedback` at all — no `nack`, no `nack pli`, no `ccm fir`, no
+`goog-remb`, where pion's own `RegisterDefaultCodecs` sets all four. So our
+SDP advertises no `a=rtcp-fb` lines and the client has no negotiated way to
+ask for a keyframe. Weak on its own, since VP9 renders fine under the same
+gap and a keyframe goes out every second regardless, but it is a second
+difference from a normal WebRTC offer and it costs nothing to close.
+
+## A third route: a known-good reference
 
 Self-host [Moepchi/webspeak3](https://github.com/Moepchi/webspeak3) and screen
 share into TeamSpeak from a browser. Its `publish.ts` does a plain
@@ -251,8 +316,9 @@ has inspected.
 
 ## AV1 is blocked, for two reasons
 
-AV1 is the other codec TeamSpeak uses natively, and the panel above proves it
-works at 1440p. It is still not a route from here:
+AV1 is the other codec TeamSpeak uses natively, the panel above proves it
+works at 1440p, and a client that cannot decode it falls back to H.264
+mid-stream without the stream restarting. It is still not a route from here:
 
 - The deployment host decodes AV1 but cannot encode it. Software encoding
   (libaom, SVT-AV1) is not realistic for realtime on that CPU.
