@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/pion/webrtc/v4"
@@ -34,11 +33,6 @@ func TestNeedsKeyframeGate(t *testing.T) {
 		{"vp8_vaapi", true},
 		{"vp9_software", false},
 		{"vp9_vaapi", false},
-		// H.264 has no parameter-set detector here either, so it opens on the
-		// first packet and relies on the PLI interceptor plus the in-band
-		// SPS/PPS repeated at every keyframe.
-		{"h264_software", false},
-		{"h264_vaapi", false},
 	} {
 		p, ok := profileByKey(tc.key)
 		if !ok {
@@ -59,12 +53,12 @@ func TestGateFlagFollowsActiveProfile(t *testing.T) {
 		t.Fatal("gate must be open before a profile is chosen")
 	}
 
-	s.setActiveProfile(mustProfile(t, "vp8_software"), "", 1280, 720, 30)
+	s.setActiveProfile(mustProfile(t, "vp8_software"), "")
 	if !s.gateKeyframe.Load() {
 		t.Fatal("VP8 must gate on a keyframe")
 	}
 
-	s.setActiveProfile(mustProfile(t, "vp9_vaapi"), "/dev/dri/renderD128", 1280, 720, 30)
+	s.setActiveProfile(mustProfile(t, "vp9_vaapi"), "/dev/dri/renderD128")
 	if s.gateKeyframe.Load() {
 		t.Fatal("VP9 must not be gated by the VP8 parser — this is what showed black video")
 	}
@@ -81,30 +75,4 @@ func mustProfile(t *testing.T, key string) EncoderProfile {
 		t.Fatalf("unknown profile %q", key)
 	}
 	return p
-}
-
-// The SDP and the local track are built from one capability, and for H.264 it
-// has to describe the size actually being encoded — the level is part of the
-// codec's identity, not decoration.
-func TestVideoCodecCarriesTheEncodedSize(t *testing.T) {
-	s := NewSidecar()
-
-	// Before any source, VP8 negotiates on its name alone.
-	if got := s.videoCodec().SDPFmtpLine; got != "" {
-		t.Errorf("default profile should need no fmtp, got %q", got)
-	}
-
-	s.setActiveProfile(mustProfile(t, "h264_vaapi"), "/dev/dri/renderD128", 1920, 1080, 30)
-	cap := s.videoCodec()
-	if cap.MimeType != webrtc.MimeTypeH264 {
-		t.Fatalf("mime = %q, want H264", cap.MimeType)
-	}
-	if !strings.Contains(cap.SDPFmtpLine, "profile-level-id=42e028") {
-		t.Errorf("1080p must advertise level 4.0, got %q", cap.SDPFmtpLine)
-	}
-
-	s.setActiveProfile(mustProfile(t, "h264_vaapi"), "/dev/dri/renderD128", 1280, 720, 30)
-	if got := s.videoCodec().SDPFmtpLine; !strings.Contains(got, "profile-level-id=42e01f") {
-		t.Errorf("720p must advertise level 3.1, got %q", got)
-	}
 }

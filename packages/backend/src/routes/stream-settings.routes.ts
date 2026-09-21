@@ -35,15 +35,8 @@ const FALLBACK_ENCODERS: EncoderCapability[] = [
   { key: 'vp9_software', label: 'VP9 (software)', mimeType: 'video/VP9', payloadType: 98, hwAccel: '', encoder: 'libvpx-vp9', available: false },
   { key: 'vp8_vaapi', label: 'VP8 (VAAPI hardware)', mimeType: 'video/VP8', payloadType: 96, hwAccel: 'vaapi', encoder: 'vp8_vaapi', available: false },
   { key: 'vp9_vaapi', label: 'VP9 (VAAPI hardware)', mimeType: 'video/VP9', payloadType: 98, hwAccel: 'vaapi', encoder: 'vp9_vaapi', available: false },
-  { key: 'h264_software', label: 'H.264 (software)', mimeType: 'video/H264', payloadType: 102, hwAccel: '', encoder: 'libx264', available: false },
-  { key: 'h264_vaapi', label: 'H.264 (VAAPI hardware)', mimeType: 'video/H264', payloadType: 102, hwAccel: 'vaapi', encoder: 'h264_vaapi', available: false },
 ];
 
-/**
- * Display names for codecs whose key does not uppercase into something
- * readable. Anything absent falls back to the uppercased key.
- */
-const CODEC_LABELS: Record<string, string> = { h264: 'H.264' };
 
 function asBool(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
@@ -113,7 +106,7 @@ streamSettingsRoutes.get('/options', async (req: Request, res: Response, next: N
       const codec = codecFromProfile(enc.key);
       const entry = byCodec.get(codec) ?? {
         codec,
-        label: CODEC_LABELS[codec] ?? codec.toUpperCase(),
+        label: codec.toUpperCase(),
         softwareAvailable: false,
         hardwareAvailable: false,
       };

@@ -417,6 +417,69 @@ than in CI:
   without saying what of. Ending a video stream restores the queue track's
   nickname if one is playing, rather than wiping it.
 
+### H.264: attempted, not shipped
+
+H.264 was tried before the fork, produced a black screen, and was replaced with
+VP9. It was attempted again here and **is not in the registry**, for the same
+reason it was absent before: a codec that negotiates, connects, delivers every
+packet and renders nothing is worse than one that is missing, because no log
+anywhere says it failed.
+
+The work and the evidence are preserved on `claude/h264-investigation`, and
+`docs/h264-findings.md` on that branch records what four rounds of testing on
+real hardware ruled out — the encoder, the parameter sets, the profile, the
+keyframe gate, the resolution and the level are all eliminated, and the client
+demonstrably accepts H.264 in its answer. The untested lead is that TeamSpeak
+natively uses AV1 and H.264, so a working H.264 stream exists to capture and
+diff against.
+
+What did survive into `main` from that work is `SIDECAR_DEBUG_LOGS=1` logging
+the full SDP offer and answer. It is what finally made the negotiation legible
+after two wrong guesses, and it is useful for any codec. Off by default: an SDP
+carries ICE credentials and every address the host gathered.
+
+### Quality of life: source-matched quality, and a bot that says what it plays
+
+- **The encode follows the source's resolution.** A 720p TV channel streamed at
+  the 1080p preset was upscaled: no more detail, 5500k spent carrying
+  interpolated pixels, and a softer picture than the source. The backend now
+  probes the resolved source with `ffprobe` and drops the preset to the largest
+  one the source can fill. It only ever goes *down* — the configured preset is
+  a ceiling an operator chose, so a 4K source does not pull a deliberate 720p
+  stream up to 2160p — and an unmeasurable source keeps the configured preset
+  rather than being guessed at.
+
+  This applies to YouTube too, and not redundantly: the yt-dlp format filter
+  caps height *at* the preset, so a video whose best format is 720p already
+  arrived as 720p however high the preset was set.
+
+  The probe opens its own short-lived connection to the source before FFmpeg
+  opens one. `STREAM_PROBE_TIMEOUT_MS=0` disables it, for an IPTV subscription
+  that permits only one concurrent connection.
+
+  `setVideoSource` (changing source mid-stream) deliberately keeps the preset
+  it started with: renegotiating dimensions under connected peers is a larger
+  change than that path should make.
+
+- **The bot's nickname says what it is streaming** — `Boten Anna - Streaming
+  'MTV3'`. This extends the existing music/ICY nickname rather than restoring
+  something: the pre-fork snapshot renamed the bot for queue tracks and radio
+  metadata, never for video.
+
+  `!tv` passes the channel name the viewer asked for, which reads better than
+  the playlist URL behind it. A YouTube source gets its title from a second,
+  parallel yt-dlp call — deliberately not another `--print` on the URL
+  resolution, because that call is what makes streaming work and a cosmetic
+  feature must not be able to change its output shape. The cost is one extra
+  metadata request per stream start, counting against YouTube's bot-detection
+  budget like any other. Anything else falls back to the source's hostname.
+
+  TeamSpeak caps a nickname at 30 characters, and `" - Streaming ''"` spends 15
+  of them. A bot name long enough to crowd out the title drops to the compact
+  `Boten Anna ▶ MTV3` form instead, so the nickname never announces a stream
+  without saying what of. Ending a video stream restores the queue track's
+  nickname if one is playing, rather than wiping it.
+
 ### H.264
 
 H.264 was tried in the pre-fork version, produced a black screen, and was
