@@ -420,8 +420,15 @@ than in CI:
 ### H.264
 
 H.264 was tried in the pre-fork version, produced a black screen, and was
-replaced with VP9. It is now in the registry, and the two things that make it
-work are the two that were missing.
+replaced with VP9. It is in the registry on the `claude/h264-investigation`
+branch only — **not on `main`, because it still renders a black screen.** It
+negotiates, connects and delivers every packet; audio on the same peer
+connection plays. A codec that fails with nothing in any log saying so is
+worse than one that is absent.
+
+What follows is what the branch carries and why. Several of the reasons were
+wrong and are marked as such — `docs/h264-findings.md` is the running record
+of what is eliminated and on what evidence, and is the file to read first.
 
 **In-band parameter sets.** FFmpeg gives SPS/PPS to the muxer as extradata.
 When FFmpeg also writes the SDP, they come out as `sprop-parameter-sets`; here
@@ -433,11 +440,18 @@ completely different cause. `-bsf:v dump_extra=freq=keyframe` puts them ahead
 of every keyframe. The filter compares before prepending, so it is harmless
 where they are already present.
 
-**Constrained Baseline, and saying so.** TeamSpeak decodes with Cisco's
-OpenH264, which implements Constrained Baseline. Main and High negotiate
-cleanly and then fail to decode. So both profiles encode Constrained Baseline
-with B-frames off, and the offer advertises
+**Constrained Baseline, and saying so.** Both profiles encode Constrained
+Baseline with B-frames off, and the offer advertises
 `profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1`.
+
+The reason given for this was wrong. It was that TeamSpeak decodes with
+Cisco's OpenH264, which implements Constrained Baseline only — the client's
+settings do expose a "Use Cisco OpenH264" toggle, so it was a fair reading of
+what the client advertises. But the client's own Connection Info reports
+`Decoder: FFmpeg (h264_cuvid)` on a working 1080p H.264 stream. FFmpeg decodes
+Main and High at any level, so nothing needed constraining. The constraint is
+kept because it is harmless and removing it is not the fix; it is not load
+bearing.
 
 That fmtp line is a third thing the codec sites must agree on, alongside the
 mime type and the payload type: it is carried on `RegisterCodec` *and* on the
@@ -468,9 +482,10 @@ local track both use. An unknown size deliberately over-advertises (5.2): too
 *low* a level is what breaks decoding.
 
 `h264_vaapi` asks the driver for `constrained_baseline`. A GPU that exposes no
-such encode entrypoint fails the probe and falls back to `libx264` — the right
-outcome, since Main or High would encode and not decode. Expect that fallback
-to be common.
+such encode entrypoint fails the probe and falls back to `libx264`. That
+fallback was predicted to be common; on the deployment host it does not happen
+at all — the GPU exposes the ConstrainedBaseline entrypoint and `h264_vaapi`
+runs on it at ~30fps with speed near 1.0.
 
 **Debugging aid.** `SIDECAR_DEBUG_LOGS=1` now logs the SDP offer and the
 answer in full. A codec that negotiates and then renders nothing leaves no
@@ -478,104 +493,28 @@ error anywhere — the disagreement is only visible with both halves side by
 side, which is how two wrong guesses were made before it existed. Off by
 default: an SDP carries ICE credentials and host addresses.
 
-**The client caps H.264 at 720p, and says so in the answer.** With both
-halves of the SDP visible the cause was immediate:
+**The 720p cap, and why it is gone.** With both halves of the SDP visible,
+the client looked like it was capping H.264 at level 3.1:
 
 ```
 Offer  a=fmtp:102 …profile-level-id=42e028    level 4.0, what a 1080p encode is
-Answer a=fmtp:102 …profile-level-id=42e01f    level 3.1, what the client accepts
+Answer a=fmtp:102 …profile-level-id=42e01f    level 3.1, what the client sends back
 ```
 
-The TeamSpeak client does support H.264 — the answer carries the m-line,
-`recvonly`, `rtpmap:102 H264/90000` — but it answers 42e01f *whatever level is
-offered*. Level 3.1 allows 3600 macroblocks at 108000 per second: exactly
-1280x720 at 30fps. A 1080p H.264 stream is one the receiver has already
-refused, and it presents as black.
+Level 3.1 allows 3600 macroblocks at 108000 per second: exactly 1280x720 at
+30fps. So `presetForCodec` and `framerateForCodec` were added to hold H.264 to
+720p30.
 
-`presetForCodec` and `framerateForCodec` hold H.264 to 720p30. They only ever
-reduce, so they compose with the source probe — whichever binds harder wins.
-This is why VP9 streams 1080p happily: VPx carries no level in its SDP, so
-there is nothing to exceed. It also explains the earlier level fix: that made
-the *offer* honest, which is what made the answer's disagreement legible.
+**That was wrong, and the code is deleted.** Capping to 720p30 — offer, answer
+and SPS all agreeing at level 3.1 — was still black. And the client's
+Connection Info shows it decoding 1920x1080 at 29fps from another TeamSpeak
+client. There is no resolution ceiling; the `42e01f` in the answer is a
+constant in the client's SDP generation, not a statement of what it can
+decode. H.264 encodes at the configured preset like every other codec.
 
-The cap is a property of this client, not of H.264. If a future TeamSpeak
-answers with a higher level, the ceiling in `types.ts` is the one place to
-raise.
+The level derivation above is kept regardless: advertising a level the stream
+exceeds is a real bug whether or not it was *this* bug.
 
-**Partly verified against a TeamSpeak client.** A deploy confirmed that the GPU
-does expose a ConstrainedBaseline encode entrypoint (the fallback to libx264
-never fired), that the parameter sets reach the bitstream, and that the per-peer
-gate opens. It also produced the level mismatch described above. Whether fixing
-the level is *sufficient* has still not been observed, only argued.
-`packages/sidecar/encoders_test.go` pins the registry and level invariants, not
-the wire behaviour.
-
-### Images published to GHCR
-
-`.github/workflows/publish.yml` builds the three images on every push and
-pushes them to `ghcr.io/korppujauho/ts6-manager-{backend,frontend,sidecar}`,
-tagged by branch, by commit SHA, and `latest` on the default branch.
-`docker-compose.ghcr.yml` runs them.
-
-Upstream has no equivalent, and `docker-compose.hub.yml` — which does exist
-upstream — points at `clusterzx/ts6-manager:*`, so a deployment using it runs
-**upstream's** code, not this fork's. That file is left alone; the new one
-is separate rather than a rewrite of it.
-
-The motive is that building on the deployment host has failed twice in ways CI
-could not reproduce: a `cpu-features` toolchain error, and the umask problem
-under "Second deploy" above. Both were properties of the host, not the commit.
-Pulling an image CI already built removes the host's toolchain from the
-deployment path entirely.
-
-CI's own Docker job now reads the same build cache (`cache-from`, read-only —
-both workflows writing one scope would evict each other). The cache scope is
-keyed on the *Dockerfile* name because that is what CI's matrix carries; the
-two must agree or neither reuses the other's layers.
-
-The publish half is verified: the workflow's first run built and pushed all
-three images, and all three manifests are readable from GHCR with an
-anonymously-obtained token, so a deployment needs no `docker login`. That
-corrects an expectation written into the first draft of this section —
-packages inherit the *repository's* visibility rather than defaulting to
-private.
-
-What remains unverified is the other half: nothing here has run a container
-from one of these images.
-
-## Open follow-ups
-
-1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
-   question is settled: VP9 VAAPI encoding has run in production on a UGREEN
-   NASync DXP4800 Plus since 2026-08, with `devices: /dev/dri:/dev/dri` and
-   `group_add: "105"`, streaming both IPTV and YouTube. The GPU is capable and
-   the passthrough config is known good.
-
-   What is *not* confirmed is the path this fork now takes to reach it. The
-   deployed version hardcoded `vp9_vaapi`; `main` selects it through the
-   encoder registry, the `/capabilities` probe and the `POST /source` body.
-   Same destination, different plumbing — so a failure after upgrading is a
-   code regression against a known-good reference, not a hardware unknown.
-
-   **Upgrading from the pre-settings version silently disables hardware
-   encoding.** `StreamSettings` defaults to `hwAccelEnabled: false` and
-   `vp8_software` — correct for a fresh install on a host with no GPU, wrong
-   for a deployment that was already using the GPU. After deploying, set
-   hardware encoding on, the device to `/dev/dri/renderD128`, and the encoder
-   to VP9 (VAAPI) in Settings → Streaming, or streams quietly fall back to
-   software.
-
-   Verify with the sidecar log on the first stream: `[FFmpeg] Starting: …
-   encoder=vp9_vaapi`. Anything else means the fallback fired, and the line
-   above it says why.
-
-2. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8
-   streams gate correctly again.) Note that FFmpeg's VP9 RTP packetizer is not
-   known to set the descriptor's P bit, so "P clear means keyframe" needs
-   checking against a real capture before it can be relied on; gating on the B
-   bit alone would at least align the gate to a frame start.
-3. Confirm whether removing A/V pacing causes audio drift on long streams.
-4. An H.264 parameter-set detector, so a peer joining mid-stream is held until
-   an SPS rather than opening on the first packet. The same gap VP9 has; less
-   pressing than it looks, because the PLI interceptor asks for a keyframe and
-   the parameter sets are repeated at every one.
+VP8 and VP9 are unaffected by any of this — VPx carries no level, profile or
+parameter sets in its SDP, so there is nothing for the two sides to disagree
+about. They stream 1080p on this same path without trouble.
