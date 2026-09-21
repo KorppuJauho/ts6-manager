@@ -39,11 +39,12 @@ RTP is written to the track.
 
 ## What has not been examined
 
-- **The RTP payload itself.** Nobody has captured the packets the client
-  receives and checked the FU-A/STAP-A framing, the marker bit on the last
-  packet of each access unit, or whether SPS/PPS survive into RTP. Every
-  sampled packet logged `marker=false`, though the sampling interval (every
-  600th) makes that weak evidence either way.
+- **The RTP payload itself** — now the only remaining surface, so it has a
+  section of its own at the end of this file. Nobody has captured the packets
+  the client receives and checked the FU-A/STAP-A framing, the marker bit on
+  the last packet of each access unit, or whether SPS/PPS survive into RTP.
+  Every sampled packet logged `marker=false`, though the sampling interval
+  (every 600th) makes that weak evidence either way.
 - **What TeamSpeak's own client sends.** The most direct comparison available:
   capture a TeamSpeak-to-TeamSpeak video stream and diff its SDP and RTP
   against this one. TeamSpeak natively uses **AV1 and H.264**, so a working
@@ -98,7 +99,7 @@ Now that 1080p is confirmed working into `h264_cuvid`, `presetForCodec` and
 preset like every other codec. The theory they implemented is recorded above;
 the code implementing it is not worth keeping.
 
-## The next thing to check: are our keyframes IDR?
+## Checked: the keyframes *are* IDR
 
 `forced-idr` exists in NVENC because an encoder can emit an I-frame that is not
 an **IDR** — a picture that refreshes the decoder completely. Without an IDR, a
@@ -106,17 +107,120 @@ decoder joining an ongoing stream has no clean entry point: it receives data,
 finds nothing it can start from, and displays nothing. That is precisely the
 symptom here, and it fits every elimination so far.
 
-`h264_vaapi` was run with `-g 30` and no equivalent flag. Nobody has checked
-whether the keyframes it produces are IDR. The earlier bitstream dump confirmed
-an SPS (`0x67`) at the head of the file but was not read past that.
+`h264_vaapi` is run with `-g 30` and no equivalent flag, and the earlier
+bitstream dump confirmed an SPS (`0x67`) at the head of the file but was not
+read past that. So the keyframes were counted: encode a few seconds through
+the same path and tally NAL unit types, looking for type 5 (an IDR slice)
+rather than only type 1.
 
-**The check:** encode a few seconds through the same path and look for NAL unit
-type 5 (byte `0x65` after a start code) rather than only type 1. If there are
-none, that is the bug, and the fix is whatever makes VAAPI emit IDR at each
-keyframe.
+**It was run, and the answer is that the stream is healthy.** Four seconds of
+`h264_vaapi` through the same argument list, NAL types counted from the
+Annex B bitstream:
 
-This costs one command and no deployment, and it should be the first thing
-tried — before any further reasoning about profiles, levels or SDP.
+```
+  type  1 : 116     non-IDR slices
+  type  5 : 4       IDR slices
+  type  6 : 120     SEI
+  type  7 : 4       SPS
+  type  8 : 4       PPS
+```
+
+120 frames in four seconds is 30fps, and four IDRs at `-g 30` is exactly one
+per GOP — each one preceded by its own SPS and PPS, which is `dump_extra`
+doing its job at every keyframe rather than only at the head of the stream.
+There is a clean random-access point every second. `h264_cuvid` has everything
+it needs to start.
+
+The one SEI per frame is VAAPI's normal picture-timing/buffering-period
+message. It is not an anomaly and it is not stripped anywhere in the pipeline.
+
+So the encoder output is correct. The bug is downstream of it.
+
+## What is left: the RTP framing
+
+Every stage from the source to the encoder's output bitstream is now
+eliminated with evidence. The bitstream is well-formed H.264 that a hardware
+decoder can enter. The SDP offer and the client's answer agree. The client
+accepts the codec and decodes 1080p H.264 from other clients. The gate opens
+and packets are written to the track.
+
+That leaves exactly one surface nobody has looked at: what happens between
+FFmpeg's `-f rtp` output and the client's depacketiser.
+
+The sidecar does not packetise — FFmpeg does, and the sidecar reads whole
+datagrams off a UDP socket, clones them, and hands them to
+`TrackLocalStaticRTP.WriteRTP`, which rewrites SSRC and payload type and
+leaves sequence number, timestamp, marker bit and payload alone. That path is
+codec-blind, which is why VP9 survives it. H.264 is the first codec here whose
+payload format needs *structure* across packets: FU-A fragments have to arrive
+in order with start and end bits, STAP-A aggregates carry SPS/PPS, and the
+marker bit is what tells the decoder an access unit is complete. Any of those
+being wrong produces a stream that counts packets and renders nothing.
+
+**The check:** send through the same `-f rtp` output and read it back with
+FFmpeg's own depacketiser, then count NAL types again. If the same
+7/8/5 pattern comes out the far side, RTP framing is sound and the search
+moves to the client. If SPS/PPS or the IDRs vanish, that is the bug.
+
+```sh
+docker exec -i ts6-sidecar sh -s <<'EOF'
+set -e
+cd /tmp
+
+# Encode through the sidecar's own H.264 argument list, out over RTP.
+ffmpeg -hide_banner -loglevel error \
+  -vaapi_device /dev/dri/renderD128 \
+  -f lavfi -i testsrc=size=1280x720:rate=30 -t 8 \
+  -vf format=nv12,hwupload \
+  -c:v h264_vaapi -profile:v constrained_baseline -bf 0 \
+  -b:v 1500k -g 30 -bsf:v dump_extra=freq=keyframe \
+  -payload_type 102 -ssrc 11111111 -f rtp -pkt_size 1200 \
+  -sdp_file /tmp/rtp.sdp rtp://127.0.0.1:5999 &
+sender=$!
+
+# Give the SDP a moment to be written, then depacketise the same RTP back.
+sleep 1
+ffmpeg -hide_banner -loglevel error \
+  -protocol_whitelist file,udp,rtp -i /tmp/rtp.sdp \
+  -t 6 -c copy -f h264 -y /tmp/rtp-out.h264 || true
+wait $sender || true
+
+ls -l /tmp/rtp-out.h264
+
+# NAL types out the far side. POSIX awk only: no strtonum, no gawk.
+od -An -tx1 -v /tmp/rtp-out.h264 | tr ' ' '\n' | grep -v '^$' | awk '
+  function hexval(s,   h, l) {
+    h = index("0123456789abcdef", substr(s, 1, 1)) - 1
+    l = index("0123456789abcdef", substr(s, 2, 1)) - 1
+    return h * 16 + l
+  }
+  /^00$/ { z++; next }
+  /^01$/ { if (z >= 2) want = 1; z = 0; next }
+  { if (want) { c[hexval($0) % 32]++; want = 0 } z = 0 }
+  END { for (t in c) printf "  type %2d : %d\n", t, c[t] }
+' | sort -n -k2
+EOF
+```
+
+The same `7 / 8 / 5` pattern out the far side means FU-A, STAP-A and the
+marker bit are all intact and the search moves to the client. Missing SPS/PPS
+or missing IDRs means the packetiser is dropping them, and that is the bug.
+
+One caveat on what this proves: it tests FFmpeg's depacketiser, not
+TeamSpeak's. It can find a fault but cannot fully clear one — a stream FFmpeg
+reassembles may still be framed in a way the client will not accept.
+
+## A second route, if the framing is clean
+
+Self-host [Moepchi/webspeak3](https://github.com/Moepchi/webspeak3) and screen
+share into TeamSpeak from a browser. Its `publish.ts` does a plain
+`createOffer()` with no codec selection at all, so whatever TS6 negotiates is
+the client's own choice — and the resulting SDP and RTP are a known-good
+reference to diff this one against. It is the most direct answer available to
+"what does TeamSpeak actually want", and it needs no encoder the host lacks.
+
+It also needs the user to stand up new infrastructure, so it is a decision to
+make rather than a command to run.
 
 ## The premise this was built on was wrong
 
