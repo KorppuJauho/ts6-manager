@@ -493,6 +493,33 @@ error anywhere — the disagreement is only visible with both halves side by
 side, which is how two wrong guesses were made before it existed. Off by
 default: an SDP carries ICE credentials and host addresses.
 
+**The offer carries every codec, and advertises feedback.** Upstream's
+sidecar registers one video codec and sets no `RTCPFeedback`, so its offer is
+a single payload type with no `a=rtcp-fb` lines. Both are now changed, for one
+reason each.
+
+TeamSpeak's own streams are multi-codec: a viewer whose hardware cannot decode
+AV1 is moved to H.264 mid-stream with no renegotiation, which is only possible
+when both payload types were in the `m=` line from the start. A single-codec
+offer is a shape the client is otherwise never sent. `videoCodecs()` therefore
+registers one entry per distinct codec in the registry — deduplicated by mime
+type, since the hardware and software profiles for a codec share a payload
+type — with the active one first, because it is the only one that can actually
+be sent and the local track binds to it.
+
+The feedback set (`goog-remb`, `ccm fir`, `nack`, `nack pli`) is what pion's
+own `RegisterDefaultCodecs` sets and what an ordinary WebRTC offer carries.
+`nack` is only honoured if something drains RTCP back from the sender, which
+nothing did, so `drainSenderRTCP` now does — and logs PLI, FIR and NACK while
+it is there. That logging is the point as much as the repair: a decoder with
+nothing it can start from asks for a keyframe, and until now the receiver had
+no negotiated way to say so and we had no way to hear it.
+
+`SIDECAR_MULTI_CODEC_OFFER=0` restores the single-codec offer without a
+rebuild. The escape hatch exists because a client is free to answer without
+the codec being encoded, which would leave the track bound to nothing and
+break VP9 — not observed, but not previously possible either.
+
 **The 720p cap, and why it is gone.** With both halves of the SDP visible,
 the client looked like it was capping H.264 at level 3.1:
 

@@ -267,6 +267,60 @@ and read the answer. Either the client picks one and renders it, which tells
 us what it prefers when given the choice, or it behaves differently from the
 single-codec case, which is itself the finding.
 
+**Both are now implemented on this branch.** The offer carries every codec in
+the registry, active one first, and every one of them advertises the standard
+feedback set:
+
+```
+m=video 9 UDP/TLS/RTP/SAVPF 102 96 98
+a=rtpmap:102 H264/90000
+a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f
+a=rtcp-fb:102 goog-remb
+a=rtcp-fb:102 ccm fir
+a=rtcp-fb:102 nack
+a=rtcp-fb:102 nack pli
+a=rtcp-fb:102 transport-cc
+a=rtpmap:96 VP8/90000
+a=rtpmap:98 VP9/90000
+```
+
+(`transport-cc` comes from pion's interceptor registry, which was already
+there — it had nothing to attach to before.)
+
+### What to read from the deploy
+
+Three things, in order of how much they would tell us.
+
+1. **Does H.264 render now?** If yes, the single-codec offer was the bug.
+2. **What does the client answer?** `SIDECAR_DEBUG_LOGS=1` prints both halves.
+   The `m=` line of the answer is the interesting part: which payload types it
+   keeps, and in what order. If it strips H.264 and keeps VP8 or VP9 while
+   FFmpeg is encoding H.264, that is the client telling us it would rather not
+   decode our H.264 — a much more specific statement than a black screen.
+3. **Does it ask for a keyframe?** New log lines, no debug flag needed:
+   `[Peer N] video PLI #1`, `FIR`, `NACK`. A receiver that cannot decode what
+   it is being sent asks for a fresh picture. A stream of PLI would be the
+   client saying, for the first time in this investigation, that it is
+   unhappy — and silence is nearly as informative, because it would mean the
+   client believes it is being served correctly.
+
+### The risk, and the escape hatch
+
+A client may answer *without* the codec being encoded. The local track carries
+one capability, so if the answer drops it the track binds to nothing and
+sends nothing — which would break VP9, the codec that currently works.
+
+That has not been observed, but it has also never been tested. So it is a
+flag, off by one environment variable and no rebuild:
+
+```
+SIDECAR_MULTI_CODEC_OFFER=0
+```
+
+Set that on the `ts6-sidecar` container and the offer goes back to the single
+codec it has always carried. The RTCP feedback and the PLI logging stay
+either way; they are not part of the risk.
+
 A related gap, noticed while looking: the registered capability carries no
 `RTCPFeedback` at all — no `nack`, no `nack pli`, no `ccm fir`, no
 `goog-remb`, where pion's own `RegisterDefaultCodecs` sets all four. So our

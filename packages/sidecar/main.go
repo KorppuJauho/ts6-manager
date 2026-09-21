@@ -60,6 +60,16 @@ func envIntOrDefault(key string, def int) int {
 	return def
 }
 
+// envBoolOrDefault reads a flag that is off when set to "0", "false" or "no"
+// and on for any other non-empty value. Unset leaves the default in place.
+func envBoolOrDefault(key string, def bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if v == "" {
+		return def
+	}
+	return v != "0" && v != "false" && v != "no"
+}
+
 func getFfmpegPath() string {
 	return envOrDefault("FFMPEG_PATH", "ffmpeg")
 }
@@ -551,20 +561,136 @@ func (s *Sidecar) setActiveProfile(p EncoderProfile, device string, width, heigh
 	s.gateKeyframe.Store(needsKeyframeGate(p))
 }
 
-// videoCodec is the capability the SDP offers and the local track carries.
-// Both must be identical: a track whose capability does not match the
-// registered codec is not bound to it.
-func (s *Sidecar) videoCodec() webrtc.RTPCodecCapability {
+// videoRTCPFeedback is what an ordinary WebRTC offer advertises on a video
+// codec, and what pion's own RegisterDefaultCodecs sets.
+//
+// The sidecar built its media engine by hand and set none of it, so the offer
+// carried no "a=rtcp-fb" lines at all and a viewer had no negotiated way to
+// say it had lost a packet or needed a keyframe. VP9 renders under that gap
+// and an IDR goes out every second regardless, so it is not known to be a
+// fault — but it is a divergence from every offer the client normally sees,
+// and closing it costs nothing.
+//
+// nack is only honoured if something reads RTCP back from the sender, which
+// is what drainSenderRTCP is for.
+var videoRTCPFeedback = []webrtc.RTCPFeedback{
+	{Type: "goog-remb"},
+	{Type: "ccm", Parameter: "fir"},
+	{Type: "nack"},
+	{Type: "nack", Parameter: "pli"},
+}
+
+// codecParametersFor turns a profile into what the media engine registers.
+// The fmtp line depends on the frame size, so it is built per stream.
+func codecParametersFor(p EncoderProfile, w, h, fps int) webrtc.RTPCodecParameters {
+	return webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType:     p.MimeType,
+			ClockRate:    90000,
+			SDPFmtpLine:  p.FmtpFor(w, h, fps),
+			RTCPFeedback: videoRTCPFeedback,
+		},
+		PayloadType: webrtc.PayloadType(p.PayloadType),
+	}
+}
+
+// activeVideoProfile is the profile being encoded with, with the zero value
+// resolved — the profile is only known once a source has been set.
+func (s *Sidecar) activeVideoProfile() (EncoderProfile, int, int, int) {
 	s.profileMu.RLock()
 	p, w, h, fps := s.profile, s.encWidth, s.encHeight, s.encFPS
 	s.profileMu.RUnlock()
 	if p.Key == "" {
 		p = defaultProfile()
 	}
-	return webrtc.RTPCodecCapability{
-		MimeType:    p.MimeType,
-		ClockRate:   90000,
-		SDPFmtpLine: p.FmtpFor(w, h, fps),
+	return p, w, h, fps
+}
+
+// videoCodec is the capability the local track carries. It must match one of
+// the registered codecs: a track whose capability matches none of them is not
+// bound, and nothing is sent.
+func (s *Sidecar) videoCodec() webrtc.RTPCodecCapability {
+	p, w, h, fps := s.activeVideoProfile()
+	return codecParametersFor(p, w, h, fps).RTPCodecCapability
+}
+
+// videoCodecs is every video codec the offer carries, the active one first.
+//
+// TeamSpeak's own streams are multi-codec. A viewer whose hardware cannot
+// decode AV1 is moved to H.264 mid-stream with no renegotiation, which is only
+// possible when both payload types were in the m-line from the start — so a
+// single-codec offer is a shape the client is otherwise never sent, and it is
+// the shape this sidecar has always used.
+//
+// Only the active codec can actually be sent: FFmpeg is encoding one format
+// and the local track carries that capability. The alternatives are there to
+// make the offer the right shape and to show what the client picks when it is
+// given a choice.
+//
+// The risk this carries is that a client is free to answer *without* the codec
+// being encoded, which would leave the track unbound and send nothing. That is
+// why it can be switched off at the container without a rebuild.
+func (s *Sidecar) videoCodecs() []webrtc.RTPCodecParameters {
+	p, w, h, fps := s.activeVideoProfile()
+	codecs := []webrtc.RTPCodecParameters{codecParametersFor(p, w, h, fps)}
+
+	if !envBoolOrDefault("SIDECAR_MULTI_CODEC_OFFER", true) {
+		return codecs
+	}
+
+	// One entry per distinct codec, not per profile: the hardware and
+	// software profiles for a codec differ only in how frames are produced,
+	// and share a mime type and payload type.
+	seen := map[string]bool{p.MimeType: true}
+	for _, alt := range encoderProfiles {
+		if seen[alt.MimeType] {
+			continue
+		}
+		seen[alt.MimeType] = true
+		codecs = append(codecs, codecParametersFor(alt, w, h, fps))
+	}
+	return codecs
+}
+
+// drainSenderRTCP reads the RTCP a viewer sends back about a track.
+//
+// Not optional once nack is advertised: pion's responder only sees a
+// retransmission request if something reads the sender, so advertising repair
+// without this would negotiate a mechanism that never repairs.
+//
+// It is also the one direct channel the receiver has to say it is unhappy. A
+// decoder with nothing it can start from asks for a keyframe, so a stream of
+// PLI or FIR is the client telling us the pictures it is being sent are not
+// usable — which no other log here would reveal.
+func drainSenderRTCP(peerID, kind string, sender *webrtc.RTPSender) {
+	var pli, fir, nack uint64
+	for {
+		packets, _, err := sender.ReadRTCP()
+		if err != nil {
+			// The sender is closed with its peer connection.
+			return
+		}
+		for _, packet := range packets {
+			var count *uint64
+			var name string
+			switch packet.(type) {
+			case *rtcp.PictureLossIndication:
+				count, name = &pli, "PLI"
+			case *rtcp.FullIntraRequest:
+				count, name = &fir, "FIR"
+			case *rtcp.TransportLayerNack:
+				count, name = &nack, "NACK"
+			default:
+				continue
+			}
+			*count++
+			// The first is the interesting one — it says the receiver asked
+			// at all. After that only a sample, to keep a client that asks
+			// every frame from filling the log.
+			if *count == 1 || *count%50 == 0 {
+				log.Printf("[Peer %s] %s %s #%d", peerID, kind, name, *count)
+			}
+		}
 	}
 }
 
@@ -684,15 +810,20 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 		iceServers = append(iceServers, webrtc.ICEServer{URLs: []string{stun}})
 	}
 
-	profile := s.activeProfile()
-
 	m := &webrtc.MediaEngine{}
 	videoCodec := s.videoCodec()
-	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: videoCodec,
-		PayloadType:        webrtc.PayloadType(profile.PayloadType),
-	}, webrtc.RTPCodecTypeVideo); err != nil {
-		return "", err
+	videoCodecs := s.videoCodecs()
+	for _, codec := range videoCodecs {
+		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
+			return "", err
+		}
+	}
+	if len(videoCodecs) > 1 {
+		names := make([]string, 0, len(videoCodecs))
+		for _, codec := range videoCodecs {
+			names = append(names, fmt.Sprintf("%s/%d", codec.MimeType, codec.PayloadType))
+		}
+		log.Printf("[Peer %s] Offering %s (sending %s)", id, strings.Join(names, ", "), videoCodec.MimeType)
 	}
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -739,14 +870,18 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 		return "", err
 	}
 
-	if _, err = pc.AddTrack(videoTrack); err != nil {
+	videoSender, err := pc.AddTrack(videoTrack)
+	if err != nil {
 		pc.Close()
 		return "", err
 	}
-	if _, err = pc.AddTrack(audioTrack); err != nil {
+	audioSender, err := pc.AddTrack(audioTrack)
+	if err != nil {
 		pc.Close()
 		return "", err
 	}
+	go drainSenderRTCP(id, "video", videoSender)
+	go drainSenderRTCP(id, "audio", audioSender)
 
 	peer := &Peer{
 		ID:         id,
