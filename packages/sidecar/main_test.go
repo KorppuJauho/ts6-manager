@@ -115,6 +115,8 @@ func TestVideoCodecCarriesTheEncodedSize(t *testing.T) {
 // moved to H.264 mid-stream with no renegotiation, which only works when both
 // payload types were in the m-line from the start.
 func TestVideoCodecsOfferEveryCodecActiveFirst(t *testing.T) {
+	t.Setenv("SIDECAR_MULTI_CODEC_OFFER", "1")
+
 	s := NewSidecar()
 	s.setActiveProfile(mustProfile(t, "h264_vaapi"), "/dev/dri/renderD128", 1280, 720, 30)
 
@@ -160,6 +162,8 @@ func TestVideoCodecsOfferEveryCodecActiveFirst(t *testing.T) {
 // alongside VP9 needs its fmtp line, or it is advertised as something the
 // client cannot match.
 func TestAlternativeH264StillCarriesItsFmtp(t *testing.T) {
+	t.Setenv("SIDECAR_MULTI_CODEC_OFFER", "1")
+
 	s := NewSidecar()
 	s.setActiveProfile(mustProfile(t, "vp9_vaapi"), "/dev/dri/renderD128", 1920, 1080, 30)
 
@@ -175,12 +179,11 @@ func TestAlternativeH264StillCarriesItsFmtp(t *testing.T) {
 	t.Fatal("H264 was not offered alongside VP9")
 }
 
-// The escape hatch: a client is free to answer without the codec being
-// encoded, which would leave the track unbound and send nothing. Turning the
-// multi-codec offer off must restore the single-codec shape.
-func TestMultiCodecOfferCanBeSwitchedOff(t *testing.T) {
-	t.Setenv("SIDECAR_MULTI_CODEC_OFFER", "0")
-
+// Off is the default, because a multi-codec m-line made the TeamSpeak client
+// report NullVideoDecoder and turned VP9 black as well. The single-codec
+// offer is the shape that works and must be what an unconfigured sidecar
+// sends.
+func TestMultiCodecOfferIsOffByDefault(t *testing.T) {
 	s := NewSidecar()
 	s.setActiveProfile(mustProfile(t, "vp9_vaapi"), "/dev/dri/renderD128", 1280, 720, 30)
 
@@ -198,6 +201,8 @@ func TestMultiCodecOfferCanBeSwitchedOff(t *testing.T) {
 // here set none, so the client had no negotiated way to report loss or ask
 // for a keyframe.
 func TestVideoCodecsAdvertiseFeedback(t *testing.T) {
+	t.Setenv("SIDECAR_MULTI_CODEC_OFFER", "1")
+
 	s := NewSidecar()
 	s.setActiveProfile(mustProfile(t, "h264_vaapi"), "/dev/dri/renderD128", 1280, 720, 30)
 
@@ -247,6 +252,22 @@ func TestEnvBoolOrDefault(t *testing.T) {
 		}
 		if got := envBoolOrDefault("SIDECAR_TEST_FLAG", c.def); got != c.want {
 			t.Errorf("envBoolOrDefault(%q, %v) = %v, want %v", c.value, c.def, got, c.want)
+		}
+	}
+}
+
+// The feedback and the multi-codec offer shipped together and one of them
+// turned VP9 black, so each has to be switchable on its own or the regression
+// cannot be bisected on a live deployment.
+func TestRTCPFeedbackCanBeSwitchedOff(t *testing.T) {
+	t.Setenv("SIDECAR_RTCP_FEEDBACK", "0")
+
+	s := NewSidecar()
+	s.setActiveProfile(mustProfile(t, "vp9_vaapi"), "/dev/dri/renderD128", 1280, 720, 30)
+
+	for _, c := range s.videoCodecs() {
+		if len(c.RTCPFeedback) != 0 {
+			t.Errorf("codec %q still advertises %d feedback entries", c.MimeType, len(c.RTCPFeedback))
 		}
 	}
 }

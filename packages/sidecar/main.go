@@ -582,13 +582,22 @@ var videoRTCPFeedback = []webrtc.RTCPFeedback{
 
 // codecParametersFor turns a profile into what the media engine registers.
 // The fmtp line depends on the frame size, so it is built per stream.
+//
+// The feedback is separately switchable from the multi-codec offer, because
+// the two shipped together and one of them turned VP9 black. Turning the
+// offer back to a single codec and leaving this on is the first half of that
+// bisect; SIDECAR_RTCP_FEEDBACK=0 is the second.
 func codecParametersFor(p EncoderProfile, w, h, fps int) webrtc.RTPCodecParameters {
+	var feedback []webrtc.RTCPFeedback
+	if envBoolOrDefault("SIDECAR_RTCP_FEEDBACK", true) {
+		feedback = videoRTCPFeedback
+	}
 	return webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:     p.MimeType,
 			ClockRate:    90000,
 			SDPFmtpLine:  p.FmtpFor(w, h, fps),
-			RTCPFeedback: videoRTCPFeedback,
+			RTCPFeedback: feedback,
 		},
 		PayloadType: webrtc.PayloadType(p.PayloadType),
 	}
@@ -627,14 +636,22 @@ func (s *Sidecar) videoCodec() webrtc.RTPCodecCapability {
 // make the offer the right shape and to show what the client picks when it is
 // given a choice.
 //
-// The risk this carries is that a client is free to answer *without* the codec
-// being encoded, which would leave the track unbound and send nothing. That is
-// why it can be switched off at the container without a rebuild.
+// **This is off by default, because it was tried and it made things worse.**
+// Offering H.264, VP8 and VP9 together turned VP9 — the codec that works —
+// into a black screen as well, with the client reporting `NullVideoDecoder`
+// and 0x0 0fps while 10MB of video arrived with zero packet loss. So the
+// TeamSpeak client does not resolve a decoder from a multi-codec m-line; it
+// wants exactly one. Whatever lets it switch AV1 to H.264 mid-stream, it is
+// not a payload-type change inside one negotiated m-line.
+//
+// The code stays because the switch is the cheapest way to re-test the shape
+// if that understanding changes, and because it documents what was tried.
+// SIDECAR_MULTI_CODEC_OFFER=1 turns it back on.
 func (s *Sidecar) videoCodecs() []webrtc.RTPCodecParameters {
 	p, w, h, fps := s.activeVideoProfile()
 	codecs := []webrtc.RTPCodecParameters{codecParametersFor(p, w, h, fps)}
 
-	if !envBoolOrDefault("SIDECAR_MULTI_CODEC_OFFER", true) {
+	if !envBoolOrDefault("SIDECAR_MULTI_CODEC_OFFER", false) {
 		return codecs
 	}
 

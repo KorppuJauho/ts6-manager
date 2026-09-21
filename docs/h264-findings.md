@@ -329,6 +329,97 @@ ask for a keyframe. Weak on its own, since VP9 renders fine under the same
 gap and a keyframe goes out every second regardless, but it is a second
 difference from a normal WebRTC offer and it costs nothing to close.
 
+## The multi-codec offer was wrong, and it broke VP9
+
+Deployed and tested. **Both H.264 and VP9 rendered black**, where VP9 had
+worked on every build before it. The client's own Connection Info on the
+stream:
+
+```
+Downstream          8.8 Mbps        Received Packets     10215
+Jitter              32ms            Total Received       10.8 MB
+Decoding Time       0ms             Lost Packets (in)    0
+Quality (Current)   0x0 0fps        Decoder              NullVideoDecoder
+```
+
+Read that carefully, because it is the most informative thing in this entire
+investigation.
+
+**`NullVideoDecoder`.** The client did not fail to decode. It never
+constructed a decoder at all — it resolved the negotiated video codec to
+nothing and installed a null implementation. `Decoding Time 0ms` and
+`Quality 0x0 0fps` follow from that, not from a decode error.
+
+**`Lost Packets (in): 0`, 10.8 MB received.** The transport is perfect.
+Everything the sidecar sent arrived intact. Nothing about RTP, framing,
+keyframes, levels or parameter sets can explain a receiver that never built a
+decoder in the first place.
+
+So the conclusion is the opposite of the hypothesis: **the TeamSpeak client
+does not resolve a decoder from a multi-codec `m=` line. It wants exactly
+one.** Offering three payload types took the codec that worked and broke it.
+
+The reasoning that led here was sound about the *observation* — a viewer whose
+hardware cannot decode AV1 really is switched to H.264 mid-stream — and wrong
+about the *mechanism*. Whatever TeamSpeak does to achieve that, it is not a
+payload-type change inside one negotiated m-line. Renegotiation, a second
+transceiver, or its own signalling outside SDP are all still open; the SDP
+m-line is not.
+
+`SIDECAR_MULTI_CODEC_OFFER` now defaults to **off**. The code stays as the
+cheapest way to re-test the shape, and as a record of what was tried.
+
+### The RTCP feedback earned its keep
+
+```
+[Peer 15] video PLI #1
+```
+
+Once, immediately after the gate opened, and never again. That is the first
+time in this investigation the receiver has said anything at all. It is also
+exactly what a client with a `NullVideoDecoder` would do: ask once for a
+picture it can start from, get data it has no decoder for, and stop asking.
+
+The feedback set and the multi-codec offer shipped in the same commit, so
+either could be what broke VP9. `SIDECAR_RTCP_FEEDBACK` is therefore switchable
+on its own, and the bisect is: single-codec offer with feedback on (expect VP9
+back — the offer was the cause), then feedback off as well if it is not.
+
+## The next hypothesis: sprop-parameter-sets
+
+`NullVideoDecoder` reframes the whole problem. Every theory so far assumed the
+client was *trying* to decode and failing. It is not. It is deciding, while
+parsing the SDP, that it has no decoder for what is offered — before a single
+packet arrives.
+
+That makes the fmtp line the thing that matters, and there is one parameter
+conspicuously absent from ours:
+
+```
+a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f
+```
+
+No **`sprop-parameter-sets`**. Many H.264 receivers build the decoder at
+negotiation time from the SPS and PPS carried there, rather than waiting to
+find them in the bitstream. In-band parameter sets — which this branch
+confirmed are present and correct at every keyframe — do not help a decoder
+that was never constructed.
+
+This fits every observation: the codec is accepted in the answer (the SDP
+parses), no decoder exists (no sprop to build one from), the transport is
+clean, and a single PLI goes out and is never repeated.
+
+**The check, before writing any code:** confirm whether a VP9 stream with the
+multi-codec offer off reports a real decoder in Connection Info. VP9 carries
+no fmtp at all, so if working VP9 shows a real decoder and single-codec H.264
+still shows `NullVideoDecoder`, the difference is in what the fmtp line has to
+provide — and `sprop-parameter-sets` is the missing piece.
+
+Implementing it means extracting the SPS and PPS the encoder will actually
+produce at the configured resolution, base64ing them, and putting them in the
+fmtp line. The encoder probe that already runs at profile-selection time is
+the natural place to get them.
+
 ## A third route: a known-good reference
 
 Self-host [Moepchi/webspeak3](https://github.com/Moepchi/webspeak3) and screen

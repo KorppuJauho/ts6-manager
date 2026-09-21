@@ -515,10 +515,13 @@ it is there. That logging is the point as much as the repair: a decoder with
 nothing it can start from asks for a keyframe, and until now the receiver had
 no negotiated way to say so and we had no way to hear it.
 
-`SIDECAR_MULTI_CODEC_OFFER=0` restores the single-codec offer without a
-rebuild. The escape hatch exists because a client is free to answer without
-the codec being encoded, which would leave the track bound to nothing and
-break VP9 — not observed, but not previously possible either.
+**The multi-codec offer is off by default, because it was wrong.** Deployed,
+it turned VP9 black as well as H.264, with the client reporting
+`NullVideoDecoder` and `0x0 0fps` while 10.8 MB arrived with zero loss. The
+TeamSpeak client does not resolve a decoder from a multi-codec m-line; it
+wants one. `SIDECAR_MULTI_CODEC_OFFER=1` re-enables it for testing, and
+`SIDECAR_RTCP_FEEDBACK=0` switches the feedback off separately, because the
+two shipped together and either could have been the cause.
 
 **The 720p cap, and why it is gone.** With both halves of the SDP visible,
 the client looked like it was capping H.264 at level 3.1:
