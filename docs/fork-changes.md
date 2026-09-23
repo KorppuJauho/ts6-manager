@@ -549,6 +549,16 @@ Constrained Baseline. The client's "Use Cisco OpenH264" toggle was on
 throughout, so a disabled OpenH264 is not the reason. `sprop-parameter-sets` did not
 change the outcome and stays as a harmless, verified extra.
 
+**The bot can capture another client's stream offer.** With
+`TS6_CAPTURE_STREAM_OFFERS=1` on the backend, each bot sends
+`joinstreamrequest` for any stream another client starts in view, logs the SDP
+offer from the `notifyrespondjoinstreamrequest` that answers it — addresses,
+ICE credentials and fingerprint removed — and withdraws. Diagnostic only, off by
+default: the TeamSpeak client rejects Main and High from us outright and builds
+no decoder for our Constrained Baseline, so a real TeamSpeak H.264 offer is the
+remaining thing to compare against. The command shape follows webspeak3, which
+recovered it from `TeamSpeak.dll`.
+
 **The 720p cap, and why it is gone.** With both halves of the SDP visible,
 the client looked like it was capping H.264 at level 3.1:
 

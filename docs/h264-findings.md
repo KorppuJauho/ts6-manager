@@ -590,6 +590,63 @@ is rejected and the stream fails to negotiate, which is itself an answer.
 If a profile works it becomes the default — and it needs nothing from viewers,
 who cannot be asked to change their client settings.
 
+### Result: Main and High are rejected outright
+
+Both negotiated nothing. The client's answer to a `6400` (High) offer, and
+likewise to `4d00` (Main):
+
+```
+m=video 0 UDP/TLS/RTP/SAVPF 0
+```
+
+Port `0` rejects the video m-line: none of the offered codecs is one the client
+lists as receivable, and pion then refuses to start the track (`unable to start
+track, codec is not supported by remote`). So the client's receivable H.264
+formats include Constrained Baseline — it answered `42e01f` to that — and
+exclude Main and High.
+
+That changes the question. The factory **lists** Constrained Baseline as
+receivable and then **returns no decoder** when asked to build one for it.
+Since Main and High are not receivable at all, a TeamSpeak client's own H.264 is
+almost certainly Constrained Baseline too — which means the factory does build
+a decoder for *some* Constrained Baseline format, and whatever separates that
+format from ours is not the profile. It is something else in the negotiated
+format: another fmtp parameter, its absence, or a value. That can only be read
+off a real TeamSpeak offer. (`SIDECAR_H264_PROFILE` stays: the default is
+unchanged, and it is how this was established.)
+
+## Capturing a TeamSpeak client's own offer
+
+`TS6_CAPTURE_STREAM_OFFERS=1` on the **backend** makes each bot ask to watch any
+stream another client starts where the bot can see it — the viewer half of
+TS6's stream signaling, `joinstreamrequest id clid msg is_remove`, whose
+parameters webspeak3 recovered from `TeamSpeak.dll`. The streamer's client
+answers with `notifyrespondjoinstreamrequest` carrying its SDP offer. The bot
+logs the offer and withdraws with `is_remove=1`; it never answers, so no media
+flows. (`streaming/offer-capture.ts`)
+
+The logged offer has its addresses, ICE credentials and DTLS fingerprint
+removed, so it can be pasted: what decides the decoder is the `m=`, `rtpmap`,
+`fmtp` and `rtcp-fb` lines, and those are kept. A test fails if the redaction
+is removed.
+
+To capture:
+
+1. Add `TS6_CAPTURE_STREAM_OFFERS=1` to the **backend** service's
+   `environment:` block and redeploy. The backend logs
+   `[OfferCapture] Enabled` when the bot connects.
+2. In a TeamSpeak client, in the bot's channel, start a stream (screen share)
+   with the client set to H.264 — after the bot has connected, since it reacts
+   to the stream starting.
+3. Accept the bot's request to watch if the client asks.
+4. The backend logs `[OfferCapture] Offer from clid=…` through
+   `[OfferCapture] End of offer`.
+5. Remove the variable again afterwards: while set, the bot asks to watch every
+   stream started where it can see.
+
+Diffing that offer against ours is the comparison this file has been missing
+since the beginning.
+
 ## A third route: a known-good reference
 
 Self-host [Moepchi/webspeak3](https://github.com/Moepchi/webspeak3) and screen

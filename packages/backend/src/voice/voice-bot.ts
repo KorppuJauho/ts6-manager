@@ -5,6 +5,7 @@ import { AudioPipeline, FRAME_MS, BYTES_PER_FRAME } from './audio/pipeline.js';
 import { PlayQueue, type QueueItem } from './playlist/queue.js';
 import { fetchIcyMetadata } from './audio/icy-metadata.js';
 import { StreamSignaling, type ActiveStream, type SignalingMessage } from './streaming/stream-signaling.js';
+import { StreamOfferCapture } from './streaming/offer-capture.js';
 import { SidecarClient } from './streaming/sidecar-client.js';
 import { SidecarProcess, type SidecarConfig } from './streaming/sidecar-process.js';
 import {
@@ -123,6 +124,10 @@ export interface VoiceBotConfig {
 
 export class VoiceBot extends EventEmitter {
   private client: Ts3Client;
+  // Diagnostic only: logs the SDP offer of streams other clients start, so the
+  // bot's H.264 can be compared with a TeamSpeak client's own. See
+  // streaming/offer-capture.ts.
+  private offerCapture: StreamOfferCapture | null = null;
   private pipeline: AudioPipeline;
   readonly queue: PlayQueue;
   private config: VoiceBotConfig;
@@ -194,6 +199,9 @@ export class VoiceBot extends EventEmitter {
     this.config = config;
     this._originalNickname = config.nickname;
     this.client = new Ts3Client();
+    if (process.env.TS6_CAPTURE_STREAM_OFFERS === '1') {
+      this.offerCapture = new StreamOfferCapture(this.client);
+    }
     this.pipeline = new AudioPipeline();
     this.queue = new PlayQueue();
 
@@ -404,6 +412,7 @@ export class VoiceBot extends EventEmitter {
     };
 
     await this.client.connect(opts);
+    this.offerCapture?.start();
     this._status = 'connected';
     this.emit('statusChange', this._status);
     this.emit('connected');
@@ -421,6 +430,7 @@ export class VoiceBot extends EventEmitter {
     if (this._videoStreaming) {
       await this.stopVideoStream();
     }
+    this.offerCapture?.stop();
     this.client.disconnect();
   }
 

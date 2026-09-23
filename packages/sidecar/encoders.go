@@ -160,9 +160,10 @@ type h264Profile struct {
 // returns nothing for the negotiated format, and that factory builds
 // FFmpeg (h264_cuvid) for H.264 from other TeamSpeak clients. Those stream
 // through FFmpeg's h264_nvenc, whose default profile is Main, and the client
-// exposes no profile setting — so Main is the likeliest thing it accepts. Main
-// and High are here so that can be tested with an environment variable
-// instead of a rebuild.
+// exposes no profile setting — so Main looked like the likeliest thing it
+// accepts. Tested, it is not: the client rejects both Main and High offers
+// with a port-0 video m-line. They stay selectable because that is how it was
+// established, and the default is unchanged.
 //
 // libwebrtc treats High (6400) and Constrained High (640c) as different
 // profiles when it matches an offer against what the receiver supports, and
