@@ -528,12 +528,25 @@ H.264; it declines *this* H.264.
 Nothing in the stream can change that outcome — the factory is consulted with
 the negotiated format before a packet is decoded. Everything that separates
 our H.264 from a TeamSpeak client's lives in that format, and the obvious
-candidate is the **profile**: `42e0` is Constrained Baseline. TeamSpeak
-clients send through NVENC, which defaults to High. And the client has a
-"Use Cisco OpenH264" toggle — OpenH264 being the classic Constrained Baseline
-codec. A factory that routes Constrained Baseline to OpenH264, with that toggle
-off, would return nothing for exactly our stream. That is a hypothesis; two
-tests below settle it.
+candidate is the **profile**: `42e0` is Constrained Baseline.
+
+TeamSpeak clients stream through NVENC, driven via FFmpeg's `h264_nvenc` — the
+client's encoder settings page uses its AVOption names verbatim, and exposes
+no profile setting. FFmpeg's `h264_nvenc` defaults to **Main**
+(`{ .i64 = NV_ENC_H264_PROFILE_MAIN }` in `libavcodec/nvenc_h264.c`,
+`release/7.0`). So H.264 from another TeamSpeak client is most likely Main —
+the profile the factory demonstrably builds a decoder for — while ours is
+Constrained Baseline, which it declines.
+
+### Ruled out: OpenH264 being switched off
+
+The client has a "Use Cisco OpenH264" toggle, and OpenH264 is the classic
+Constrained Baseline codec, so a factory routing Constrained Baseline to a
+disabled OpenH264 would explain everything. It does not: that toggle has been
+**on** for every test in this investigation, and our Constrained Baseline got
+`NullVideoDecoder` regardless. With NVENC available the client streams through
+it automatically; the toggle does not bring a Constrained Baseline decoder
+into play.
 
 ## The H.264 profile is now selectable
 
@@ -561,22 +574,21 @@ fails both it and the unit test.
 
 ### Testing it
 
-Two tests, cheapest first.
+One variable at a time, in the sidecar's `environment:` block, checking
+Connection Info **Decoder** for each:
 
-1. **No deploy:** in the *viewing* client, turn **"Use Cisco OpenH264"** on and
-   watch the H.264 stream again. If Connection Info now names a real decoder,
-   the factory routes Constrained Baseline to OpenH264 and has nothing for it
-   while that is off.
-2. **One variable at a time,** in the sidecar's `environment:` block:
-   `SIDECAR_H264_PROFILE=high`, then `constrained_high`, then `main`, with the
-   OpenH264 toggle back off. For each, Connection Info **Decoder**. A profile
-   the client does not list at all shows up differently from a black screen:
-   the H.264 line is rejected and the stream fails to negotiate, which is
-   itself an answer.
+1. `SIDECAR_H264_PROFILE=main` — first, because it is what a TeamSpeak client's
+   own NVENC stream most likely is.
+2. `SIDECAR_H264_PROFILE=high`
+3. `SIDECAR_H264_PROFILE=constrained_high`
 
-If a profile works, it becomes the default and the toggle becomes irrelevant
-to viewers — which matters more than the toggle test, since viewers cannot be
-asked to change their client settings.
+The sidecar logs `[FFmpeg] H.264 profile: <name> (profile-level-id <prefix>…)`
+at each stream start, which confirms the setting took. A profile the client
+does not list at all shows up differently from a black screen: the H.264 line
+is rejected and the stream fails to negotiate, which is itself an answer.
+
+If a profile works it becomes the default — and it needs nothing from viewers,
+who cannot be asked to change their client settings.
 
 ## A third route: a known-good reference
 

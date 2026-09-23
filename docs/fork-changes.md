@@ -543,8 +543,10 @@ both the encoder's `-profile:v` and the SDP's `profile-level-id` come from the
 same `h264Profiles` entry. The reason: the TeamSpeak client runs libwebrtc,
 where `NullVideoDecoder` means the application's decoder factory returned
 nothing for the negotiated format — and that factory builds `h264_cuvid`
-decoders for other TeamSpeak clients' H.264, most likely High from NVENC,
-while declining our Constrained Baseline. `sprop-parameter-sets` did not
+decoders for other TeamSpeak clients' H.264 — most likely Main, the default
+of the FFmpeg `h264_nvenc` those clients stream through — while declining our
+Constrained Baseline. The client's "Use Cisco OpenH264" toggle was on
+throughout, so a disabled OpenH264 is not the reason. `sprop-parameter-sets` did not
 change the outcome and stays as a harmless, verified extra.
 
 **The 720p cap, and why it is gone.** With both halves of the SDP visible,

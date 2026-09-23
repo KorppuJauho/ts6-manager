@@ -158,9 +158,11 @@ type h264Profile struct {
 // client answers with and then refuses to build a decoder for: libwebrtc
 // installs NullVideoDecoder precisely when the application's decoder factory
 // returns nothing for the negotiated format, and that factory builds
-// FFmpeg (h264_cuvid) for H.264 from other TeamSpeak clients, which send
-// through NVENC and so most likely High. Main and High are here so that can be
-// tested with an environment variable instead of a rebuild.
+// FFmpeg (h264_cuvid) for H.264 from other TeamSpeak clients. Those stream
+// through FFmpeg's h264_nvenc, whose default profile is Main, and the client
+// exposes no profile setting — so Main is the likeliest thing it accepts. Main
+// and High are here so that can be tested with an environment variable
+// instead of a rebuild.
 //
 // libwebrtc treats High (6400) and Constrained High (640c) as different
 // profiles when it matches an offer against what the receiver supports, and
