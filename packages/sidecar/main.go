@@ -1283,7 +1283,14 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 		"-bufsize", encoderBufsize(vBitrate),
 		"-g", "30",
 	)
-	args = append(args, profile.ExtraArgs...)
+	args = append(args, profile.encodeArgs()...)
+	if profile.MimeType == webrtc.MimeTypeH264 {
+		hp := selectedH264Profile()
+		if want := os.Getenv("SIDECAR_H264_PROFILE"); want != "" && !strings.EqualFold(strings.TrimSpace(want), hp.name) {
+			log.Printf("[FFmpeg] SIDECAR_H264_PROFILE=%q is not a known profile; using %s", want, hp.name)
+		}
+		log.Printf("[FFmpeg] H.264 profile: %s (profile-level-id %s…)", hp.name, hp.profileIOP)
+	}
 	args = append(args,
 		"-payload_type", fmt.Sprintf("%d", profile.PayloadType),
 		"-ssrc", "11111111",

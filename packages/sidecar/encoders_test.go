@@ -48,43 +48,93 @@ func TestPayloadTypeAndFmtpAgreePerCodec(t *testing.T) {
 }
 
 // Every H.264 failure this guards against presents identically — a stream that
-// negotiates, connects, counts packets, and shows nothing.
-func TestH264ProfilesCarryWhatOpenH264Needs(t *testing.T) {
-	found := 0
-	for _, p := range encoderProfiles {
-		if p.MimeType != webrtc.MimeTypeH264 {
-			continue
-		}
-		found++
-
-		// Without parameter sets in the bitstream the decoder never
-		// configures itself: pion builds the SDP, so FFmpeg's extradata
-		// (which would become sprop-parameter-sets) never reaches the peer.
-		if !strings.Contains(strings.Join(p.ExtraArgs, " "), "dump_extra") {
-			t.Errorf("%s: no in-band SPS/PPS, the stream will be black", p.Key)
-		}
-
-		// OpenH264 implements Constrained Baseline. Main or High negotiates
-		// and then fails to decode.
-		args := strings.Join(p.ExtraArgs, " ")
-		if !strings.Contains(args, "baseline") {
-			t.Errorf("%s: encodes a profile OpenH264 cannot decode", p.Key)
-		}
-		if !strings.Contains(args, "-bf 0") {
-			t.Errorf("%s: B-frames are not allowed in Constrained Baseline", p.Key)
-		}
-
-		fmtp := p.FmtpFor(1920, 1080, 30)
-		if !strings.Contains(fmtp, "profile-level-id=42e0") {
-			t.Errorf("%s: fmtp does not advertise Constrained Baseline: %q", p.Key, fmtp)
-		}
-		if !strings.Contains(fmtp, "packetization-mode=1") {
-			t.Errorf("%s: fmtp must match FFmpeg's STAP-A/FU-A packetisation: %q", p.Key, fmtp)
-		}
+// negotiates, connects, counts packets, and shows nothing. So for every
+// selectable profile, what the SDP names and what the encoder is asked for
+// must agree, and the stream must carry what a decoder needs.
+func TestH264ProfilesAgreeWithTheirSDP(t *testing.T) {
+	// profile_idc for each -profile:v spelling, as the SPS will carry it.
+	idc := map[string]string{
+		"baseline": "42", "constrained_baseline": "42",
+		"main": "4d", "high": "64",
 	}
 
-	if found != 2 {
-		t.Fatalf("expected a software and a hardware H.264 profile, found %d", found)
+	for _, hp := range h264Profiles {
+		t.Run(hp.name, func(t *testing.T) {
+			t.Setenv("SIDECAR_H264_PROFILE", hp.name)
+
+			found := 0
+			for _, p := range encoderProfiles {
+				if p.MimeType != webrtc.MimeTypeH264 {
+					continue
+				}
+				found++
+				args := strings.Join(p.encodeArgs(), " ")
+				fmtp := p.FmtpFor(1920, 1080, 30)
+
+				want := hp.x264
+				if p.Encoder == "h264_vaapi" {
+					want = hp.vaapi
+				}
+				if !strings.Contains(args, "-profile:v "+want) {
+					t.Errorf("%s: encoder not asked for %q: %s", p.Key, want, args)
+				}
+				// The SDP's profile_idc must be the one the encoder writes.
+				if got := idc[want]; !strings.Contains(fmtp, "profile-level-id="+got) {
+					t.Errorf("%s: fmtp %q does not name profile_idc %s for -profile:v %s", p.Key, fmtp, got, want)
+				}
+				if !strings.Contains(fmtp, "profile-level-id="+hp.profileIOP) {
+					t.Errorf("%s: fmtp %q does not carry %s", p.Key, fmtp, hp.profileIOP)
+				}
+
+				// Without in-band parameter sets a decoder that joins mid-stream
+				// has nothing to configure itself from.
+				if !strings.Contains(args, "dump_extra") {
+					t.Errorf("%s: no in-band SPS/PPS", p.Key)
+				}
+				// No B-frames for any profile: they add latency and reorder,
+				// and Constrained High forbids them outright.
+				if !strings.Contains(args, "-bf 0") {
+					t.Errorf("%s: B-frames are not disabled", p.Key)
+				}
+				if !strings.Contains(fmtp, "packetization-mode=1") {
+					t.Errorf("%s: fmtp must match FFmpeg's STAP-A/FU-A packetisation: %q", p.Key, fmtp)
+				}
+				if strings.Count(args, "-profile:v") != 1 {
+					t.Errorf("%s: -profile:v given more than once: %s", p.Key, args)
+				}
+			}
+			if found != 2 {
+				t.Fatalf("expected a software and a hardware H.264 profile, found %d", found)
+			}
+		})
+	}
+}
+
+// Constrained Baseline is what every build of this branch has sent; an
+// unconfigured sidecar, or one given a typo, must keep sending it.
+func TestH264ProfileDefaultsToConstrainedBaseline(t *testing.T) {
+	for _, v := range []string{"", "  ", "bogus", "High10"} {
+		t.Setenv("SIDECAR_H264_PROFILE", v)
+		if got := selectedH264Profile().name; got != "constrained_baseline" {
+			t.Errorf("SIDECAR_H264_PROFILE=%q selected %q", v, got)
+		}
+	}
+	t.Setenv("SIDECAR_H264_PROFILE", " HIGH ")
+	if got := selectedH264Profile().name; got != "high" {
+		t.Errorf("case and whitespace should not matter, got %q", got)
+	}
+}
+
+// VP8 and VP9 are untouched by the H.264 profile switch.
+func TestVpxArgsIgnoreH264Profile(t *testing.T) {
+	t.Setenv("SIDECAR_H264_PROFILE", "high")
+	for _, p := range encoderProfiles {
+		if p.MimeType == webrtc.MimeTypeH264 {
+			continue
+		}
+		if strings.Contains(strings.Join(p.encodeArgs(), " "), "-profile:v") {
+			t.Errorf("%s: an H.264 profile leaked into a VPx encode", p.Key)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v4"
 )
 
 // A real SPS and PPS, as libx264 emits them for 1280x720 Constrained
@@ -236,8 +236,11 @@ func TestAwaitParamSetsSkipsNonH264(t *testing.T) {
 // The oracle: FFmpeg writes sprop-parameter-sets into its own SDP from the
 // encoder's extradata. Capturing them off the RTP that same run sends must
 // produce the identical string, or the offer would advertise parameter sets
-// that do not describe the stream. Needs an FFmpeg with libx264, so it runs
-// wherever one is on PATH or named by SIDECAR_TEST_FFMPEG, and skips in CI.
+// that do not describe the stream. Run for every selectable profile with the
+// production libx264 arguments, it also checks that the profile_idc the encoder
+// writes into the SPS is the one the offer names. Needs an FFmpeg with
+// libx264, so it runs wherever one is on PATH or named by SIDECAR_TEST_FFMPEG,
+// and skips in CI.
 func TestSpropMatchesFFmpegOwnSDP(t *testing.T) {
 	ffmpeg := os.Getenv("SIDECAR_TEST_FFMPEG")
 	if ffmpeg == "" {
@@ -246,79 +249,96 @@ func TestSpropMatchesFFmpegOwnSDP(t *testing.T) {
 			t.Skip("no ffmpeg; set SIDECAR_TEST_FFMPEG to run this")
 		}
 	}
+	sw := mustProfile(t, "h264_software")
 
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	_ = conn.SetReadBuffer(8 << 20)
-	port := conn.LocalAddr().(*net.UDPAddr).Port
-	sdpPath := filepath.Join(t.TempDir(), "oracle.sdp")
+	for _, hp := range h264Profiles {
+		t.Run(hp.name, func(t *testing.T) {
+			t.Setenv("SIDECAR_H264_PROFILE", hp.name)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	// +global_header puts the parameter sets in extradata, which is where
-	// FFmpeg's SDP writer reads them; dump_extra then re-inserts them in-band
-	// exactly as the production profiles do.
-	cmd := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-loglevel", "error",
-		"-re", "-f", "lavfi", "-i", "testsrc=size=1280x720:rate=30", "-t", "2",
-		"-pix_fmt", "yuv420p", "-c:v", "libx264", "-profile:v", "baseline",
-		"-bf", "0", "-g", "30", "-flags", "+global_header",
-		"-bsf:v", "dump_extra=freq=keyframe",
-		"-payload_type", "102", "-f", "rtp", "-pkt_size", "1200",
-		"-sdp_file", sdpPath, "rtp://127.0.0.1:"+strconv.Itoa(port))
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Observed straight into a sidecar running the same H.264 profile, so the
-	// test also covers the capture flag and the path into the offer.
-	s := NewSidecar()
-	s.setActiveProfile(EncoderProfile{
-		Key: "h264_software", MimeType: webrtc.MimeTypeH264, PayloadType: 102, NeedsFmtp: true,
-	}, "", 1280, 720, 30)
-	settled()
-
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	buf := make([]byte, 1500)
-	for running := true; running; {
-		select {
-		case err := <-done:
+			conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 			if err != nil {
-				t.Fatalf("ffmpeg: %v\n%s", err, stderr.String())
+				t.Fatal(err)
 			}
-			running = false
-		default:
-		}
-		_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-		n, _, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			continue
-		}
-		var pkt rtp.Packet
-		if pkt.Unmarshal(buf[:n]) == nil && s.captureParamSets.Load() {
-			s.paramSets.observe(pkt.Payload)
-		}
-	}
+			defer conn.Close()
+			_ = conn.SetReadBuffer(8 << 20)
+			port := conn.LocalAddr().(*net.UDPAddr).Port
+			sdpPath := filepath.Join(t.TempDir(), "oracle.sdp")
 
-	sdp, err := os.ReadFile(sdpPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := regexp.MustCompile(`sprop-parameter-sets=([A-Za-z0-9+/=]+,[A-Za-z0-9+/=]+)`).FindSubmatch(sdp)
-	if m == nil {
-		t.Fatalf("FFmpeg's SDP carries no sprop-parameter-sets to compare with:\n%s", sdp)
-	}
-	if got, want := s.paramSets.sprop(), string(m[1]); got != want {
-		t.Fatalf("captured sprop %q, FFmpeg advertised %q", got, want)
-	}
+			// Observed straight into a sidecar running the same profile, so the
+			// test also covers the capture flag and the path into the offer.
+			s := NewSidecar()
+			s.setActiveProfile(sw, "", 1280, 720, 30)
+			settled()
 
-	// And the value survives into the offer this sidecar would send.
-	if fmtp := s.videoCodec().SDPFmtpLine; !strings.Contains(fmtp, string(m[1])) {
-		t.Fatalf("offer fmtp %q does not carry the captured parameter sets", fmtp)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			// The production arguments, plus +global_header so FFmpeg's SDP
+			// writer has extradata to read the parameter sets from; dump_extra
+			// (part of the production arguments) re-inserts them in-band.
+			args := []string{"-hide_banner", "-loglevel", "error",
+				"-re", "-f", "lavfi", "-i", "testsrc=size=1280x720:rate=30", "-t", "2",
+				"-pix_fmt", "yuv420p", "-c:v", sw.Encoder}
+			args = append(args, sw.encodeArgs()...)
+			args = append(args, "-g", "30", "-flags", "+global_header",
+				"-payload_type", "102", "-f", "rtp", "-pkt_size", "1200",
+				"-sdp_file", sdpPath, "rtp://127.0.0.1:"+strconv.Itoa(port))
+			cmd := exec.CommandContext(ctx, ffmpeg, args...)
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			buf := make([]byte, 1500)
+			for running := true; running; {
+				select {
+				case err := <-done:
+					if err != nil {
+						t.Fatalf("ffmpeg: %v\n%s", err, stderr.String())
+					}
+					running = false
+				default:
+				}
+				_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+				n, _, err := conn.ReadFromUDP(buf)
+				if err != nil {
+					continue
+				}
+				var pkt rtp.Packet
+				if pkt.Unmarshal(buf[:n]) == nil && s.captureParamSets.Load() {
+					s.paramSets.observe(pkt.Payload)
+				}
+			}
+
+			sdp, err := os.ReadFile(sdpPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := regexp.MustCompile(`sprop-parameter-sets=([A-Za-z0-9+/=]+,[A-Za-z0-9+/=]+)`).FindSubmatch(sdp)
+			if m == nil {
+				t.Fatalf("FFmpeg's SDP carries no sprop-parameter-sets to compare with:\n%s", sdp)
+			}
+			captured := s.paramSets.sprop()
+			if want := string(m[1]); captured != want {
+				t.Fatalf("captured sprop %q, FFmpeg advertised %q", captured, want)
+			}
+
+			// The encoder's own SPS must carry the profile_idc the offer names.
+			sps, err := base64.StdEncoding.DecodeString(strings.SplitN(captured, ",", 2)[0])
+			if err != nil || len(sps) < 2 {
+				t.Fatalf("captured SPS does not decode: %v", err)
+			}
+			if got, want := fmt.Sprintf("%02x", sps[1]), hp.profileIOP[:2]; got != want {
+				t.Fatalf("encoder wrote profile_idc %s, the offer advertises %s", got, want)
+			}
+
+			// And the value survives into the offer this sidecar would send.
+			fmtp := s.videoCodec().SDPFmtpLine
+			if !strings.Contains(fmtp, captured) || !strings.Contains(fmtp, "profile-level-id="+hp.profileIOP) {
+				t.Fatalf("offer fmtp %q does not carry the stream's profile and parameter sets", fmtp)
+			}
+		})
 	}
 }

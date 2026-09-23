@@ -472,6 +472,112 @@ rebuild, which makes the test a clean A/B on one variable:
    carries ICE credentials. What the client answers to an H.264 offer that
    carries parameter sets is the next thing to read.
 
+### Result: sprop-parameter-sets did not change it
+
+Deployed. The offer carried the stream's own parameter sets, single codec:
+
+```
+m=video 9 UDP/TLS/RTP/SAVPF 102
+a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e028;sprop-parameter-sets=Z0JAKJZU…,aM44gA==
+```
+
+The client still reported `NullVideoDecoder`. Its answer:
+
+```
+a=rtpmap:102 H264/90000
+a=rtcp-fb:102 goog-remb
+a=rtcp-fb:102 transport-cc
+a=rtcp-fb:102 ccm fir
+a=rtcp-fb:102 nack
+a=rtcp-fb:102 nack pli
+a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f
+```
+
+The capture is kept — it is verified correct, costs nothing, and some
+receivers do use it — but it is not the fix. `SIDECAR_H264_SPROP=0` removes it.
+
+## What NullVideoDecoder actually means
+
+That answer is libwebrtc's: the `rtcp-fb` order (`goog-remb`, `transport-cc`,
+`ccm fir`, `nack`, `nack pli`), the `o=` and `msid-semantic` lines, the
+level-asymmetric `42e01f` reply to a `42e028` offer. The TeamSpeak client is
+built on libwebrtc — which makes `NullVideoDecoder` something that can be read
+in source rather than guessed at. From `video/video_receive_stream2.cc`
+(checked on the webrtc-sdk mirror, `m125_release`):
+
+```cpp
+std::unique_ptr<VideoDecoder> video_decoder =
+    config_.decoder_factory->Create(env_, decoder.video_format);
+// If we still have no valid decoder, we have to create a "Null" decoder
+// that ignores all calls. ...
+if (!video_decoder) {
+  video_decoder = std::make_unique<NullVideoDecoder>();
+}
+```
+
+and `NullVideoDecoder::Decode` logs "doesn't support decoding" and returns
+`WEBRTC_VIDEO_CODEC_OK` — it swallows every frame and reports success, which
+is precisely a stream that connects, counts packets and shows nothing.
+
+So the precise statement is: **TeamSpeak's own video decoder factory was asked
+for a decoder for `H264; packetization-mode=1; profile-level-id=42e01f` and
+returned none.** That is the same factory that produces `FFmpeg (h264_cuvid)`
+for H.264 from other TeamSpeak clients, and `libvpx` for our VP9. It decodes
+H.264; it declines *this* H.264.
+
+Nothing in the stream can change that outcome — the factory is consulted with
+the negotiated format before a packet is decoded. Everything that separates
+our H.264 from a TeamSpeak client's lives in that format, and the obvious
+candidate is the **profile**: `42e0` is Constrained Baseline. TeamSpeak
+clients send through NVENC, which defaults to High. And the client has a
+"Use Cisco OpenH264" toggle — OpenH264 being the classic Constrained Baseline
+codec. A factory that routes Constrained Baseline to OpenH264, with that toggle
+off, would return nothing for exactly our stream. That is a hypothesis; two
+tests below settle it.
+
+## The H.264 profile is now selectable
+
+`SIDECAR_H264_PROFILE` picks what is encoded *and* what is advertised, from one
+record (`h264Profiles` in `encoders.go`), so the two cannot disagree:
+
+| Value | profile-level-id | h264_vaapi | libx264 |
+|---|---|---|---|
+| `constrained_baseline` (default) | `42e0xx` | `constrained_baseline` | `baseline` |
+| `main` | `4d00xx` | `main` | `main` |
+| `high` | `6400xx` | `high` | `high` |
+| `constrained_high` | `640cxx` | `high` | `high` |
+
+libwebrtc treats High and Constrained High as different profiles when matching
+an offer against what the receiver supports, and which one TeamSpeak lists is
+unknown — hence both. Every profile encodes with B-frames off and progressive
+frames, which is what Constrained High requires. pion's H.264 match compares
+the profile *and* constraint bytes and ignores only the level, and libwebrtc's
+answer keeps the offered profile and constraint bits, so the track still binds.
+
+Verified with a real encoder: the FFmpeg oracle runs every profile through the
+production libx264 arguments and requires the SPS the encoder writes to carry
+the profile_idc the offer names. All four pass; giving Main a wrong prefix
+fails both it and the unit test.
+
+### Testing it
+
+Two tests, cheapest first.
+
+1. **No deploy:** in the *viewing* client, turn **"Use Cisco OpenH264"** on and
+   watch the H.264 stream again. If Connection Info now names a real decoder,
+   the factory routes Constrained Baseline to OpenH264 and has nothing for it
+   while that is off.
+2. **One variable at a time,** in the sidecar's `environment:` block:
+   `SIDECAR_H264_PROFILE=high`, then `constrained_high`, then `main`, with the
+   OpenH264 toggle back off. For each, Connection Info **Decoder**. A profile
+   the client does not list at all shows up differently from a black screen:
+   the H.264 line is rejected and the stream fails to negotiate, which is
+   itself an answer.
+
+If a profile works, it becomes the default and the toggle becomes irrelevant
+to viewers — which matters more than the toggle test, since viewers cannot be
+asked to change their client settings.
+
 ## A third route: a known-good reference
 
 Self-host [Moepchi/webspeak3](https://github.com/Moepchi/webspeak3) and screen

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -100,13 +101,9 @@ func h264LevelIdc(width, height, fps int) uint8 {
 
 // h264FmtpLine builds the "a=fmtp" parameters for a stream of this size.
 //
-// 42e0 is Constrained Baseline. It was chosen on the belief that TeamSpeak
-// decodes with Cisco's OpenH264, which implements only that profile; the
-// client's own Connection Info later showed FFmpeg (h264_cuvid) instead, so
-// the constraint is not load-bearing. It stays because it is harmless and the
-// encoder profiles are built to match it. The constraint bits stay at e0, the
-// spelling every H.264 WebRTC implementation uses; only the level byte is
-// computed.
+// The first four hex digits of profile-level-id come from the selected H.264
+// profile (see h264Profile), so the SDP always names the profile the encoder
+// is actually asked for. Only the level byte is computed here.
 //
 // packetization-mode=1 is what FFmpeg's RTP muxer emits (STAP-A and FU-A).
 //
@@ -115,8 +112,8 @@ func h264LevelIdc(width, height, fps int) uint8 {
 // absent one.
 func h264FmtpLine(width, height, fps int, sprop string) string {
 	line := fmt.Sprintf(
-		"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e0%02x",
-		h264LevelIdc(width, height, fps),
+		"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=%s%02x",
+		selectedH264Profile().profileIOP, h264LevelIdc(width, height, fps),
 	)
 	if sprop != "" {
 		line += ";sprop-parameter-sets=" + sprop
@@ -136,6 +133,77 @@ func (p EncoderProfile) fmtpWithParamSets(width, height, fps int, sprop string) 
 		return ""
 	}
 	return h264FmtpLine(width, height, fps, sprop)
+}
+
+// h264Profile is one H.264 profile the sidecar can send. What the SDP
+// advertises and what each encoder is asked for live in one record, because
+// the two must agree: a profile-level-id naming one profile over a stream
+// encoded in another is exactly the kind of mismatch that negotiates, connects
+// and shows nothing.
+type h264Profile struct {
+	// name is the SIDECAR_H264_PROFILE value.
+	name string
+	// profileIOP is profile_idc and the constraint flags: the first four hex
+	// digits of profile-level-id, spelled the way libwebrtc spells them.
+	profileIOP string
+	// vaapi and x264 are the -profile:v values each encoder knows it by.
+	vaapi string
+	x264  string
+}
+
+// h264Profiles lists what can be selected; the first entry is the default.
+//
+// Constrained Baseline stays the default because it is what every build of
+// this branch has sent. It is also, as it turns out, the profile the TeamSpeak
+// client answers with and then refuses to build a decoder for: libwebrtc
+// installs NullVideoDecoder precisely when the application's decoder factory
+// returns nothing for the negotiated format, and that factory builds
+// FFmpeg (h264_cuvid) for H.264 from other TeamSpeak clients, which send
+// through NVENC and so most likely High. Main and High are here so that can be
+// tested with an environment variable instead of a rebuild.
+//
+// libwebrtc treats High (6400) and Constrained High (640c) as different
+// profiles when it matches an offer against what the receiver supports, and
+// which of them TeamSpeak lists is not known — offering the one it lacks gets
+// the H.264 m-line rejected rather than a black screen. Both are here. Every
+// profile encodes with B-frames off and progressive frames, which is what
+// Constrained High requires, so advertising it is truthful even though
+// neither encoder has a Constrained High spelling of its own; they encode
+// High and the constraint flags in the in-band SPS stay 00.
+var h264Profiles = []h264Profile{
+	{name: "constrained_baseline", profileIOP: "42e0", vaapi: "constrained_baseline", x264: "baseline"},
+	{name: "main", profileIOP: "4d00", vaapi: "main", x264: "main"},
+	{name: "high", profileIOP: "6400", vaapi: "high", x264: "high"},
+	{name: "constrained_high", profileIOP: "640c", vaapi: "high", x264: "high"},
+}
+
+// selectedH264Profile is the profile SIDECAR_H264_PROFILE names, or the
+// default when it is unset or names nothing known. Env is fixed at container
+// start, so this is constant for the life of the process.
+func selectedH264Profile() h264Profile {
+	want := strings.ToLower(strings.TrimSpace(os.Getenv("SIDECAR_H264_PROFILE")))
+	for _, p := range h264Profiles {
+		if p.name == want {
+			return p
+		}
+	}
+	return h264Profiles[0]
+}
+
+// encodeArgs is ExtraArgs plus, for H.264, the -profile:v the selected profile
+// calls for. Both the stream and the encoder probe use it, so a GPU without an
+// entrypoint for the chosen profile fails the probe and falls back rather
+// than failing at stream start.
+func (p EncoderProfile) encodeArgs() []string {
+	if p.MimeType != webrtc.MimeTypeH264 {
+		return p.ExtraArgs
+	}
+	hp := selectedH264Profile()
+	name := hp.x264
+	if p.Encoder == "h264_vaapi" {
+		name = hp.vaapi
+	}
+	return append([]string{"-profile:v", name}, p.ExtraArgs...)
 }
 
 // h264InBandParameterSets re-inserts SPS/PPS ahead of every keyframe.
@@ -192,10 +260,10 @@ var encoderProfiles = []EncoderProfile{
 		MimeType: webrtc.MimeTypeH264, PayloadType: 102,
 		NeedsFmtp: true,
 		Encoder:   "libx264", PixelFormat: "yuv420p",
+		// -profile:v comes from encodeArgs, from the same record as the SDP.
+		// B-frames stay off for every profile: they add a frame of latency
+		// and reorder output, which a real-time receiver has no use for.
 		ExtraArgs: append([]string{
-			// Constrained Baseline is what the advertised profile-level-id
-			// promises and what OpenH264 decodes: no B-frames, no CABAC.
-			"-profile:v", "baseline",
 			"-preset", "veryfast",
 			"-tune", "zerolatency",
 			"-bf", "0",
@@ -206,11 +274,10 @@ var encoderProfiles = []EncoderProfile{
 		MimeType: webrtc.MimeTypeH264, PayloadType: 102,
 		NeedsFmtp: true,
 		HWAccel:   "vaapi", Encoder: "h264_vaapi", PixelFormat: "nv12",
+		// -profile:v comes from encodeArgs. A driver with no encode
+		// entrypoint for the selected profile fails the probe and falls back
+		// to libx264, which can encode all three.
 		ExtraArgs: append([]string{
-			// A driver that exposes no ConstrainedBaseline encode entrypoint
-			// fails the probe and falls back to libx264, which is the right
-			// outcome: Main or High would encode but not decode.
-			"-profile:v", "constrained_baseline",
 			"-bf", "0",
 		}, h264InBandParameterSets...),
 	},
@@ -324,7 +391,7 @@ func runEncoderProbe(p EncoderProfile, device string) bool {
 		"-c:v", p.Encoder,
 		"-b:v", "500k",
 	)
-	args = append(args, p.ExtraArgs...)
+	args = append(args, p.encodeArgs()...)
 	args = append(args, "-f", "null", "-")
 
 	return exec.CommandContext(ctx, getFfmpegPath(), args...).Run() == nil

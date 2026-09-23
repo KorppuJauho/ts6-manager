@@ -537,6 +537,16 @@ sends them only inside STAP-A packets, so that path is load-bearing, not an
 edge case. Verified against FFmpeg's own SDP by `TestSpropMatchesFFmpegOwnSDP`.
 `SIDECAR_H264_SPROP=0` removes them without a rebuild.
 
+**The H.264 profile is selectable.** `SIDECAR_H264_PROFILE` chooses
+`constrained_baseline` (default), `main`, `high` or `constrained_high`, and
+both the encoder's `-profile:v` and the SDP's `profile-level-id` come from the
+same `h264Profiles` entry. The reason: the TeamSpeak client runs libwebrtc,
+where `NullVideoDecoder` means the application's decoder factory returned
+nothing for the negotiated format — and that factory builds `h264_cuvid`
+decoders for other TeamSpeak clients' H.264, most likely High from NVENC,
+while declining our Constrained Baseline. `sprop-parameter-sets` did not
+change the outcome and stays as a harmless, verified extra.
+
 **The 720p cap, and why it is gone.** With both halves of the SDP visible,
 the client looked like it was capping H.264 at level 3.1:
 

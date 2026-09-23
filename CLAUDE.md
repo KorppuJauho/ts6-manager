@@ -61,7 +61,9 @@ silently, as a black or frozen video. All three derive from one record in
 `encoders.go`; keep it that way. For H.264 the fmtp line is part of that
 identity too — built by `FmtpFor` from the frame size, because the advertised
 level has to cover the stream actually sent — and its encoder arguments must
-keep the in-band SPS/PPS bitstream filter. Get either wrong and the stream
+keep the in-band SPS/PPS bitstream filter. The H.264 profile is selectable
+(`SIDECAR_H264_PROFILE`); `-profile:v` and the profile-level-id prefix must
+come from the same `h264Profiles` entry, via `encodeArgs` and `FmtpFor`. Get either wrong and the stream
 connects, counts packets, and shows nothing.
 
 **`SOURCE_SEPARATOR` is a wire format between two processes.** A DASH source
