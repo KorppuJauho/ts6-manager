@@ -100,27 +100,42 @@ func h264LevelIdc(width, height, fps int) uint8 {
 
 // h264FmtpLine builds the "a=fmtp" parameters for a stream of this size.
 //
-// 42e0 is Constrained Baseline — the one profile Cisco's OpenH264, which is
-// what TeamSpeak decodes with, implements. Main or High negotiate cleanly and
-// then fail to decode, which presents as a black stream rather than an error.
-// The constraint bits stay at e0, the spelling every H.264 WebRTC
-// implementation uses; only the level byte is computed.
+// 42e0 is Constrained Baseline. It was chosen on the belief that TeamSpeak
+// decodes with Cisco's OpenH264, which implements only that profile; the
+// client's own Connection Info later showed FFmpeg (h264_cuvid) instead, so
+// the constraint is not load-bearing. It stays because it is harmless and the
+// encoder profiles are built to match it. The constraint bits stay at e0, the
+// spelling every H.264 WebRTC implementation uses; only the level byte is
+// computed.
 //
 // packetization-mode=1 is what FFmpeg's RTP muxer emits (STAP-A and FU-A).
-func h264FmtpLine(width, height, fps int) string {
-	return fmt.Sprintf(
+//
+// sprop, when non-empty, is appended as sprop-parameter-sets. It is left off
+// rather than sent empty: an empty value is a malformed parameter, not an
+// absent one.
+func h264FmtpLine(width, height, fps int, sprop string) string {
+	line := fmt.Sprintf(
 		"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e0%02x",
 		h264LevelIdc(width, height, fps),
 	)
+	if sprop != "" {
+		line += ";sprop-parameter-sets=" + sprop
+	}
+	return line
 }
 
 // FmtpFor returns the fmtp line this profile needs for a stream of this size,
 // or "" for a codec that negotiates on its name alone.
 func (p EncoderProfile) FmtpFor(width, height, fps int) string {
+	return p.fmtpWithParamSets(width, height, fps, "")
+}
+
+// fmtpWithParamSets is FmtpFor with the stream's own SPS and PPS attached.
+func (p EncoderProfile) fmtpWithParamSets(width, height, fps int, sprop string) string {
 	if !p.NeedsFmtp {
 		return ""
 	}
-	return h264FmtpLine(width, height, fps)
+	return h264FmtpLine(width, height, fps, sprop)
 }
 
 // h264InBandParameterSets re-inserts SPS/PPS ahead of every keyframe.

@@ -393,6 +393,13 @@ type Sidecar struct {
 	// first source picks a codec.
 	gateKeyframe atomic.Bool
 
+	// The SPS and PPS the running H.264 encode is actually sending, captured
+	// off the RTP so the offer can carry them as sprop-parameter-sets.
+	// captureParamSets mirrors "the active codec is H.264" for the same
+	// reason gateKeyframe exists: the read loop tests it per packet.
+	paramSets        h264ParamSets
+	captureParamSets atomic.Bool
+
 	// Atomic timestamps for RTCP Sender Report generation
 	lastVideoRTPTs  uint64 // atomic: latest video RTP timestamp seen
 	lastAudioRTPTs  uint64 // atomic: latest audio RTP timestamp seen
@@ -469,6 +476,10 @@ func (s *Sidecar) readVideoRTP() {
 
 		if err := pkt.Unmarshal(buf[:n]); err != nil {
 			continue
+		}
+
+		if s.captureParamSets.Load() {
+			s.paramSets.observe(pkt.Payload)
 		}
 
 		// Track RTP stats used by optional debug / legacy reporting paths
@@ -559,6 +570,9 @@ func (s *Sidecar) setActiveProfile(p EncoderProfile, device string, width, heigh
 	s.encFPS = fps
 	s.profileMu.Unlock()
 	s.gateKeyframe.Store(needsKeyframeGate(p))
+	// A new source is a new SPS; the old one must not reach a new offer.
+	s.paramSets.reset()
+	s.captureParamSets.Store(p.MimeType == webrtc.MimeTypeH264)
 }
 
 // videoRTCPFeedback is what an ordinary WebRTC offer advertises on a video
@@ -583,11 +597,10 @@ var videoRTCPFeedback = []webrtc.RTCPFeedback{
 // codecParametersFor turns a profile into what the media engine registers.
 // The fmtp line depends on the frame size, so it is built per stream.
 //
-// The feedback is separately switchable from the multi-codec offer, because
-// the two shipped together and one of them turned VP9 black. Turning the
-// offer back to a single codec and leaving this on is the first half of that
-// bisect; SIDECAR_RTCP_FEEDBACK=0 is the second.
-func codecParametersFor(p EncoderProfile, w, h, fps int) webrtc.RTPCodecParameters {
+// The feedback is separately switchable from the multi-codec offer because
+// the two shipped together, and a live deployment should be able to isolate
+// either without a rebuild. SIDECAR_RTCP_FEEDBACK=0 turns it off.
+func codecParametersFor(p EncoderProfile, w, h, fps int, sprop string) webrtc.RTPCodecParameters {
 	var feedback []webrtc.RTCPFeedback
 	if envBoolOrDefault("SIDECAR_RTCP_FEEDBACK", true) {
 		feedback = videoRTCPFeedback
@@ -596,10 +609,40 @@ func codecParametersFor(p EncoderProfile, w, h, fps int) webrtc.RTPCodecParamete
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:     p.MimeType,
 			ClockRate:    90000,
-			SDPFmtpLine:  p.FmtpFor(w, h, fps),
+			SDPFmtpLine:  p.fmtpWithParamSets(w, h, fps, sprop),
 			RTCPFeedback: feedback,
 		},
 		PayloadType: webrtc.PayloadType(p.PayloadType),
+	}
+}
+
+// activeSprop is the sprop-parameter-sets value for the codec being encoded,
+// or "" when it is not H.264, none have been seen yet, or the operator has
+// switched it off. SIDECAR_H264_SPROP=0 exists so the one variable can be
+// flipped on a live deployment without a rebuild.
+func (s *Sidecar) activeSprop() string {
+	if !s.captureParamSets.Load() || !envBoolOrDefault("SIDECAR_H264_SPROP", true) {
+		return ""
+	}
+	return s.paramSets.sprop()
+}
+
+// awaitParamSets holds a new peer's offer until the running H.264 encode has
+// sent its SPS and PPS, bounded so a stalled encoder cannot hold a viewer
+// forever. FFmpeg repeats them at every keyframe and keyframes are one second
+// apart, so a viewer who joins in the first moments of a stream waits at most
+// about that long; every later viewer does not wait at all.
+func (s *Sidecar) awaitParamSets(peerID string, limit time.Duration) {
+	if !s.captureParamSets.Load() || !envBoolOrDefault("SIDECAR_H264_SPROP", true) {
+		return
+	}
+	deadline := time.Now().Add(limit)
+	for s.paramSets.sprop() == "" {
+		if time.Now().After(deadline) {
+			log.Printf("[Peer %s] No SPS/PPS within %s; offering H.264 without sprop-parameter-sets", peerID, limit)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -620,7 +663,7 @@ func (s *Sidecar) activeVideoProfile() (EncoderProfile, int, int, int) {
 // bound, and nothing is sent.
 func (s *Sidecar) videoCodec() webrtc.RTPCodecCapability {
 	p, w, h, fps := s.activeVideoProfile()
-	return codecParametersFor(p, w, h, fps).RTPCodecCapability
+	return codecParametersFor(p, w, h, fps, s.activeSprop()).RTPCodecCapability
 }
 
 // videoCodecs is every video codec the offer carries, the active one first.
@@ -636,20 +679,15 @@ func (s *Sidecar) videoCodec() webrtc.RTPCodecCapability {
 // make the offer the right shape and to show what the client picks when it is
 // given a choice.
 //
-// **This is off by default, because it was tried and it made things worse.**
-// Offering H.264, VP8 and VP9 together turned VP9 — the codec that works —
-// into a black screen as well, with the client reporting `NullVideoDecoder`
-// and 0x0 0fps while 10MB of video arrived with zero packet loss. So the
-// TeamSpeak client does not resolve a decoder from a multi-codec m-line; it
-// wants exactly one. Whatever lets it switch AV1 to H.264 mid-stream, it is
-// not a payload-type change inside one negotiated m-line.
-//
-// The code stays because the switch is the cheapest way to re-test the shape
-// if that understanding changes, and because it documents what was tried.
-// SIDECAR_MULTI_CODEC_OFFER=1 turns it back on.
+// It is off by default because it neither helps nor is needed. Tested live,
+// VP9 renders at 1080p through libvpx with this offer on, so the client does
+// resolve a decoder from a multi-codec m-line — but H.264 on the same offer
+// still gets NullVideoDecoder, so the offer shape is not what separates them.
+// A single codec is the shape main ships and keeps H.264 tests to one
+// variable. SIDECAR_MULTI_CODEC_OFFER=1 turns it back on.
 func (s *Sidecar) videoCodecs() []webrtc.RTPCodecParameters {
 	p, w, h, fps := s.activeVideoProfile()
-	codecs := []webrtc.RTPCodecParameters{codecParametersFor(p, w, h, fps)}
+	codecs := []webrtc.RTPCodecParameters{codecParametersFor(p, w, h, fps, s.activeSprop())}
 
 	if !envBoolOrDefault("SIDECAR_MULTI_CODEC_OFFER", false) {
 		return codecs
@@ -664,7 +702,8 @@ func (s *Sidecar) videoCodecs() []webrtc.RTPCodecParameters {
 			continue
 		}
 		seen[alt.MimeType] = true
-		codecs = append(codecs, codecParametersFor(alt, w, h, fps))
+		// Only the codec being encoded has parameter sets to advertise.
+		codecs = append(codecs, codecParametersFor(alt, w, h, fps, ""))
 	}
 	return codecs
 }
@@ -826,6 +865,10 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 	for _, stun := range getStunServers() {
 		iceServers = append(iceServers, webrtc.ICEServer{URLs: []string{stun}})
 	}
+
+	// peersLock is already released here, so this wait never stalls the
+	// forwarding loops or other viewers.
+	s.awaitParamSets(id, 2500*time.Millisecond)
 
 	m := &webrtc.MediaEngine{}
 	videoCodec := s.videoCodec()

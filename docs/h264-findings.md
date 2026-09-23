@@ -247,7 +247,10 @@ exactly what `-g 30` predicts.
 The caveat above still stands — this is FFmpeg's depacketiser, not
 TeamSpeak's. But there is no fault here to find.
 
-## The strongest remaining lead: we offer one codec, TeamSpeak offers several
+## Tried: offering several codecs, as TeamSpeak does
+
+*Implemented, tested, and not the cause — see "NullVideoDecoder" below. Kept
+for the reasoning and the escape hatches it introduced.*
 
 Observed on a client-to-client stream: **a viewer whose hardware cannot decode
 AV1 gets H.264 instead, mid-stream, without the stream restarting.**
@@ -329,11 +332,10 @@ ask for a keyframe. Weak on its own, since VP9 renders fine under the same
 gap and a keyframe goes out every second regardless, but it is a second
 difference from a normal WebRTC offer and it costs nothing to close.
 
-## The multi-codec offer was wrong, and it broke VP9
+## NullVideoDecoder: the client never builds an H.264 decoder
 
-Deployed and tested. **Both H.264 and VP9 rendered black**, where VP9 had
-worked on every build before it. The client's own Connection Info on the
-stream:
+The multi-codec offer was deployed and tested. H.264 rendered black, and the
+client's own Connection Info on that stream read:
 
 ```
 Downstream          8.8 Mbps        Received Packets     10215
@@ -342,32 +344,52 @@ Decoding Time       0ms             Lost Packets (in)    0
 Quality (Current)   0x0 0fps        Decoder              NullVideoDecoder
 ```
 
-Read that carefully, because it is the most informative thing in this entire
-investigation.
+**`NullVideoDecoder`** is the most informative thing in this investigation.
+The client did not fail to decode. It never constructed a decoder — it
+resolved the negotiated codec to nothing and installed a null implementation.
+`Decoding Time 0ms` and `Quality 0x0 0fps` follow from that. And with 10.8 MB
+received at zero loss the transport is flawless: nothing about RTP, framing,
+keyframes or levels can explain a receiver that never built a decoder.
 
-**`NullVideoDecoder`.** The client did not fail to decode. It never
-constructed a decoder at all — it resolved the negotiated video codec to
-nothing and installed a null implementation. `Decoding Time 0ms` and
-`Quality 0x0 0fps` follow from that, not from a decode error.
+### Correction: the multi-codec offer did not break VP9
 
-**`Lost Packets (in): 0`, 10.8 MB received.** The transport is perfect.
-Everything the sidecar sent arrived intact. Nothing about RTP, framing,
-keyframes, levels or parameter sets can explain a receiver that never built a
-decoder in the first place.
+The first report of that deploy said VP9 was black too, and this file — along
+with the commit that defaulted the offer off (`f4e7c7f`) — concluded that the
+client *cannot* resolve a decoder from a multi-codec `m=` line. **That was
+wrong.** A later run on the same multi-codec build, with the sidecar logging
 
-So the conclusion is the opposite of the hypothesis: **the TeamSpeak client
-does not resolve a decoder from a multi-codec `m=` line. It wants exactly
-one.** Offering three payload types took the codec that worked and broke it.
+```
+[Peer 95] Offering video/VP9/98, video/VP8/96, video/H264/102 (sending video/VP9)
+```
 
-The reasoning that led here was sound about the *observation* — a viewer whose
-hardware cannot decode AV1 really is switched to H.264 mid-stream — and wrong
-about the *mechanism*. Whatever TeamSpeak does to achieve that, it is not a
-payload-type change inside one negotiated m-line. Renegotiation, a second
-transceiver, or its own signalling outside SDP are all still open; the SDP
-m-line is not.
+rendered VP9 at `1920x1080 30fps`, `Decoder: libvpx`, `Decoding Time 2ms`.
+The client resolves a decoder from a multi-codec offer without trouble.
 
-`SIDECAR_MULTI_CODEC_OFFER` now defaults to **off**. The code stays as the
-cheapest way to re-test the shape, and as a record of what was tried.
+The earlier VP9 black screen was most likely not the codec at all. The same
+log shows the failure mode that would produce one: a YouTube URL returning
+`HTTP error 403 Forbidden`, FFmpeg exiting, and the viewer still connecting
+to a stream with no video behind it. That run was not captured, so this is the
+probable cause, not a proven one — but it is the lesson either way: a single
+black screen is not evidence about the codec until the source is known to
+have been playing.
+
+The multi-codec offer stays off by default, now for the right reason: it does
+not help H.264, and a single codec is the shape main ships and keeps H.264
+tests to one variable.
+
+### The controlled result
+
+That later run is the cleanest comparison this investigation has produced:
+same build, same offer shape, same source, same client, same session.
+
+| Stream | Decoder | Quality |
+|---|---|---|
+| VP9 | `libvpx` | 1920x1080 30fps |
+| H.264 | `NullVideoDecoder` | 0x0 0fps |
+
+Everything is controlled except the codec. VP9 negotiates on its name alone —
+no fmtp. H.264 is the codec whose decoder can be configured from the fmtp
+line. That was the condition set out for implementing the next hypothesis.
 
 ### The RTCP feedback earned its keep
 
@@ -375,50 +397,80 @@ cheapest way to re-test the shape, and as a record of what was tried.
 [Peer 15] video PLI #1
 ```
 
-Once, immediately after the gate opened, and never again. That is the first
-time in this investigation the receiver has said anything at all. It is also
-exactly what a client with a `NullVideoDecoder` would do: ask once for a
-picture it can start from, get data it has no decoder for, and stop asking.
+Once, right after the gate opened, and never again — the first time in this
+investigation the receiver has said anything at all. It appears on the VP9
+streams too, so on its own it is the ordinary PLI a receiver sends as it
+starts, not a distress signal. What matters is what does not follow it: a
+receiver with a working decoder and a broken stream keeps asking.
 
-The feedback set and the multi-codec offer shipped in the same commit, so
-either could be what broke VP9. `SIDECAR_RTCP_FEEDBACK` is therefore switchable
-on its own, and the bisect is: single-codec offer with feedback on (expect VP9
-back — the offer was the cause), then feedback off as well if it is not.
+## sprop-parameter-sets: implemented
 
-## The next hypothesis: sprop-parameter-sets
+Every theory before `NullVideoDecoder` assumed the client was *trying* to
+decode and failing. It is deciding, while it sets up the stream, that it has
+no decoder for what is offered — before a packet arrives. That makes the fmtp
+line the thing that matters, and ours had no **`sprop-parameter-sets`**.
 
-`NullVideoDecoder` reframes the whole problem. Every theory so far assumed the
-client was *trying* to decode and failing. It is not. It is deciding, while
-parsing the SDP, that it has no decoder for what is offered — before a single
-packet arrives.
+Many H.264 receivers build the decoder at negotiation time from the SPS and
+PPS carried there. In-band parameter sets — present and correct at every
+keyframe, as established above — cannot help a decoder that was never built.
 
-That makes the fmtp line the thing that matters, and there is one parameter
-conspicuously absent from ours:
+### How
+
+The sidecar captures the SPS and PPS off the RTP FFmpeg is already sending
+(`paramsets.go`), and the offer for a new viewer carries them:
 
 ```
-a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f
+a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e028;sprop-parameter-sets=Z0LA…,aMuD…
 ```
 
-No **`sprop-parameter-sets`**. Many H.264 receivers build the decoder at
-negotiation time from the SPS and PPS carried there, rather than waiting to
-find them in the bitstream. In-band parameter sets — which this branch
-confirmed are present and correct at every keyframe — do not help a decoder
-that was never constructed.
+They are taken from the live stream, not from a separate probe encode, because
+they must be byte-for-byte the ones in the stream: SPS content depends on
+resolution, level and driver. A viewer who joins in the first second of a
+stream waits, at most 2.5 s, for the first keyframe to supply them; every
+later viewer does not wait.
 
-This fits every observation: the codec is accepted in the answer (the SDP
-parses), no decoder exists (no sprop to build one from), the transport is
-clean, and a single PLI goes out and is never repeated.
+They are forgotten when a new source starts — and for 150 ms after that,
+anything that looks like one is ignored. A source change kills the old FFmpeg
+without waiting, so its last packets can still be in the kernel's UDP buffer
+and be read after the reset; both encodes use the same SSRC, so the packets
+cannot be told apart. Time separates them: leftovers in a continuously-read
+socket are gone in milliseconds, while a new FFmpeg took ~800 ms to emit its
+first packet in the deployment logs. Without the window, a viewer joining just
+after a source change could be offered the previous source's SPS — and the
+logs show a peer created 208 ms after a source was set, so that is not
+hypothetical.
 
-**The check, before writing any code:** confirm whether a VP9 stream with the
-multi-codec offer off reports a real decoder in Connection Info. VP9 carries
-no fmtp at all, so if working VP9 shows a real decoder and single-codec H.264
-still shows `NullVideoDecoder`, the difference is in what the fmtp line has to
-provide — and `sprop-parameter-sets` is the missing piece.
+**FFmpeg sends them only inside STAP-A packets.** Disabling STAP-A parsing
+makes the capture come back empty on real FFmpeg output — so a parser that
+handled only single-NAL packets would compile, pass the obvious unit test, and
+never advertise anything. Both paths are handled and tested.
 
-Implementing it means extracting the SPS and PPS the encoder will actually
-produce at the configured resolution, base64ing them, and putting them in the
-fmtp line. The encoder probe that already runs at profile-selection time is
-the natural place to get them.
+### Verified against FFmpeg itself
+
+FFmpeg writes `sprop-parameter-sets` into its own SDP from the encoder's
+extradata. `TestSpropMatchesFFmpegOwnSDP` runs a real libx264 encode through
+the production arguments, captures the parameter sets off the RTP it sends,
+and requires the result to equal the string FFmpeg itself advertised. It
+passes; with STAP-A parsing disabled, it fails. The test needs an FFmpeg with
+libx264, so it runs wherever `SIDECAR_TEST_FFMPEG` names one and skips in CI.
+
+pion's H.264 codec matching compares only `packetization-mode` and
+`profile-level-id`, so adding `sprop-parameter-sets` cannot stop the track
+binding to the client's answer. VP9 is untouched: it has no fmtp line at all.
+
+### Testing it
+
+`SIDECAR_H264_SPROP` defaults on; `SIDECAR_H264_SPROP=0` removes it without a
+rebuild, which makes the test a clean A/B on one variable:
+
+1. H.264 stream, defaults → Connection Info **Decoder**.
+2. If it now names a real decoder, repeat with `SIDECAR_H264_SPROP=0` and
+   confirm it goes back to `NullVideoDecoder`. That proves the cause rather
+   than a coincidence.
+3. If it is still `NullVideoDecoder`, run once with `SIDECAR_DEBUG_LOGS=1` to
+   capture the offer and the answer, then switch debug logs back off — an SDP
+   carries ICE credentials. What the client answers to an H.264 offer that
+   carries parameter sets is the next thing to read.
 
 ## A third route: a known-good reference
 

@@ -179,10 +179,8 @@ func TestAlternativeH264StillCarriesItsFmtp(t *testing.T) {
 	t.Fatal("H264 was not offered alongside VP9")
 }
 
-// Off is the default, because a multi-codec m-line made the TeamSpeak client
-// report NullVideoDecoder and turned VP9 black as well. The single-codec
-// offer is the shape that works and must be what an unconfigured sidecar
-// sends.
+// Off is the default: the multi-codec offer does not help H.264, and a single
+// codec is the shape main ships. An unconfigured sidecar must send that.
 func TestMultiCodecOfferIsOffByDefault(t *testing.T) {
 	s := NewSidecar()
 	s.setActiveProfile(mustProfile(t, "vp9_vaapi"), "/dev/dri/renderD128", 1280, 720, 30)
@@ -256,9 +254,8 @@ func TestEnvBoolOrDefault(t *testing.T) {
 	}
 }
 
-// The feedback and the multi-codec offer shipped together and one of them
-// turned VP9 black, so each has to be switchable on its own or the regression
-// cannot be bisected on a live deployment.
+// The feedback and the multi-codec offer shipped together, so each has to be
+// switchable on its own for either to be isolated on a live deployment.
 func TestRTCPFeedbackCanBeSwitchedOff(t *testing.T) {
 	t.Setenv("SIDECAR_RTCP_FEEDBACK", "0")
 

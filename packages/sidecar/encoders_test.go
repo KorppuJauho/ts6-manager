@@ -133,7 +133,7 @@ func TestH264LevelCoversEveryPreset(t *testing.T) {
 		{"1440p30", 2560, 1440, 30, "32"}, // 5.0
 		{"2160p30", 3840, 2160, 30, "33"}, // 5.1
 	} {
-		got := h264FmtpLine(tc.w, tc.h, tc.fps)
+		got := h264FmtpLine(tc.w, tc.h, tc.fps, "")
 		want := "profile-level-id=42e0" + tc.wantLevelByte
 		if !strings.Contains(got, want) {
 			t.Errorf("%s: got %q, want it to contain %q", tc.name, got, want)

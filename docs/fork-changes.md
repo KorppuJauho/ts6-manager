@@ -515,13 +515,27 @@ it is there. That logging is the point as much as the repair: a decoder with
 nothing it can start from asks for a keyframe, and until now the receiver had
 no negotiated way to say so and we had no way to hear it.
 
-**The multi-codec offer is off by default, because it was wrong.** Deployed,
-it turned VP9 black as well as H.264, with the client reporting
-`NullVideoDecoder` and `0x0 0fps` while 10.8 MB arrived with zero loss. The
-TeamSpeak client does not resolve a decoder from a multi-codec m-line; it
-wants one. `SIDECAR_MULTI_CODEC_OFFER=1` re-enables it for testing, and
-`SIDECAR_RTCP_FEEDBACK=0` switches the feedback off separately, because the
-two shipped together and either could have been the cause.
+**The multi-codec offer is off by default.** It was first defaulted off on a
+report that it turned VP9 black too. That report was wrong: a later run with
+the offer on rendered VP9 at 1080p through `libvpx`, and the earlier black
+screen most likely came from a YouTube source returning 403 rather than from
+the codec. It stays off because it does not help H.264 — which gets
+`NullVideoDecoder` on the same offer — and a single codec is the shape main
+ships. `SIDECAR_MULTI_CODEC_OFFER=1` re-enables it; `SIDECAR_RTCP_FEEDBACK=0`
+switches the feedback off separately.
+
+**The offer carries the stream's own SPS and PPS as `sprop-parameter-sets`.**
+Same build, same offer shape, same source: VP9 gets `libvpx` and renders,
+H.264 gets `NullVideoDecoder` — the client never constructs a decoder. VP9
+negotiates on its name alone; H.264 is the codec whose decoder can be
+configured from the fmtp line, and ours carried no parameter sets there.
+`paramsets.go` captures them off the RTP FFmpeg is already sending, so they are
+byte-for-byte the stream's own, and forgets them when a new source starts —
+ignoring anything that looks like one for 150 ms after, because the killed
+encode's last packets can still be in the UDP buffer and share its SSRC. FFmpeg
+sends them only inside STAP-A packets, so that path is load-bearing, not an
+edge case. Verified against FFmpeg's own SDP by `TestSpropMatchesFFmpegOwnSDP`.
+`SIDECAR_H264_SPROP=0` removes them without a rebuild.
 
 **The 720p cap, and why it is gone.** With both halves of the SDP visible,
 the client looked like it was capping H.264 at level 3.1:
