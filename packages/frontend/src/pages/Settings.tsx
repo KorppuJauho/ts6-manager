@@ -1810,6 +1810,21 @@ function StreamingTab() {
             <p className="text-[10px] text-muted-foreground">{t('settings.streaming.defaultPresetHint')}</p>
           </div>
 
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('settings.streaming.autoMaxPreset')}</Label>
+            <Select value={form.autoMaxPreset} onValueChange={(v) => set('autoMaxPreset', v)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(options?.presets ?? []).map((p) => (
+                  <SelectItem key={p.key} value={p.key}>
+                    {p.label} — {p.width}x{p.height}, {p.bitrate}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.autoMaxPresetHint')}</p>
+          </div>
+
         </CardContent>
       </Card>
 

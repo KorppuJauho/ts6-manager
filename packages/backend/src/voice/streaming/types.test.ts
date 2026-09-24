@@ -7,7 +7,8 @@ import {
   STREAM_PRESETS,
   MAX_STREAM_BITRATE_KBPS,
   AUTO_PRESET,
-  AUTO_PRESET_CEILING,
+  DEFAULT_AUTO_MAX_PRESET,
+  autoMaxOrDefault,
 } from './types.js';
 
 describe('clampBitrate', () => {
@@ -98,13 +99,24 @@ describe('encodePresetFor', () => {
     await expect(encodePresetFor(AUTO_PRESET, probeReturning(480))).resolves.toBe('480p');
   });
 
-  // Upload is the bitrate times the audience; Auto does not decide on 4K.
-  it('stops Auto at its ceiling however large the source is', async () => {
-    await expect(encodePresetFor(AUTO_PRESET, probeReturning(2160))).resolves.toBe(AUTO_PRESET_CEILING);
+  it('goes up to 4K by default', async () => {
+    expect(DEFAULT_AUTO_MAX_PRESET).toBe('2160p');
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(2160))).resolves.toBe('2160p');
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(1440))).resolves.toBe('1440p');
   });
 
-  it('uses the ceiling when the source cannot be measured', async () => {
-    await expect(encodePresetFor(AUTO_PRESET, probeReturning(null))).resolves.toBe(AUTO_PRESET_CEILING);
+  // The limit is what keeps upload (bitrate times viewers) within the line.
+  it('stops at the configured limit however large the source is', async () => {
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(2160), '1080p')).resolves.toBe('1080p');
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(720), '1080p')).resolves.toBe('720p');
+  });
+
+  it('uses the limit when the source cannot be measured', async () => {
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(null), '1080p')).resolves.toBe('1080p');
+  });
+
+  it('ignores the limit for a named preset', async () => {
+    await expect(encodePresetFor('2160p', probeReturning(480), '720p')).resolves.toBe('2160p');
   });
 
   // A named preset is the operator's choice of size, and the probe's extra
@@ -126,5 +138,14 @@ describe('isPresetChoice', () => {
 
   it('rejects anything else, including object keys', () => {
     for (const key of ['', 'AUTO', '999p', 'toString', '__proto__']) expect(isPresetChoice(key)).toBe(false);
+  });
+});
+
+describe('autoMaxOrDefault', () => {
+  // The limit comes from a database column; a stale or hand-edited value
+  // must not reach presetForHeight, which would pass it through unchanged.
+  it('falls back to the default for anything that is not a preset', () => {
+    expect(autoMaxOrDefault('1080p')).toBe('1080p');
+    for (const v of ['', 'auto', '999p', '__proto__']) expect(autoMaxOrDefault(v)).toBe(DEFAULT_AUTO_MAX_PRESET);
   });
 });

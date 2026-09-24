@@ -11,6 +11,7 @@ export interface StreamSettings {
   /** Codec half of encoderProfile, e.g. "vp9". What the UI presents. */
   videoCodec?: string;
   defaultPreset: string;
+  autoMaxPreset: string;
   iptvEnabled: boolean;
   iptvPlaylistUrl: string;
   iptvChannelFilter: string;

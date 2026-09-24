@@ -34,8 +34,8 @@ and what to preserve when merging upstream, are in
 - **1080p and above from YouTube**: separate video and audio (DASH) streams,
   since YouTube's combined formats stop at 720p.
 - **Auto quality**, the default: the stream follows the source's resolution,
-  up to 1080p, so a 720p channel is not upscaled. Or a fixed preset, up to
-  2160p.
+  so a 720p channel is not upscaled, up to a configurable limit (4K unless
+  lowered). Or a fixed preset, up to 2160p.
 - **The GPU decodes the source as well as encoding it**, where it supports the
   source's codec; otherwise decoding falls back to the CPU.
 - **Idle streams stop themselves** after five minutes with no viewers.

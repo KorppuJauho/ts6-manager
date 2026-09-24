@@ -11,7 +11,7 @@ import {
   STREAM_PRESETS,
   DEFAULT_PRESET,
   AUTO_PRESET,
-  AUTO_PRESET_CEILING,
+  autoMaxOrDefault,
   SOURCE_SEPARATOR,
   clampBitrate,
   encodePresetFor,
@@ -1010,9 +1010,10 @@ export class VoiceBot extends EventEmitter {
     // and must gain a UI before it is read again.
     const requestedPreset = preset ?? settings.defaultPreset;
     const followSource = requestedPreset === AUTO_PRESET;
-    // Auto starts from its ceiling and is lowered to the source after the
-    // probe below; a named preset is used as named.
-    this._videoPreset = followSource ? AUTO_PRESET_CEILING : requestedPreset;
+    // Auto starts from its configured limit and is lowered to the source
+    // after the probe below; a named preset is used as named.
+    const autoMax = autoMaxOrDefault(settings.autoMaxPreset);
+    this._videoPreset = followSource ? autoMax : requestedPreset;
     const presetConfig = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     if (!STREAM_PRESETS[this._videoPreset]) {
       console.warn(`[VoiceBot ${this.config.id}] Unknown preset "${this._videoPreset}", using ${DEFAULT_PRESET}`);
@@ -1131,8 +1132,8 @@ export class VoiceBot extends EventEmitter {
     // 720p channel gains nothing from a 1080p encode but spends the higher
     // bitrate carrying interpolated pixels, and arrives softer than the
     // source. This matters for yt-dlp sources too — the format filter caps
-    // height at the ceiling, so a video whose best format is 720p arrives at
-    // 720p however high the ceiling is.
+    // height at the limit, so a video whose best format is 720p arrives at
+    // 720p however high the limit is.
     //
     // A named preset skips the probe entirely. That is the operator's choice
     // of size, and it is also how a single-connection IPTV service is
@@ -1141,6 +1142,7 @@ export class VoiceBot extends EventEmitter {
     this._videoPreset = await encodePresetFor(
       followSource ? AUTO_PRESET : this._videoPreset,
       () => probeVideoHeight(resolvedSource),
+      autoMax,
     );
     if (followSource) {
       console.log(`[VoiceBot ${this.config.id}] Auto quality: encoding at ${this._videoPreset}`);

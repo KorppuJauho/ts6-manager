@@ -388,10 +388,11 @@ than in CI:
   interpolated pixels, and a softer picture than the source. The quality list
   now starts with **Auto**, the default for a new install: the backend probes
   the resolved source with `ffprobe` and encodes at the largest preset it can
-  fill, up to 1080p (`AUTO_PRESET_CEILING`). The ceiling is there because the
-  stream is sent to each viewer separately, so the upload is the bitrate
-  times the audience; 1440p and 4K are for choosing deliberately. An
-  unmeasurable source gets the ceiling rather than a guess.
+  fill, up to the **Auto limit** setting (2160p unless lowered). The limit is
+  a setting because the stream is sent to each viewer separately, so the
+  upload is the bitrate times the audience, and only the operator knows what
+  their connection carries. An unmeasurable source gets the limit rather than
+  a guess; a limit that names no preset falls back to 2160p.
 
   A **named preset** is the opposite: encoded at exactly that size with no
   probe, upscaling a smaller source. The probe opens its own short-lived
@@ -405,8 +406,8 @@ than in CI:
   Settings → Streaming for the old behaviour.
 
   This applies to YouTube too, and not redundantly: the yt-dlp format filter
-  caps height *at* the ceiling, so a video whose best format is 720p arrives
-  as 720p however high the ceiling is.
+  caps height *at* the limit, so a video whose best format is 720p arrives
+  as 720p however high the limit is.
 
   `setVideoSource` (changing source mid-stream) deliberately keeps the preset
   it started with: renegotiating dimensions under connected peers is a larger

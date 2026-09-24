@@ -151,6 +151,11 @@ streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunc
     if (!isPresetChoice(defaultPreset)) {
       throw new AppError(400, `Unknown preset "${defaultPreset}"`);
     }
+    // A limit is a size, so Auto itself is not one.
+    const autoMaxPreset = asText(body.autoMaxPreset, 32) ?? current.autoMaxPreset;
+    if (!Object.prototype.hasOwnProperty.call(STREAM_PRESETS, autoMaxPreset)) {
+      throw new AppError(400, `Unknown preset "${autoMaxPreset}"`);
+    }
 
     const hwAccelDevice = asText(body.hwAccelDevice, 200) ?? current.hwAccelDevice;
     // Mirrors the sidecar's own check: the device must be a path under /dev,
@@ -174,6 +179,7 @@ streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunc
       hwAccelDevice: hwAccelDevice || STREAM_SETTINGS_DEFAULTS.hwAccelDevice,
       encoderProfile,
       defaultPreset,
+      autoMaxPreset,
       iptvEnabled: asBool(body.iptvEnabled, current.iptvEnabled),
       iptvPlaylistUrl,
       iptvChannelFilter: asText(body.iptvChannelFilter, 2000) ?? current.iptvChannelFilter,

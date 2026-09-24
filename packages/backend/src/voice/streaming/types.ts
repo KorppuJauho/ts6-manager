@@ -31,19 +31,20 @@ export const DEFAULT_PRESET = '1080p';
 
 /**
  * Not a preset but a choice alongside them: follow the source. The source is
- * probed and encoded at the largest preset it can fill, up to
- * AUTO_PRESET_CEILING — so a 720p channel streams at 720p instead of being
+ * probed and encoded at the largest preset it can fill, up to a configured
+ * limit — so a 720p channel streams at 720p instead of being
  * upscaled. A named preset is the opposite: encoded at exactly that size,
  * with no probe, which is also what a single-connection IPTV service needs.
  */
 export const AUTO_PRESET = 'auto';
 
 /**
- * Where Auto stops. The stream is encoded once but sent to each viewer
- * separately, so the upload is the bitrate times the audience; above 1080p
- * that is a choice to make deliberately, by naming the preset.
+ * The largest preset Auto may choose when no limit is configured. The limit is
+ * a setting because the stream is encoded once but sent to each viewer
+ * separately: the upload is the bitrate times the audience, and only the
+ * operator knows what their connection carries.
  */
-export const AUTO_PRESET_CEILING = '1080p';
+export const DEFAULT_AUTO_MAX_PRESET = '2160p';
 
 /** Whether a key names something a stream can be asked for. */
 export function isPresetChoice(key: string): boolean {
@@ -141,7 +142,13 @@ export function presetForHeight(requested: string, sourceHeight: number | null):
 export async function encodePresetFor(
   requested: string,
   probeHeight: () => Promise<number | null>,
+  autoMax: string = DEFAULT_AUTO_MAX_PRESET,
 ): Promise<string> {
   if (requested !== AUTO_PRESET) return requested;
-  return presetForHeight(AUTO_PRESET_CEILING, await probeHeight());
+  return presetForHeight(autoMaxOrDefault(autoMax), await probeHeight());
+}
+
+/** A configured Auto limit, or the default when it names no preset. */
+export function autoMaxOrDefault(autoMax: string): string {
+  return Object.prototype.hasOwnProperty.call(STREAM_PRESETS, autoMax) ? autoMax : DEFAULT_AUTO_MAX_PRESET;
 }

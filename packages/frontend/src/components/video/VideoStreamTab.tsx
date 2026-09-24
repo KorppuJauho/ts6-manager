@@ -19,7 +19,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
-// 'auto' follows the source's resolution, up to 1080p; the rest are fixed.
+// 'auto' follows the source's resolution, up to the limit set in Settings;
+// the rest are fixed.
 const PRESETS = [
   { value: 'auto', label: 'auto' },
   { value: '480p', label: '480p (854x480, 1 Mbps)' },
