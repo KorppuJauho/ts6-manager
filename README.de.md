@@ -271,27 +271,6 @@ docker compose -f docker-compose.hub.yml up -d
 Die Hub-Images lauschen auf anderen internen Ports als die lokal gebauten –
 mischen Sie niemals Container aus beiden Compose-Dateien im selben Stack.
 
-### Coolify / Reverse Proxy
-
-Verwenden Sie [`docker-compose.coolify.yml`](docker-compose.coolify.yml) als Ausgangspunkt. Wesentliche Unterschiede zur Standard-Compose-Konfiguration:
-
-- Kein `ports`-Abschnitt – der Reverse Proxy übernimmt das Routing
-- Legen Sie die Domain am **Frontend**-Dienst in Coolify fest (Port 8080 – nginx läuft ohne Root-Rechte)
-- Wenn Ihr TS-Server in einem separaten Docker-Netzwerk läuft, fügen Sie es als externes Netzwerk am Backend-Dienst hinzu:
-
-```yaml
-services:
-  backend:
-    networks:
-      - ts6-network
-      - ts-server-net
-
-networks:
-  ts-server-net:
-    external: true
-    name: your-ts-server-network-id
-```
-
 ## Entwicklung
 
 Voraussetzungen: Node.js 20+, pnpm 9+

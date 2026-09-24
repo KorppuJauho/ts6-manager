@@ -135,11 +135,6 @@ group that owns the render node. Both are set up in `docker-compose.yml`;
 `RENDER_GID` in `.env` overrides the group. Then turn it on under
 Settings → Streaming.
 
-**Behind a reverse proxy** (Coolify and similar), start from
-[`docker-compose.coolify.yml`](docker-compose.coolify.yml): no published
-ports, the domain on the frontend service (port 8080), and the TeamSpeak
-server's Docker network added to the backend if it runs in a separate one.
-
 `docker-compose.hub.yml` runs clusterzx's Docker Hub images, which contain
 none of this fork's changes, and uses different internal ports, so never mix
 it with the other compose files.
