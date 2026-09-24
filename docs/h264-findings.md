@@ -659,6 +659,43 @@ To capture:
 Diffing that offer against ours is the comparison this file has been missing
 since the beginning.
 
+## Result: TeamSpeak offers only Constrained High
+
+A TeamSpeak 6 client streaming H.264, captured with the tool above
+(2026-09-24). The video m-line lists AV1, H.264, VP9, VP8 in that order, and
+its only H.264 entries are:
+
+```
+a=rtpmap:103 H264/90000
+a=fmtp:103 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640c1f
+a=rtpmap:107 H264/90000
+a=fmtp:107 level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=640c1f
+```
+
+`640c` is **Constrained High**: profile_idc 100 with constraint_set4 and
+constraint_set5 set, which is High with no B-frames. No Constrained Baseline
+(`42e0`), no Main (`4d00`), no plain High (`6400`). That is consistent with
+everything before it:
+
+- Main and High from us were rejected with a port-0 m-line, because the client
+  has no decoder registered for either.
+- Constrained Baseline was accepted in the SDP answer but got
+  `NullVideoDecoder`: something on the client advertises the format, but the
+  factory's `Create` returns nothing for it. What advertises it is not known.
+- The `h264_cuvid` decoder seen for other TeamSpeak clients' streams is
+  what gets built for `640c`.
+
+Its rtcp-fb set is ours plus `transport-cc`, and its level (`1f`, 3.1) is
+lower than what we would advertise for 1080p (`28`, 4.0), but
+`level-asymmetry-allowed=1` makes the level a sender-side statement. Neither
+decides which decoder is built.
+
+**Next test:** `SIDECAR_H264_PROFILE=constrained_high`, which offers
+`640c` + our level and encodes with `-profile:v high` and `-bf 0`. A High
+bitstream without B-frames satisfies Constrained High apart from the two
+constraint flags in the SPS, and libwebrtc chooses the decoder from the SDP,
+not from the SPS.
+
 ## A third route: a known-good reference
 
 Self-host [Moepchi/webspeak3](https://github.com/Moepchi/webspeak3) and screen
