@@ -37,6 +37,18 @@ var defaultStunServers = []string{
 	"stun:stun.l.google.com:19302",
 }
 
+// stunGatherTimeout bounds how long ICE gathering waits on a STUN server.
+//
+// CreatePeer answers a viewer only once gathering has completed, and gathering
+// completes only when every STUN request has either been answered or timed
+// out. pion's default timeout is five seconds, so a single server in the list
+// that no longer answers — or a request over a network family the host has no
+// route for — held every viewer at "waiting to be let in" for exactly five
+// seconds. A reachable server answers in well under a second, so this keeps
+// the server-reflexive candidates that remote viewers need while capping what
+// a dead one costs.
+const stunGatherTimeout = 1 * time.Second
+
 func getStunServers() []string {
 	if env := os.Getenv("STUN_SERVERS"); env != "" {
 		return strings.Split(env, ",")
@@ -58,6 +70,16 @@ func envIntOrDefault(key string, def int) int {
 		}
 	}
 	return def
+}
+
+// envBoolOrDefault reads a flag that is off when set to "0", "false" or "no"
+// and on for any other non-empty value. Unset leaves the default in place.
+func envBoolOrDefault(key string, def bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if v == "" {
+		return def
+	}
+	return v != "0" && v != "false" && v != "no"
 }
 
 func getFfmpegPath() string {
@@ -723,7 +745,9 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 		return "", err
 	}
 
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i))
+	se := webrtc.SettingEngine{}
+	se.SetSTUNGatherTimeout(stunGatherTimeout)
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(se))
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{
 		ICEServers: iceServers,
@@ -1007,6 +1031,43 @@ func (s *Sidecar) ClosePeer(id string) {
 	s.peersLock.Unlock()
 }
 
+// inputArgs is the FFmpeg input half of the command line for a source.
+//
+// With hwDecode the video input is decoded on the GPU as well as encoded
+// there. Without it FFmpeg decodes in software — for a 1080p VP9 YouTube
+// source that is the most expensive step of the whole stream, on the CPU,
+// while the GPU that is about to encode the result sits idle for it. The
+// decoded frames still come back to system memory (no
+// -hwaccel_output_format), because the fps, scale and pad filters that follow
+// are software filters; that copy costs far less than the decode it replaces.
+//
+// No device is named: -hwaccel reuses the one -vaapi_device already opened.
+// Nor is a fallback needed. A GPU that cannot decode the source's codec or
+// profile fails the hwaccel's initialisation, and libavcodec then drops that
+// format and hands FFmpeg the software one, so the stream decodes on the CPU
+// as it always did.
+//
+// Input options apply to the next -i only. -hwaccel goes on the first input,
+// which is the video in both source shapes: a progressive URL carries video
+// and audio together, and a DASH pair is video then audio.
+func inputArgs(sources []string, hwDecode bool) []string {
+	var args []string
+	if strings.HasPrefix(sources[0], "http://") || strings.HasPrefix(sources[0], "https://") {
+		args = append(args, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5")
+	} else {
+		args = append(args, "-stream_loop", "-1")
+	}
+
+	args = append(args, "-fflags", "+genpts+discardcorrupt", "-re")
+	for i, src := range sources {
+		if i == 0 && hwDecode {
+			args = append(args, "-hwaccel", "vaapi")
+		}
+		args = append(args, "-i", src)
+	}
+	return args
+}
+
 func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate int, bitrate string, profile EncoderProfile, device string) {
 	s.ffmpegLock.Lock()
 	defer s.ffmpegLock.Unlock()
@@ -1048,16 +1109,8 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	sources := splitSources(source)
 
 	if len(sources) > 0 {
-		if strings.HasPrefix(sources[0], "http://") || strings.HasPrefix(sources[0], "https://") {
-			args = append(args, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5")
-		} else {
-			args = append(args, "-stream_loop", "-1")
-		}
-
-		args = append(args, "-fflags", "+genpts+discardcorrupt", "-re")
-		for _, src := range sources {
-			args = append(args, "-i", src)
-		}
+		hwDecode := profile.NeedsDevice() && device != "" && envBoolOrDefault("SIDECAR_HW_DECODE", true)
+		args = append(args, inputArgs(sources, hwDecode)...)
 	} else {
 		args = append(args, "-re", "-f", "lavfi", "-i", fmt.Sprintf("color=c=black:s=%dx%d:r=1", w, h))
 	}

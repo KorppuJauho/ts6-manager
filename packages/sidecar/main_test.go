@@ -108,3 +108,57 @@ func TestVideoCodecCarriesTheEncodedSize(t *testing.T) {
 		t.Errorf("720p must advertise level 3.1, got %q", got)
 	}
 }
+
+// -hwaccel is an input option: it binds to the -i that follows it, so it must
+// sit in front of the video input and nowhere else.
+func TestInputArgsDecodeVideoOnTheGPU(t *testing.T) {
+	video, audio := "https://example.test/v.m3u8", "https://example.test/a.webm"
+
+	got := strings.Join(inputArgs([]string{video, audio}, true), " ")
+	if !strings.Contains(got, "-hwaccel vaapi -i "+video) {
+		t.Errorf("DASH video input is not GPU-decoded: %q", got)
+	}
+	if strings.Contains(got, "-hwaccel vaapi -i "+audio) || strings.Count(got, "-hwaccel") != 1 {
+		t.Errorf("-hwaccel must apply to the video input only: %q", got)
+	}
+
+	// A progressive source carries video and audio in the one input.
+	if got := strings.Join(inputArgs([]string{video}, true), " "); !strings.Contains(got, "-hwaccel vaapi -i "+video) {
+		t.Errorf("progressive input is not GPU-decoded: %q", got)
+	}
+}
+
+func TestInputArgsWithoutHardwareDecodeAreUnchanged(t *testing.T) {
+	got := inputArgs([]string{"https://example.test/v.m3u8", "https://example.test/a.webm"}, false)
+	want := []string{
+		"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+		"-fflags", "+genpts+discardcorrupt", "-re",
+		"-i", "https://example.test/v.m3u8",
+		"-i", "https://example.test/a.webm",
+	}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+
+	// A local file loops instead of reconnecting.
+	if got := strings.Join(inputArgs([]string{"/media/clip.mp4"}, false), " "); !strings.HasPrefix(got, "-stream_loop -1 ") {
+		t.Errorf("local file should loop: %q", got)
+	}
+}
+
+func TestEnvBoolOrDefault(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		def   bool
+		want  bool
+	}{
+		{"", true, true}, {"", false, false},
+		{"0", true, false}, {"false", true, false}, {" NO ", true, false},
+		{"1", false, true}, {"yes", false, true},
+	} {
+		t.Setenv("SIDECAR_TEST_FLAG", c.value)
+		if got := envBoolOrDefault("SIDECAR_TEST_FLAG", c.def); got != c.want {
+			t.Errorf("envBoolOrDefault(%q, %v) = %v, want %v", c.value, c.def, got, c.want)
+		}
+	}
+}
