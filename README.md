@@ -1,465 +1,249 @@
-#### DISCLAIMER: 
 ![AI Assisted](https://img.shields.io/badge/AI%20Assisted-Project-00ADD8?style=for-the-badge&logo=dependabot&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
 # TS6 Manager
 
-**English** · [Français](README.fr.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [Italiano](README.it.md)
+Web-based management interface for TeamSpeak servers: virtual servers,
+channels, clients, permissions, music bots, video streaming, automated
+workflows and embeddable server widgets, from the browser. Built on the
+**WebQuery HTTP API**; telnet ServerQuery is not used.
 
-Web-based management interface for TeamSpeak servers. Control virtual servers, channels, clients, permissions, music bots, automated workflows, and embeddable server widgets — all from your browser. The interface is available in **English, French, German, Spanish, and Italian**.
+This repository is a fork. Its lineage:
 
-## What this version changes
+1. [clusterzx/ts6-manager](https://github.com/clusterzx/ts6-manager), the
+   original.
+2. `coom/ts6-manager`, a hardened fork of it: MFA and SSO, the Discord bridge, the
+   connection journal, five UI languages, and the music bot's streamed playback
+   and native Opus encoder.
+3. **This fork**, below.
 
-Hardened, reliability-focused evolution of [clusterzx/ts6-manager](https://github.com/clusterzx/ts6-manager):
+## What this fork changes
 
-**Accounts & access**
-- Two-factor authentication (TOTP) with one-time recovery codes; admins can require MFA per user and force a password change at next logon
-- "Trusted computer" option: skip password **and** MFA on a chosen device for 30 days via a revocable `httpOnly` cookie, with a device list you can revoke from your account
-- Configurable password policy (minimum length + complexity)
-- **SSO via SAML** — optional single sign-on alongside local login, with just-in-time account provisioning and roles mapped from your identity provider
-
-**Discord integration**
-- Discord bridge: slash commands (`/play`, `/skip`, `/queue`, …), TeamSpeak connect/leave + presence notifications, and a live server-stats panel
-- AFK notifications: post to Discord when a user goes AFK or comes back in the watched channel
-- The music bot can also stream into a Discord voice channel
-- Restrict who may run the bot's commands to a chosen set of Discord roles
-
-**Multi-language**
-- Full UI translation in English, French, German, Spanish, and Italian, remembered per user
-
-**Spotify & journal**
-- Spotify links resolve to YouTube for playback, configured in the WebUI
-- Connection journal of web + TeamSpeak logins with offline GeoIP, sortable/filterable columns, and one-click IP bans (web and/or TeamSpeak)
-
-**Reliability**
-- Self-healing connection pool: server connections added or edited in the UI work immediately — no backend restart, ever
-- WebQuery client rebuilds its transport when its keep-alive socket dies silently (Docker NAT, server restarts), with a circuit breaker that stops feeding the TS flood counter
-- Dashboard responses cached 5 s server-side: N open tabs cost the same as one
-- One undecryptable credential row no longer crashes startup
-
-**Music bots**
-- Streamed file playback: first audio in ~200 ms, constant memory (previously the entire track was decoded to RAM — ~690 MB for a 1 h mix)
-- Native opus encoder (`@discordjs/opus`, ~5-10× less CPU) with automatic WASM fallback
-- Robust yt-dlp pipeline: hard timeouts, stale-artifact cleanup, deduplicated concurrent downloads, full error logging, low CPU priority, auto-update at container start
-- Load & Play starts playback; playlist song counts stay fresh
+Mostly video streaming and the music bot. The reasons behind each change,
+and what to preserve when merging upstream, are in
+[`docs/fork-changes.md`](docs/fork-changes.md).
 
 **Video streaming**
-- Hardware video encoding on an Intel GPU (VAAPI), configurable from the web UI — encoder profile, GPU device, and an on/off toggle. The UI probes the sidecar and greys out profiles this host cannot run
-- VP8 and VP9, software or hardware; a profile the host cannot run falls back to software rather than failing the stream
-- Quality presets up to 2160p (4K), with the default selectable in the UI
-- DASH source pairs: separate video and audio streams, so 1080p and above are reachable on YouTube (progressive formats cap at 720p)
-- Streams with no viewers stop themselves after five minutes instead of holding a GPU encode session open
-- Stream visibility (public, or the TeamSpeak server's own access rules) is a setting
+- **Hardware encoding** on a VAAPI GPU (Intel), configured in
+  Settings → Streaming: encoder, GPU device, on/off. The UI probes the sidecar
+  and greys out encoders the host cannot run; one that fails falls back to
+  software instead of failing the stream.
+- **VP8, VP9 and H.264**, software or hardware. H.264 is sent as Constrained
+  High, the only H.264 profile the TeamSpeak client decodes, which it can
+  decode on the viewer's GPU.
+- **1080p and above from YouTube**: separate video and audio (DASH) streams,
+  since YouTube's combined formats stop at 720p.
+- **Presets up to 2160p**, 1080p at 5500k by default. The stream follows the
+  source's resolution, so a 720p channel is not upscaled to 1080p.
+- **Idle streams stop themselves** after five minutes with no viewers.
+- **Stream visibility** (public, or the server's own access rules) is a
+  setting, public by default.
+- Several fixes to streams that negotiated and then showed a black picture
+  (keyframe gate, ICE candidates, codec mismatches).
 
-**Live TV**
-- `!tv` streams live TV channels from an M3U/M3U8 playlist, with loose name matching so `!tv mtv3` finds "MTV 3"
-- Playlist URL, a channel filter and the channel order are configured in the web UI
-
-**Bot language**
-- The bot's TeamSpeak replies are available in English, Finnish, French, German, Spanish and Italian, selected in the UI and independent of the interface language
-
-**Security**
-- Built-in safe expression evaluator replaces the unmaintained `expr-eval`
-- Sidecar API bearer-token auth, hardened containers, committed binaries removed
-- Dependencies upgraded to clear all audit findings; ESLint + GitHub Actions CI
+**Music bot**
+- **Live TV:** `!tv` streams channels from an M3U/M3U8 playlist, with loose
+  name matching (`!tv mtv3` finds "MTV 3"). The playlist, a channel filter and
+  the order are set in the UI.
+- **Bot language:** replies in English, Finnish, French, German, Spanish or
+  Italian, chosen separately from the UI language.
+- The bot's nickname shows what it is streaming (`Boten Anna - Streaming 'MTV3'`).
+- Radio stations are listed by id, the number `!radio <id>` takes.
 
 **Deployment**
-- `docker compose up -d --build` builds from source by default (`docker-compose.hub.yml` for the upstream Docker Hub images)
-- nginx/client timeouts sized for long YouTube downloads; silent, clean container startup
-
-Built on the **WebQuery HTTP API** (the ServerQuery replacement in modern TeamSpeak builds). Telnet is not used or supported.
-
-![License](https://img.shields.io/badge/license-MIT-blue)
+- **Prebuilt images** on GHCR for every branch and commit
+  ([`docker-compose.ghcr.yml`](docker-compose.ghcr.yml)); building from source
+  is still the default.
+- [`docs/deploying.md`](docs/deploying.md): moving a deployment onto a git
+  checkout, upgrading, rolling back, and deploying a branch.
+- [`docs/local-testing.md`](docs/local-testing.md): a local TeamSpeak server to
+  test against.
 
 ## Screenshots
 
-### Dashboard
-Live overview of your server: online users, channel count, uptime, ping, bandwidth graph, and server capacity at a glance.
-
-![Dashboard](docs/dashboard.png)
-
-### Music Bots
-Run multiple music bots per server. Each bot has its own queue, volume control, and playback state. Supports radio streams, YouTube, and a local music library. Users in the bot's channel can control it via text commands (`!radio`, `!play`, `!vol`, etc.).
-
-![Music Bots](docs/musicbots.png)
-
-### Bot Flow Engine
-Visual node-based editor for building automated server workflows. Drag triggers, conditions, and actions onto the canvas, connect them, and deploy. Supports TS3 events, cron schedules, webhooks, and chat commands as triggers.
-
-![Flow Editor](docs/flow-editor.png)
-
-### Flow Templates
-Get started quickly with pre-built flow templates. Covers common use cases like temporary channel creation, AFK movers, idle kickers, online counters, and group protection. One click to import, then customize to your needs.
-
-![Flow Templates](docs/flow-templates.png)
+| Dashboard | Music bots |
+|---|---|
+| ![Dashboard](docs/dashboard.png) | ![Music Bots](docs/musicbots.png) |
+| **Flow editor** | **Flow templates** |
+| ![Flow Editor](docs/flow-editor.png) | ![Flow Templates](docs/flow-templates.png) |
 
 ## Features
 
-### Authentication & Accounts
-- Setup wizard for the initial admin account (no default credentials)
-- Two-factor authentication (TOTP) compatible with any authenticator app, with one-time recovery codes
-- Admins can require MFA per user and force a password change at next logon
-- "Trusted computer" option: a revocable 30-day cookie that skips both password and MFA on that device; trusted devices are listed and revocable from your account
-- Configurable password policy (minimum length + complexity)
-- Per-user UI language (English, French, German, Spanish, Italian)
-- Optional SSO via SAML 2.0 (SP-initiated), shown as a "Sign in via SSO" button next to local login
-- Just-in-time account provisioning (toggleable) with the role mapped from a SAML group/attribute, re-evaluated on each login, plus a configurable default role
-- The MFA gate still applies after a SAML login; SSO accounts have no local password and cannot use the local password flows
+**Server management.** Dashboard with live stats and bandwidth graph; virtual
+servers; channel tree with drag-and-drop; clients (kick, ban, move, poke);
+server and channel groups; permission editor; bans, tokens, complaints,
+offline messages; server log; channel file browser.
 
-### Server Management
-- Dashboard with live server stats, bandwidth graph, and capacity overview
-- Virtual server list with start/stop controls
-- Channel tree with drag-and-drop ordering
-- Client list with kick, ban, move, poke actions
-- Server & channel group management
-- Permission editor (server, channel, client, group-level)
-- Ban list management
-- Token / privilege key management
-- Complaint viewer
-- Offline message system
-- Server log viewer with filtering
-- Channel file browser with upload/download
-- Instance-level settings
+**Music bots.** Several per server, each with its own queue: radio streams with
+live titles, YouTube via yt-dlp, Spotify links resolved to YouTube, a local
+library with playlists. Controlled from the UI or by text commands in the
+bot's channel (below), and can be limited to chosen server groups.
 
-### Music Bots
-- Multiple bots per server, each with independent queue and playback
-- Radio station streaming with ICY metadata and live title updates
-- YouTube playback via yt-dlp (search, download, queue)
-- Spotify link support (track/album/playlist metadata resolved to YouTube)
-- Music library management (upload, organize, playlists)
-- Volume control, pause, skip, previous, shuffle, repeat
-- Stereo audio support with stable 20ms pacing
-- Auto-reconnect with exponential backoff on disconnect
-- In-channel text commands for hands-free control, including channel listing and move commands
-- Restrict music commands and admin commands to specific TeamSpeak server groups
-- Optional now-playing notification posted in the bot's TeamSpeak channel
-- Music request history tracking
+**Video streaming.** YouTube, Twitch, direct URLs and IPTV into a TeamSpeak
+channel over WebRTC, through a Go sidecar (Pion) that drives FFmpeg.
 
-### Discord Integration
-- Discord bridge bot with slash commands: `/play`, `/stop`, `/pause`, `/skip`, `/next`, `/prev`, `/queue`, `/volume`, `/nowplaying`, `/stats`, `/join`, `/leave`
-- Restrict commands to selected Discord roles (admins/owner always allowed; empty = open to everyone)
-- TeamSpeak connect/leave and channel-scoped presence notifications, with embed or plain style and optional auto-delete
-- AFK notifications: post a customizable message when a user goes AFK or comes back in the watched channel (shares the embed/plain style and auto-delete)
-- Live server-stats panel kept up to date in a Discord channel
-- The music bot can stream its audio into a Discord voice channel
-- Discord message trigger and send-message action available in the Bot Flow Engine
+**Discord bridge.** Slash commands (`/play`, `/skip`, `/queue`, …), TeamSpeak
+join/leave and AFK notices, a live server-stats panel, the bot's audio in a
+Discord voice channel, and commands limited to chosen roles.
 
-### Video Streaming
-- Live video streaming from YouTube, Twitch, or direct URLs to TeamSpeak channels
-- WebRTC-based with Go sidecar relay (Pion) for low-latency delivery
-- Quality presets (480p, 720p, 1080p)
-- In-browser preview with WebRTC playback
-- A/V synchronization via RTCP Sender Reports
-- Runs as a Docker sidecar container alongside the backend
+**Bot flow engine.** A visual editor for automations: triggers (TeamSpeak
+events, cron, webhooks, chat commands, Discord messages), conditions and
+actions, with ready-made templates (temporary channels, AFK mover, idle
+kicker, …).
 
-### Bot Flow Engine
-- Visual flow editor with drag-and-drop node canvas
-- Triggers: TS3 events, cron schedules, webhooks (with mandatory secrets), chat commands (global or channel-specific), Discord messages
-- Actions: kick, ban, move, message, poke, channel create/edit/delete, HTTP requests, WebQuery commands, Discord messages
-- Conditions, variables, delays, loops, logging
-- Animated channel names (rotating text on a timer)
-- Placeholder system with filters and expressions
-- Pre-built templates for common automation tasks
+**Accounts and security.** Setup wizard (no default credentials); TOTP MFA
+with recovery codes, enforceable per user; trusted devices; password policy;
+optional [SAML SSO](docs/sso-saml.md); admin and viewer roles with per-server
+access. Credentials are stored AES-256-GCM encrypted; outbound requests are
+SSRF-guarded; JWTs rotate with reuse detection.
 
-### Connection Journal
-- Records web and TeamSpeak logins with timestamp, username, and IP
-- Offline GeoIP enrichment (no external calls)
-- Sortable columns and per-column filters
-- One-click IP ban from the journal — on the web app, on the TeamSpeak server, or both
+**Also:** a connection journal of web and TeamSpeak logins with offline GeoIP
+and one-click IP bans; embeddable server widgets (page, SVG or PNG); a UI in
+English, French, German, Spanish and Italian.
 
-### Server Widgets
-- Embeddable server status banner for websites and forums
-- Token-based public access (no authentication required)
-- Available as live page, SVG, or PNG image
-- Dark and light themes
-- Configurable: show/hide channel tree and client list
+## Quick start (Docker)
 
-### Security
-- AES-256-GCM encryption for stored credentials (API keys, SSH passwords)
-- Two-factor authentication (TOTP) with recovery codes; admin-enforceable per user
-- Configurable password policy and forced password change at next logon
-- SSRF protection on all outbound HTTP requests, FFmpeg URLs, and webhook redirects
-- Rate limiting on authentication endpoints
-- JWT access + refresh token rotation with reuse detection
-- SAML SSO with signed-assertion validation, audience binding, replay protection, and one-time login codes
-- Role-based access control (admin / viewer)
-- Per-server access control for multi-tenant setups
-- Discord command access restricted by role
-- WebQuery command whitelist in bot flows (blocks destructive commands)
-- Authenticated WebSocket connections
+1. Clone the repository and create `.env` at its root:
 
-### Settings & Administration
-- User management with MFA enforcement and forced password change
-- Discord, Spotify, and YouTube integration settings
-- SSO / SAML identity-provider configuration: IdP SSO URL & signing certificate, attribute and role mapping, auto-provisioning toggle and default role (the SP metadata and ACS URLs to configure on the IdP side are shown in the tab)
-- Music command settings: restrict commands by TeamSpeak server group and toggle the now-playing notification
-- yt-dlp cookie file management for accessing age-restricted or member-only YouTube content (upload a file or paste directly in the UI)
-- Connection journal and IP ban management
-- Admin-only settings panel
+   ```bash
+   echo "JWT_SECRET=$(openssl rand -base64 32)" >> .env
+   echo "ENCRYPTION_KEY=$(openssl rand -base64 32)" >> .env
+   echo "SIDECAR_TOKEN=$(openssl rand -base64 32)" >> .env
+   ```
 
-## Architecture
+   All three are required. `ENCRYPTION_KEY` encrypts stored credentials:
+   back it up, and never regenerate it on an existing install, or every saved
+   credential becomes unreadable.
 
-```
-┌──────────────┐     ┌──────────────┐     ┌─────────────────┐
-│   Frontend   │────▶│   Backend    │────▶│  TS Server      │
-│  React SPA   │     │  Express API │     │  WebQuery HTTP  │
-│  nginx :8080 │     │  Node :3001  │     │  SSH (events)   │
-└──────────────┘     └──────┬───────┘     └─────────────────┘
-                            │
-                     ┌──────┴───────┐
-                     │   SQLite     │
-                     │   (Prisma)   │
-                     └──────────────┘
-                            │
-                     ┌──────┴───────┐
-                     │   Sidecar    │
-                     │  Go/Pion     │
-                     │  WebRTC :9800│
-                     └──────────────┘
+2. Start the stack, either built from source or from CI's images:
 
-Public:  /widget/:token  ──▶  SVG / PNG / JSON (no auth)
-```
+   ```bash
+   docker compose up -d --build                    # build on this host
+   docker compose -f docker-compose.ghcr.yml up -d # pull prebuilt images
+   ```
 
-**Four packages** in a pnpm monorepo:
+3. Open `http://localhost:3000/setup`, create the admin account, then add the
+   TeamSpeak server under **Settings → Connections** (host, WebQuery port, API
+   key).
 
-| Package | Description |
-|---------|-------------|
-| `@ts6/common` | Shared types, constants, utilities |
-| `@ts6/backend` | Express API, WebQuery client, bot engine, voice bots, Discord bridge, widgets |
-| `@ts6/frontend` | React SPA with Vite, TailwindCSS, shadcn/ui |
-| `sidecar` | Go WebRTC media relay (Pion) for video streaming |
+**Hardware encoding** also needs the GPU passed through to the sidecar
+container, with its unprivileged user in the group that owns the render node.
+Both are set up in `docker-compose.yml`; `RENDER_GID` in `.env` overrides the
+group. Then turn it on under Settings → Streaming.
 
-The backend proxies all TeamSpeak API calls. The frontend never has direct access to API keys or server credentials.
+**Behind a reverse proxy** (Coolify and similar), start from
+[`docker-compose.coolify.yml`](docker-compose.coolify.yml): no published
+ports, the domain on the frontend service (port 8080), and the TeamSpeak
+server's Docker network added to the backend if it runs in a separate one.
 
-## Tech Stack
+`docker-compose.hub.yml` runs clusterzx's Docker Hub images, which contain
+none of this fork's changes, and uses different internal ports, so never mix
+it with the other compose files.
 
-**Frontend:** React 18, Vite, TailwindCSS, shadcn/ui, TanStack Query + Table, React Flow, Recharts, Zustand, react-i18next
+## Configuration
 
-**Backend:** Node.js, Express, Prisma (SQLite), JWT authentication, TOTP MFA, WebQuery HTTP client, SSH event listener, discord.js
+Most settings (encoder, GPU device, presets, IPTV, bot language, Discord,
+Spotify, SSO) are in the web UI. The encoder and GPU device are not
+environment variables: the sidecar is long-lived in Docker and its environment
+is fixed at container start, so they travel with each stream instead.
 
-**Voice/Audio:** Custom TS3 voice protocol client (UDP), Opus encoding, FFmpeg, yt-dlp
+**Backend**
 
-**Video Streaming:** Go sidecar with Pion WebRTC v4, RTCP Sender Reports for A/V sync
+| Variable | Default | Description |
+|---|---|---|
+| `JWT_SECRET` | — | **Required.** JWT signing secret. |
+| `ENCRYPTION_KEY` | — | **Required in production**, must differ from `JWT_SECRET`. Encrypts stored credentials. |
+| `SIDECAR_TOKEN` | — | Shared secret for the sidecar API. The sidecar refuses to start without it. |
+| `SIDECAR_URL` | — | Sidecar address when it runs as its own container (e.g. `http://ts6-sidecar:9800`). |
+| `FRONTEND_URL` | `http://localhost:3000` | Public origin: CORS, and the base of the SAML URLs. |
+| `PORT` | `3001` | Backend port. |
+| `DATABASE_URL` | `file:./data/ts6webui.db` | SQLite path. |
+| `JWT_ACCESS_EXPIRY` / `JWT_REFRESH_EXPIRY` | `15m` / `7d` | Token lifetimes. |
+| `MUSIC_DIR` | `/data/music` | Downloaded music. |
+| `YT_COOKIE_FILE` | — | Netscape cookies.txt for yt-dlp; also settable in Settings → YouTube. |
+| `STREAM_PROBE_TIMEOUT_MS` | `6000` | Timeout for probing a source's resolution; `0` disables the probe, for an IPTV service that allows one connection. |
 
-## Quick Start (Docker)
+**Sidecar**
 
-Building from source is the default in this fork — `docker-compose.yml`
-builds the three images locally. To run the upstream Docker Hub images
-instead, use [`docker-compose.hub.yml`](docker-compose.hub.yml) (note: those
-images do not contain this fork's hardening and fixes).
+| Variable | Default | Description |
+|---|---|---|
+| `SIDECAR_LISTEN_ADDR` | `127.0.0.1` | API interface (`0.0.0.0` inside Docker, set by the image). Never publish port 9800. |
+| `SIDECAR_H264_PROFILE` | `constrained_high` | H.264 profile. The others (`constrained_baseline`, `main`, `high`) do not play in the TeamSpeak client; they exist for testing. |
+| `SIDECAR_DEBUG_LOGS` | off | `1` logs per-packet detail and the full SDP offer and answer. Leave off: an SDP carries ICE credentials and host addresses. |
+| `STUN_SERVERS` | — | Comma-separated STUN URLs. |
+| `VIDEO_QUEUE_SIZE` / `AUDIO_QUEUE_SIZE` | `1024` / `2048` | RTP queue lengths. |
+| `VIDEO_RTP_READ_BUFFER` / `AUDIO_RTP_READ_BUFFER` | 4 MiB / 1 MiB | UDP socket buffers. |
+| `AUDIO_BITRATE` | `128k` | Opus bitrate. |
 
-1. Clone the repository
-2. Create a `.env` file at the repository root:
+## Music bot text commands
 
-```env
-JWT_SECRET=your-random-secret-at-least-32-characters
-ENCRYPTION_KEY=another-random-secret-for-credential-encryption
-SIDECAR_TOKEN=a-third-random-secret-for-the-media-sidecar
-```
+| Command | Description |
+|---|---|
+| `!play <url>` / `!play` | Play a YouTube URL / resume |
+| `!queue <url>` / `!add <url>` | Add to the queue |
+| `!spotify <url>` | Play a Spotify track, album or playlist |
+| `!radio` / `!radio <id>` | List radio stations / play one |
+| `!pause`, `!stop`, `!skip` / `!next`, `!prev` | Playback control |
+| `!vol` / `!vol <0-100>` | Show / set volume |
+| `!np` / `!nowplaying`, `!info` | Current track, with progress |
+| `!lyrics [search]` | Lyrics for the current track or a search |
+| `!stream <url> [preset]` | Stream a video to the channel |
+| `!tv` / `!tv <channel>` / `!tv reload` | List / start / refetch live TV channels |
+| `!stopstream`, `!viewers` | Stop the stream / list its viewers |
+| `!channels`, `!help` | List channels / commands |
+| `!move <user> <channel>`, `!moveall <channel>`, `!notif` | Admin: move users, toggle now-playing notices |
 
-Generate secure values:
-
-```bash
-echo "JWT_SECRET=$(openssl rand -base64 32)" >> .env
-echo "ENCRYPTION_KEY=$(openssl rand -base64 32)" >> .env
-echo "SIDECAR_TOKEN=$(openssl rand -base64 32)" >> .env
-```
-
-3. Build and start the stack:
-
-```bash
-docker compose up -d --build
-```
-
-4. Open `http://localhost:3000/setup` and create your admin account
-5. Log in, then add your TeamSpeak server connection under **Settings → Connections** (host, WebQuery port, API key)
-
-> `JWT_SECRET` is **required** — the backend will refuse to start in production without it.
-> `ENCRYPTION_KEY` is **required in production** and must differ from `JWT_SECRET`. Values encrypted before this requirement (with the `JWT_SECRET` fallback) are still readable and get re-encrypted on next save.
-> `SIDECAR_TOKEN` authenticates the backend against the media sidecar API. Without it the sidecar logs a warning and accepts unauthenticated requests (acceptable only on an isolated network).
-
-### Running the upstream Docker Hub images
-
-```bash
-docker compose -f docker-compose.hub.yml up -d
-```
-
-The Hub images listen on different internal ports than the locally built
-ones — never mix containers from both compose files in the same stack.
-
-### Coolify / Reverse Proxy
-
-Use [`docker-compose.coolify.yml`](docker-compose.coolify.yml) as a starting point. Key differences from the standard compose:
-
-- No `ports` section — the reverse proxy handles routing
-- Set the domain on the **frontend** service in Coolify (port 8080 — nginx runs unprivileged)
-- If your TS server runs in a separate Docker network, add it as an external network on the backend service:
-
-```yaml
-services:
-  backend:
-    networks:
-      - ts6-network
-      - ts-server-net
-
-networks:
-  ts-server-net:
-    external: true
-    name: your-ts-server-network-id
-```
+Access to music and admin commands, and the language the bot replies in, are
+set under **Settings → Music Commands**. `!tv` needs a playlist under
+**Settings → Streaming**.
 
 ## Development
 
-Requires: Node.js 20+, pnpm 9+
+Requires Node.js 20+ and pnpm 9+.
 
 ```bash
 pnpm install
-pnpm dev          # starts backend + frontend in parallel
+pnpm --filter @ts6/common run build   # first: the other packages import it
+pnpm db:generate                      # Prisma client
+pnpm dev                              # backend :3001, frontend :5173
 ```
 
-Backend runs on `:3001`, frontend on `:5173` (Vite dev server).
+The schema is applied with `prisma db push` (the Docker image does it on
+start); this fork does not use migrations. `pnpm lint`, `pnpm typecheck` and
+`pnpm test` are what CI runs, along with `go build ./...` and `go vet ./...`
+in `packages/sidecar`. [`CLAUDE.md`](CLAUDE.md) lists the invariants that are
+easy to break.
 
-### Database
-
-Prisma with SQLite. On first run:
-
-```bash
-cd packages/backend
-npx prisma migrate deploy
-```
-
-The Docker images handle migrations automatically on startup.
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `JWT_SECRET` | — | **Required.** Secret for JWT signing. Must be set in production. |
-| `ENCRYPTION_KEY` | — | **Required in production**, must differ from `JWT_SECRET`. Dedicated key for AES-256-GCM credential encryption. In development it falls back to `JWT_SECRET`. |
-| `PORT` | `3001` | Backend port |
-| `DATABASE_URL` | `file:./data/ts6webui.db` | SQLite database path |
-| `JWT_ACCESS_EXPIRY` | `15m` | Access token lifetime |
-| `JWT_REFRESH_EXPIRY` | `7d` | Refresh token lifetime |
-| `FRONTEND_URL` | `http://localhost:3000` | CORS origin |
-| `MUSIC_DIR` | `/data/music` | Directory for downloaded music files |
-| `SIDECAR_URL` | — | Optional. Full URL of the WebRTC sidecar service (e.g. `http://ts6-sidecar:9800`). Set in Docker when sidecar runs as a separate container. |
-| `SIDECAR_TOKEN` | — | Shared secret between backend and sidecar. The sidecar rejects API calls without `Authorization: Bearer <token>` when set. |
-| `SIDECAR_LISTEN_ADDR` | `127.0.0.1` | Interface the sidecar API binds to (`0.0.0.0` inside Docker, set by the image). Never publish port 9800. |
-| `YT_COOKIE_FILE` | — | Optional. Path to a Netscape-format cookies.txt file for yt-dlp. Can also be managed via **Settings → YouTube** in the UI. |
-
-## Environment Variables Sidecar(VideoStreaming)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VIDEO_QUEUE_SIZE` | `2048` | Size of the video RTP queue |
-| `AUDIO_QUEUE_SIZE` | `4096` | Size of the audio RTP queue |
-| `SYNC_PLAYOUT_BUFFER_MS` | `4` | Small playout buffer used by the adaptive pacing logic |
-| `SYNC_VIDEO_BIAS_MS` | `4` | Optional extra holdback for video to fine-tune sync |
-| `AUDIO_DELAY_MS` | `0` | Legacy / manual audio delay option With the current pacing logic this is typically expected to stay at 0 |
-| `SIDECAR_DEBUG_LOGS` | `1` | Enables verbose debug logging for high-frequency runtime details |
-| `VIDEO_READ_RTP_BUFFER` | `4194304` | UDP OS-socketbuffer for video port |
-| `AUDIO_READ_RTP_BUFFER` | `1048576` | UDP OS-socketbuffer for audio port |
-| `VIDEO_BUFSIZE` | `1M` | FFmpeg Video Buffer |
-
-The **encoder profile and GPU device are not environment variables** — they
-are configured in the web UI under Settings → Streaming and travel to the
-sidecar with each stream. In a container deployment the sidecar is long-lived
-and its environment is fixed at container start, so a setting changed in the
-UI could not reach it any other way.
-
-Hardware encoding additionally needs the GPU passed through to the sidecar
-container, and the container's unprivileged user in the group that owns the
-render node. Both are set up in `docker-compose.yml`; `RENDER_GID` in `.env`
-overrides the group if the host differs from the default.
-
-## Music Bot Text Commands
-
-When a music bot is connected to a channel, users in that channel can control it via chat:
-
-| Command | Description |
-|---------|-------------|
-| `!radio` | List available radio stations |
-| `!radio <id>` | Play a radio station |
-| `!play <url>` | Play from YouTube URL |
-| `!play` | Resume paused playback |
-| `!spotify <url>` | Play from a Spotify track/album/playlist link |
-| `!queue <url>` / `!add <url>` | Add a track to the queue |
-| `!stop` | Stop playback |
-| `!pause` | Toggle pause/resume |
-| `!skip` / `!next` | Next track in queue |
-| `!prev` | Previous track |
-| `!vol` | Show current volume |
-| `!vol <0-100>` | Set volume |
-| `!np` / `!nowplaying` | Show current track |
-| `!info` | Current track with playback progress |
-| `!lyrics [search]` | Lyrics for the current track, or for a search |
-| `!stream <url> [preset]` | Stream a video to the channel |
-| `!tv` | List the available IPTV channels |
-| `!tv <channel>` | Start a live TV channel |
-| `!tv reload` | Refetch the IPTV playlist |
-| `!stopstream` | Stop the video stream |
-| `!viewers` | List the video stream viewers |
-| `!help` | List available commands |
-| `!channels` | List channels with their IDs |
-| `!move <user> <channel>` | Move a user to a channel (admin) |
-| `!moveall <channel>` | Move everyone to a channel (admin) |
-| `!notif` | Toggle the now-playing notification (admin) |
-
-`!move`, `!moveall`, and `!notif` are admin commands; access to music and admin commands can be restricted to specific TeamSpeak server groups under **Settings → Music Commands**.
-
-`!tv` needs an M3U playlist configured under **Settings → Streaming**; it does nothing until one is set.
-
-The language the bot replies in is chosen under **Settings → Music Commands** and is independent of the web interface's own language.
-
-## SSO / SAML Configuration
-
-Optional SP-initiated SAML 2.0 single sign-on that runs **alongside** local login. Configure it under **Settings → SSO / SAML** (admin only). SSO only becomes active once **Enable SSO** is on **and** both the **IdP SSO URL** and **IdP signing certificate** are filled in — until then the "Sign in via SSO" button stays hidden and the SAML endpoints are inert.
-
-**Give these to your identity provider (shown read-only in the tab):**
-
-| Value | What it is | How it is built |
-|-------|------------|-----------------|
-| SP metadata URL | The service-provider EntityID / audience the IdP must target | `<FRONTEND_URL>/api/auth/saml/metadata` |
-| ACS URL | Assertion Consumer Service — where the IdP POSTs the SAML response | `<FRONTEND_URL>/api/auth/saml/acs` |
-
-`<FRONTEND_URL>` is the `FRONTEND_URL` environment variable (your public app origin).
-
-**Fields:**
-
-| Field | Description | Default | Required | Admissible values |
-|-------|-------------|---------|----------|-------------------|
-| Enable SSO (SAML) | Master switch. When off, SSO is hidden and all SAML endpoints return 404 | `off` | — | on / off |
-| IdP Entity ID | The identity provider's issuer / EntityID. Informational for reference; the assertion is trusted via the certificate + audience binding | empty | no | any string (usually a URL/URN) |
-| IdP SSO URL | The IdP's SAML **redirect** SSO endpoint where the login request (AuthnRequest) is sent | empty | **yes** (to enable) | an `https://` URL |
-| IdP signing certificate | The IdP's X.509 **public** signing certificate used to verify the assertion signature. Write-only: stored encrypted, shown only as set/not-set | empty | **yes** (to enable) | PEM (`-----BEGIN CERTIFICATE-----…`) or bare base64 body (auto-wrapped) |
-| Automatically provision accounts | Create a local account on first successful SSO login (JIT). When off, a SAML login for an unknown account is rejected | `on` | no | on / off |
-| Default role for SSO accounts | Role assigned when no admin mapping matches (see role attribute below) | `viewer` | no | `viewer` or `admin` |
-| Attribute: username | Assertion attribute mapped to the account username. If missing, falls back to the email local-part, then the NameID | Authentik username claim (`http://schemas.goauthentik.io/2021/02/saml/username`) | no | any attribute name your IdP sends |
-| Attribute: email | Assertion attribute mapped to the email | `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress` | no | any attribute name |
-| Attribute: display name | Assertion attribute mapped to the display name (falls back to the username) | Authentik displayname claim (`http://schemas.goauthentik.io/2021/02/saml/displayname`) | no | any attribute name |
-| Attribute: role / group | Assertion attribute (often `groups`) whose values are checked for the admin mapping. Leave empty to give every SSO user the default role | empty | no | any attribute name |
-| Value granting the admin role | If this exact value appears in the role/group attribute, the account becomes `admin`; otherwise it gets the default role | empty | no | the exact group/role string from your IdP (e.g. `ts6-admins`) |
-
-**Behaviour notes:**
-
-- **Identity key:** accounts are matched on the SAML **NameID** — configure a **persistent** NameID format on the IdP. A *transient* NameID changes every login and would create a new account each time.
-- **Role sync:** the role is **re-evaluated on every login** (the IdP is authoritative). A manual promotion made inside the app is overwritten at the next SSO login.
-- **MFA:** the app's MFA gate still applies after a valid assertion (if the account has MFA enabled). SSO accounts have **no local password** and cannot use the local password / change-password flows.
-- **Security posture (v1):** assertion signature is **required**, the audience must equal the SP metadata URL, and `InResponseTo` replay validation is enforced. The SP does **not** sign its AuthnRequests. Importing IdP metadata by URL/XML is not wired yet — enter the SSO URL and certificate manually.
-
-**Authentik quick mapping:** *IdP SSO URL* = the provider's **SSO URL (Redirect)**; *IdP signing certificate* = the provider's **Signing Certificate**; *IdP Entity ID* = the provider's **Issuer**. For admin mapping, expose a groups attribute (Property Mapping) and set **Value granting the admin role** to your admin group's name.
+| Package | What |
+|---|---|
+| `packages/backend` | Express API, Prisma (SQLite), WebQuery client, voice bots, Discord bridge |
+| `packages/frontend` | React, Vite, Tailwind, shadcn/ui, TanStack Query, i18next |
+| `packages/common` | Types and constants shared by both |
+| `packages/sidecar` | Go WebRTC media relay (Pion); drives FFmpeg |
 
 ## Requirements
 
-- TeamSpeak server with **WebQuery HTTP** enabled (not raw/telnet)
-- WebQuery API key (generated via `apikeyadd` or server admin tools)
-- SSH access to the TS server (only needed for bot flow event triggers)
-- `yt-dlp` and `ffmpeg` installed on the backend (included in the Docker image)
+- A TeamSpeak server with **WebQuery HTTP** enabled, and a WebQuery API key
+  (`apikeyadd`)
+- SSH access to the server, only for bot-flow event triggers
+- `ffmpeg` and `yt-dlp` on the backend (included in the Docker images)
 
 ## Troubleshooting
 
-### Lost access to the TeamSpeak server after an update
+**Lost access to the TeamSpeak server after an update** (invalid API key, SSH
+refused, flood bans): a server update most likely expired the API key or reset
+the query configuration. See
+[Recovering access to your TeamSpeak server](docs/recover-server-access.md).
 
-If TS6 Manager suddenly cannot reach your TeamSpeak server — invalid API key, SSH login refused, timeouts, flood bans — the server update most likely expired the API key, regenerated the `serveradmin` password, or reset the query configuration. Follow the step-by-step recovery guide: **[Recovering access to your TeamSpeak server](docs/recover-server-access.md)**.
+**Hardware encoding stopped after an upgrade:** from a version that predates
+the streaming settings, it is off until re-enabled in Settings → Streaming.
+See [`docs/deploying.md`](docs/deploying.md).
+
+## Translations
+
+[Français](README.fr.md) · [Deutsch](README.de.md) · [Español](README.es.md) ·
+[Italiano](README.it.md): these describe `coom/ts6-manager` and do not cover this
+fork's changes.
 
 ## License
 
