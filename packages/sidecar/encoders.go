@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -27,6 +28,12 @@ type EncoderProfile struct {
 	MimeType    string `json:"mimeType"`
 	PayloadType uint8  `json:"payloadType"`
 
+	// NeedsFmtp marks a codec whose "a=fmtp" parameters are part of what the
+	// peer agrees to. VP8 and VP9 negotiate on the codec name alone; H.264
+	// does not, and the line it needs depends on the resolution being sent,
+	// so it is built per stream by FmtpFor rather than stored here.
+	NeedsFmtp bool `json:"needsFmtp,omitempty"`
+
 	// HWAccel is "" for software encoding, otherwise the FFmpeg hwaccel name
 	// ("vaapi"). A profile with a backend needs a device path.
 	HWAccel string `json:"hwAccel"`
@@ -44,6 +51,160 @@ type EncoderProfile struct {
 
 // NeedsDevice reports whether this profile has to be given a DRM render node.
 func (p EncoderProfile) NeedsDevice() bool { return p.HWAccel != "" }
+
+// h264Level is one row of Table A-1: the level_idc byte, the largest frame it
+// allows in macroblocks, and the macroblocks per second it can sustain.
+type h264Level struct {
+	idc     uint8
+	maxFS   int
+	maxMBPS int
+}
+
+// Ascending, so the first row a stream fits in is the lowest level that can
+// carry it. 4.1 is omitted: it has the same frame and rate limits as 4.0 and
+// differs only in bitrate and buffer size, so it can never be the first fit.
+var h264Levels = []h264Level{
+	{idc: 0x1e, maxFS: 1620, maxMBPS: 40500},    // 3.0
+	{idc: 0x1f, maxFS: 3600, maxMBPS: 108000},   // 3.1  - 720p30 exactly
+	{idc: 0x20, maxFS: 5120, maxMBPS: 216000},   // 3.2
+	{idc: 0x28, maxFS: 8192, maxMBPS: 245760},   // 4.0  - 1080p30 exactly
+	{idc: 0x2a, maxFS: 8704, maxMBPS: 522240},   // 4.2
+	{idc: 0x32, maxFS: 22080, maxMBPS: 589824},  // 5.0  - 1440p30
+	{idc: 0x33, maxFS: 36864, maxMBPS: 983040},  // 5.1  - 2160p30
+	{idc: 0x34, maxFS: 36864, maxMBPS: 2073600}, // 5.2
+}
+
+// h264LevelIdc returns the lowest level that can actually carry this stream.
+//
+// A hardcoded level 3.1, which caps at 1280x720, was once advertised while
+// h264_vaapi stamped level 4.0 into the SPS of a 1080p stream: the SDP
+// promising less than the stream carries. That turned out not to be what made
+// H.264 render black — the profile was — but a decoder is entitled to size
+// itself from the advertised level, so it has to cover the stream.
+func h264LevelIdc(width, height, fps int) uint8 {
+	if width <= 0 || height <= 0 {
+		return h264Levels[len(h264Levels)-1].idc
+	}
+	if fps <= 0 {
+		fps = 30
+	}
+
+	// A macroblock is 16x16, and a partial one still counts.
+	mbs := ((width + 15) / 16) * ((height + 15) / 16)
+	for _, l := range h264Levels {
+		if mbs <= l.maxFS && mbs*fps <= l.maxMBPS {
+			return l.idc
+		}
+	}
+	return h264Levels[len(h264Levels)-1].idc
+}
+
+// h264FmtpLine builds the "a=fmtp" parameters for a stream of this size.
+//
+// The first four hex digits of profile-level-id come from the selected H.264
+// profile (see h264Profile), so the SDP always names the profile the encoder
+// is actually asked for. Only the level byte is computed here.
+//
+// packetization-mode=1 is what FFmpeg's RTP muxer emits (STAP-A and FU-A).
+func h264FmtpLine(width, height, fps int) string {
+	return fmt.Sprintf(
+		"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=%s%02x",
+		selectedH264Profile().profileIOP, h264LevelIdc(width, height, fps),
+	)
+}
+
+// FmtpFor returns the fmtp line this profile needs for a stream of this size,
+// or "" for a codec that negotiates on its name alone.
+func (p EncoderProfile) FmtpFor(width, height, fps int) string {
+	if !p.NeedsFmtp {
+		return ""
+	}
+	return h264FmtpLine(width, height, fps)
+}
+
+// h264Profile is one H.264 profile the sidecar can send. What the SDP
+// advertises and what each encoder is asked for live in one record, because
+// the two must agree: a profile-level-id naming one profile over a stream
+// encoded in another is exactly the kind of mismatch that negotiates, connects
+// and shows nothing.
+type h264Profile struct {
+	// name is the SIDECAR_H264_PROFILE value.
+	name string
+	// profileIOP is profile_idc and the constraint flags: the first four hex
+	// digits of profile-level-id, spelled the way libwebrtc spells them.
+	profileIOP string
+	// vaapi and x264 are the -profile:v values each encoder knows it by.
+	vaapi string
+	x264  string
+}
+
+// h264Profiles lists what can be selected; the first entry is the default.
+//
+// Constrained High is the default because it is the only H.264 profile the
+// TeamSpeak client decodes. Its own stream offer lists H.264 solely as
+// profile-level-id=640c1f, and offered 640c from here it builds
+// FFmpeg (h264_cuvid) and renders. Everything else fails, each in its own way:
+// Main and High are rejected with a port-0 video m-line, and Constrained
+// Baseline is accepted in the answer and then given NullVideoDecoder —
+// libwebrtc's placeholder for a format the application's decoder factory
+// returns nothing for — so it connects, counts packets and shows black. The
+// others stay selectable because that is how this was established.
+//
+// libwebrtc treats High (6400) and Constrained High (640c) as different
+// profiles when it matches an offer against what the receiver supports, which
+// is why the constraint flags matter even though neither encoder has a
+// Constrained High spelling of its own. They encode High, and every profile
+// encodes with B-frames off and progressive frames, which is what Constrained
+// High requires — so the advertisement is truthful, and the constraint flags
+// in the in-band SPS staying 00 does not matter: the decoder is chosen from
+// the SDP.
+var h264Profiles = []h264Profile{
+	{name: "constrained_high", profileIOP: "640c", vaapi: "high", x264: "high"},
+	{name: "constrained_baseline", profileIOP: "42e0", vaapi: "constrained_baseline", x264: "baseline"},
+	{name: "main", profileIOP: "4d00", vaapi: "main", x264: "main"},
+	{name: "high", profileIOP: "6400", vaapi: "high", x264: "high"},
+}
+
+// selectedH264Profile is the profile SIDECAR_H264_PROFILE names, or the
+// default when it is unset or names nothing known. Env is fixed at container
+// start, so this is constant for the life of the process.
+func selectedH264Profile() h264Profile {
+	want := strings.ToLower(strings.TrimSpace(os.Getenv("SIDECAR_H264_PROFILE")))
+	for _, p := range h264Profiles {
+		if p.name == want {
+			return p
+		}
+	}
+	return h264Profiles[0]
+}
+
+// encodeArgs is ExtraArgs plus, for H.264, the -profile:v the selected profile
+// calls for. Both the stream and the encoder probe use it, so a GPU without an
+// entrypoint for the chosen profile fails the probe and falls back rather
+// than failing at stream start.
+func (p EncoderProfile) encodeArgs() []string {
+	if p.MimeType != webrtc.MimeTypeH264 {
+		return p.ExtraArgs
+	}
+	hp := selectedH264Profile()
+	name := hp.x264
+	if p.Encoder == "h264_vaapi" {
+		name = hp.vaapi
+	}
+	return append([]string{"-profile:v", name}, p.ExtraArgs...)
+}
+
+// h264InBandParameterSets re-inserts SPS/PPS ahead of every keyframe.
+//
+// FFmpeg hands the parameter sets to the muxer as extradata, where an SDP the
+// muxer generates itself would carry them as sprop-parameter-sets. We build
+// the SDP in pion instead and never see that extradata, so the bitstream is
+// the only place a decoder can get them from — and a viewer who joins
+// mid-stream needs them again at the next keyframe, not just once at the start.
+//
+// Harmless when redundant: the filter compares against the packet it is about
+// to prepend to and skips if the parameter sets are already there.
+var h264InBandParameterSets = []string{"-bsf:v", "dump_extra=freq=keyframe"}
 
 // encoderProfiles is the registry. Order is the order the UI lists them in.
 var encoderProfiles = []EncoderProfile{
@@ -80,6 +241,32 @@ var encoderProfiles = []EncoderProfile{
 		HWAccel: "vaapi", Encoder: "vp9_vaapi", PixelFormat: "nv12",
 		ExtraArgs: []string{"-strict", "experimental"},
 	},
+	{
+		Key: "h264_software", Label: "H.264 (software)",
+		MimeType: webrtc.MimeTypeH264, PayloadType: 102,
+		NeedsFmtp: true,
+		Encoder:   "libx264", PixelFormat: "yuv420p",
+		// -profile:v comes from encodeArgs, from the same record as the SDP.
+		// B-frames stay off for every profile: they add a frame of latency
+		// and reorder output, which a real-time receiver has no use for.
+		ExtraArgs: append([]string{
+			"-preset", "veryfast",
+			"-tune", "zerolatency",
+			"-bf", "0",
+		}, h264InBandParameterSets...),
+	},
+	{
+		Key: "h264_vaapi", Label: "H.264 (VAAPI hardware)",
+		MimeType: webrtc.MimeTypeH264, PayloadType: 102,
+		NeedsFmtp: true,
+		HWAccel:   "vaapi", Encoder: "h264_vaapi", PixelFormat: "nv12",
+		// -profile:v comes from encodeArgs. A driver with no encode
+		// entrypoint for the selected profile fails the probe and falls back
+		// to libx264, which can encode all three.
+		ExtraArgs: append([]string{
+			"-bf", "0",
+		}, h264InBandParameterSets...),
+	},
 }
 
 // defaultProfileKey is what a stream uses when none is requested.
@@ -112,8 +299,11 @@ func availableEncoders() map[string]bool {
 		availableSet = map[string]bool{}
 		out, err := exec.Command(getFfmpegPath(), "-hide_banner", "-encoders").Output()
 		if err != nil {
-			// Treat an unprobeable FFmpeg as "software only" rather than
-			// failing: libvpx is in every build worth deploying.
+			// Treat an unprobeable FFmpeg as "VP8/VP9 software only" rather
+			// than failing: libvpx is in every build worth deploying.
+			// libx264 is not assumed — it is a GPL build option, and
+			// claiming it is present would offer a profile that fails at
+			// stream start instead of one the UI shows as unavailable.
 			availableSet["libvpx"] = true
 			availableSet["libvpx-vp9"] = true
 			return
@@ -187,7 +377,7 @@ func runEncoderProbe(p EncoderProfile, device string) bool {
 		"-c:v", p.Encoder,
 		"-b:v", "500k",
 	)
-	args = append(args, p.ExtraArgs...)
+	args = append(args, p.encodeArgs()...)
 	args = append(args, "-f", "null", "-")
 
 	return exec.CommandContext(ctx, getFfmpegPath(), args...).Run() == nil

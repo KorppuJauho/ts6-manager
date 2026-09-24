@@ -1799,6 +1799,7 @@ function StreamingTab() {
             <Select value={form.defaultPreset} onValueChange={(v) => set('defaultPreset', v)}>
               <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="auto">{t('settings.streaming.presetAuto')}</SelectItem>
                 {(options?.presets ?? []).map((p) => (
                   <SelectItem key={p.key} value={p.key}>
                     {p.label} — {p.width}x{p.height}, {p.bitrate}, {p.framerate} FPS
@@ -1809,11 +1810,21 @@ function StreamingTab() {
             <p className="text-[10px] text-muted-foreground">{t('settings.streaming.defaultPresetHint')}</p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Switch checked={form.streamPublic} onCheckedChange={(v) => set('streamPublic', v)} />
-            <Label className="text-xs">{t('settings.streaming.streamPublic')}</Label>
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('settings.streaming.autoMaxPreset')}</Label>
+            <Select value={form.autoMaxPreset} onValueChange={(v) => set('autoMaxPreset', v)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(options?.presets ?? []).map((p) => (
+                  <SelectItem key={p.key} value={p.key}>
+                    {p.label} — {p.width}x{p.height}, {p.bitrate}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.autoMaxPresetHint')}</p>
           </div>
-          <p className="text-[10px] text-muted-foreground -mt-2">{t('settings.streaming.streamPublicHint')}</p>
+
         </CardContent>
       </Card>
 

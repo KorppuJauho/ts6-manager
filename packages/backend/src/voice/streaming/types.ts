@@ -30,6 +30,28 @@ export const STREAM_PRESETS: Record<string, VideoStreamPreset> = {
 export const DEFAULT_PRESET = '1080p';
 
 /**
+ * Not a preset but a choice alongside them: follow the source. The source is
+ * probed and encoded at the largest preset it can fill, up to a configured
+ * limit — so a 720p channel streams at 720p instead of being
+ * upscaled. A named preset is the opposite: encoded at exactly that size,
+ * with no probe, which is also what a single-connection IPTV service needs.
+ */
+export const AUTO_PRESET = 'auto';
+
+/**
+ * The largest preset Auto may choose when no limit is configured. The limit is
+ * a setting because the stream is encoded once but sent to each viewer
+ * separately: the upload is the bitrate times the audience, and only the
+ * operator knows what their connection carries.
+ */
+export const DEFAULT_AUTO_MAX_PRESET = '2160p';
+
+/** Whether a key names something a stream can be asked for. */
+export function isPresetChoice(key: string): boolean {
+  return key === AUTO_PRESET || Object.prototype.hasOwnProperty.call(STREAM_PRESETS, key);
+}
+
+/**
  * Joins the video and audio URLs of a DASH source into the single `source`
  * string the sidecar's HTTP API carries. The sidecar splits on it and gives
  * FFmpeg one `-i` per segment; it must stay in sync with `sourceSeparator`
@@ -77,16 +99,16 @@ export function clampBitrate(bitrate: string): string {
 }
 
 /**
- * Pick the preset to actually encode at, given the one that was asked for and
- * the source's own height.
+ * Pick the preset Auto encodes at, given its ceiling and the source's own
+ * height.
  *
  * Encoding a 720p channel at the 1080p preset upscales it: the picture gains
  * no detail, the encoder spends 5500k carrying interpolated pixels, and the
  * viewer sees a softer image than the source. So the result is capped at the
  * source's height.
  *
- * It only ever goes down. The requested preset is a ceiling the operator set,
- * and a 4K source must not pull a deliberate 720p stream up to 2160p.
+ * It only ever goes down from the ceiling, so a 4K source cannot pull Auto
+ * past it.
  *
  * An unknown height (probe failed) or an unknown preset leaves the request
  * alone — guessing would be worse than streaming at the configured quality.
@@ -112,3 +134,21 @@ export function presetForHeight(requested: string, sourceHeight: number | null):
   return chosen;
 }
 
+/**
+ * The preset to encode at. Only Auto consults the source, so only Auto runs
+ * the probe: a named preset is encoded as named, and must not open the extra
+ * connection a single-connection IPTV service would refuse.
+ */
+export async function encodePresetFor(
+  requested: string,
+  probeHeight: () => Promise<number | null>,
+  autoMax: string = DEFAULT_AUTO_MAX_PRESET,
+): Promise<string> {
+  if (requested !== AUTO_PRESET) return requested;
+  return presetForHeight(autoMaxOrDefault(autoMax), await probeHeight());
+}
+
+/** A configured Auto limit, or the default when it names no preset. */
+export function autoMaxOrDefault(autoMax: string): string {
+  return Object.prototype.hasOwnProperty.call(STREAM_PRESETS, autoMax) ? autoMax : DEFAULT_AUTO_MAX_PRESET;
+}

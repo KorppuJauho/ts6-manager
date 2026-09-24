@@ -9,7 +9,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { AppError } from '../middleware/error-handler.js';
 import { requireRole } from '../middleware/rbac.js';
-import { STREAM_PRESETS } from '../voice/streaming/types.js';
+import { STREAM_PRESETS, isPresetChoice } from '../voice/streaming/types.js';
 import {
   getStreamSettings,
   invalidateStreamSettings,
@@ -35,8 +35,15 @@ const FALLBACK_ENCODERS: EncoderCapability[] = [
   { key: 'vp9_software', label: 'VP9 (software)', mimeType: 'video/VP9', payloadType: 98, hwAccel: '', encoder: 'libvpx-vp9', available: false },
   { key: 'vp8_vaapi', label: 'VP8 (VAAPI hardware)', mimeType: 'video/VP8', payloadType: 96, hwAccel: 'vaapi', encoder: 'vp8_vaapi', available: false },
   { key: 'vp9_vaapi', label: 'VP9 (VAAPI hardware)', mimeType: 'video/VP9', payloadType: 98, hwAccel: 'vaapi', encoder: 'vp9_vaapi', available: false },
+  { key: 'h264_software', label: 'H.264 (software)', mimeType: 'video/H264', payloadType: 102, hwAccel: '', encoder: 'libx264', available: false },
+  { key: 'h264_vaapi', label: 'H.264 (VAAPI hardware)', mimeType: 'video/H264', payloadType: 102, hwAccel: 'vaapi', encoder: 'h264_vaapi', available: false },
 ];
 
+/**
+ * Display names for codecs whose key does not uppercase into something
+ * readable. Anything absent falls back to the uppercased key.
+ */
+const CODEC_LABELS: Record<string, string> = { h264: 'H.264' };
 
 function asBool(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
@@ -106,7 +113,7 @@ streamSettingsRoutes.get('/options', async (req: Request, res: Response, next: N
       const codec = codecFromProfile(enc.key);
       const entry = byCodec.get(codec) ?? {
         codec,
-        label: codec.toUpperCase(),
+        label: CODEC_LABELS[codec] ?? codec.toUpperCase(),
         softwareAvailable: false,
         hardwareAvailable: false,
       };
@@ -141,8 +148,13 @@ streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunc
       ?? codecFromProfile(asText(body.encoderProfile, 64) ?? current.encoderProfile);
     const encoderProfile = composeProfile(videoCodec, hwAccelEnabled);
     const defaultPreset = asText(body.defaultPreset, 32) ?? current.defaultPreset;
-    if (!STREAM_PRESETS[defaultPreset]) {
+    if (!isPresetChoice(defaultPreset)) {
       throw new AppError(400, `Unknown preset "${defaultPreset}"`);
+    }
+    // A limit is a size, so Auto itself is not one.
+    const autoMaxPreset = asText(body.autoMaxPreset, 32) ?? current.autoMaxPreset;
+    if (!Object.prototype.hasOwnProperty.call(STREAM_PRESETS, autoMaxPreset)) {
+      throw new AppError(400, `Unknown preset "${autoMaxPreset}"`);
     }
 
     const hwAccelDevice = asText(body.hwAccelDevice, 200) ?? current.hwAccelDevice;
@@ -167,7 +179,7 @@ streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunc
       hwAccelDevice: hwAccelDevice || STREAM_SETTINGS_DEFAULTS.hwAccelDevice,
       encoderProfile,
       defaultPreset,
-      streamPublic: asBool(body.streamPublic, current.streamPublic),
+      autoMaxPreset,
       iptvEnabled: asBool(body.iptvEnabled, current.iptvEnabled),
       iptvPlaylistUrl,
       iptvChannelFilter: asText(body.iptvChannelFilter, 2000) ?? current.iptvChannelFilter,

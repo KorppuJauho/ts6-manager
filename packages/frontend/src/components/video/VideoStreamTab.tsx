@@ -19,7 +19,10 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
+// 'auto' follows the source's resolution, up to the limit set in Settings;
+// the rest are fixed.
 const PRESETS = [
+  { value: 'auto', label: 'auto' },
   { value: '480p', label: '480p (854x480, 1 Mbps)' },
   { value: '720p', label: '720p (1280x720, 2.5 Mbps)' },
   { value: '1080p', label: '1080p (1920x1080, 4.5 Mbps)' },
@@ -38,7 +41,7 @@ interface VideoStreamTabProps {
 
 export function VideoStreamTab({ botId, botStatus }: VideoStreamTabProps) {
   const [sourceUrl, setSourceUrl] = useState('');
-  const [preset, setPreset] = useState('720p');
+  const [preset, setPreset] = useState('auto');
   const [framerate, setFramerate] = useState('30');
   const [bitrate, setBitrate] = useState('2500k');
 

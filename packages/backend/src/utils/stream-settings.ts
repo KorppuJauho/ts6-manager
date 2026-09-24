@@ -15,7 +15,7 @@ export interface StreamSettingsValue {
   hwAccelDevice: string;
   encoderProfile: string;
   defaultPreset: string;
-  streamPublic: boolean;
+  autoMaxPreset: string;
   iptvEnabled: boolean;
   iptvPlaylistUrl: string;
   iptvChannelFilter: string;
@@ -32,8 +32,8 @@ export const STREAM_SETTINGS_DEFAULTS: StreamSettingsValue = {
   hwAccelEnabled: false,
   hwAccelDevice: '/dev/dri/renderD128',
   encoderProfile: 'vp8_software',
-  defaultPreset: '720p',
-  streamPublic: true,
+  defaultPreset: 'auto',
+  autoMaxPreset: '2160p',
   iptvEnabled: false,
   iptvPlaylistUrl: '',
   iptvChannelFilter: '',
@@ -60,7 +60,7 @@ export async function getStreamSettings(prisma: PrismaClient): Promise<StreamSet
     hwAccelDevice: row?.hwAccelDevice || STREAM_SETTINGS_DEFAULTS.hwAccelDevice,
     encoderProfile: row?.encoderProfile || STREAM_SETTINGS_DEFAULTS.encoderProfile,
     defaultPreset: row?.defaultPreset || STREAM_SETTINGS_DEFAULTS.defaultPreset,
-    streamPublic: row?.streamPublic ?? STREAM_SETTINGS_DEFAULTS.streamPublic,
+    autoMaxPreset: row?.autoMaxPreset || STREAM_SETTINGS_DEFAULTS.autoMaxPreset,
     iptvEnabled: row?.iptvEnabled ?? STREAM_SETTINGS_DEFAULTS.iptvEnabled,
     iptvPlaylistUrl: row?.iptvPlaylistUrl ?? STREAM_SETTINGS_DEFAULTS.iptvPlaylistUrl,
     iptvChannelFilter: row?.iptvChannelFilter ?? STREAM_SETTINGS_DEFAULTS.iptvChannelFilter,

@@ -386,8 +386,13 @@ model StreamSettings {
   // Preset a stream uses when the caller does not name one.
   defaultPreset String @default("720p")
 
-  /// Whether streams are created public. False restricts them to the
-  /// TeamSpeak server's own access rules.
+  // The largest preset "auto" may choose; a named preset ignores it.
+  autoMaxPreset String @default("2160p")
+
+  /// No longer read: streams are always created public. The column stays
+  /// because the container applies the schema with a plain `prisma db push`,
+  /// which refuses to drop a column that holds data — and a failed push
+  /// would leave every later schema change unapplied too.
   streamPublic Boolean @default(true)
 
   // IPTV (!tv). channelFilter is comma-separated substrings; empty offers

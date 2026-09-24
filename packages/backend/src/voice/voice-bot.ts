@@ -10,9 +10,11 @@ import { SidecarProcess, type SidecarConfig } from './streaming/sidecar-process.
 import {
   STREAM_PRESETS,
   DEFAULT_PRESET,
+  AUTO_PRESET,
+  autoMaxOrDefault,
   SOURCE_SEPARATOR,
   clampBitrate,
-  presetForHeight,
+  encodePresetFor,
   type VideoViewerInfo,
   type VideoStreamStatus,
 } from './streaming/types.js';
@@ -1006,7 +1008,12 @@ export class VoiceBot extends EventEmitter {
     // one preset an operator can actually set, making Settings -> Streaming
     // look broken. It stays in the schema as the seed for a per-bot override,
     // and must gain a UI before it is read again.
-    this._videoPreset = preset ?? settings.defaultPreset;
+    const requestedPreset = preset ?? settings.defaultPreset;
+    const followSource = requestedPreset === AUTO_PRESET;
+    // Auto starts from its configured limit and is lowered to the source
+    // after the probe below; a named preset is used as named.
+    const autoMax = autoMaxOrDefault(settings.autoMaxPreset);
+    this._videoPreset = followSource ? autoMax : requestedPreset;
     const presetConfig = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     if (!STREAM_PRESETS[this._videoPreset]) {
       console.warn(`[VoiceBot ${this.config.id}] Unknown preset "${this._videoPreset}", using ${DEFAULT_PRESET}`);
@@ -1096,9 +1103,11 @@ export class VoiceBot extends EventEmitter {
       name: `${this.config.nickname} Stream`,
       type: 3,
       bitrate: 4608,
-      // Public streams admit any client on the TeamSpeak server; restricted
-      // defers to the server's own access rules.
-      accessibility: settings.streamPublic ? 0 : 1,
+      // Public. This was a setting, and it made no visible difference: the
+      // bot accepts every join request itself, and what viewers saw as
+      // "waiting to be let in" was the sidecar's ICE gathering, not access
+      // control. 0 is what the setting's default sent.
+      accessibility: 0,
       mode: 1,
       viewerLimit: 0,
       audio: true,
@@ -1119,19 +1128,24 @@ export class VoiceBot extends EventEmitter {
       this.resolveStreamTitle(source, opts.title),
     ]);
 
-    // Encode at the source's own resolution rather than upscaling to the
-    // preset: a 720p channel gains nothing from a 1080p encode but spends the
-    // higher bitrate carrying interpolated pixels, and arrives softer than the
+    // Auto encodes at the source's own resolution rather than upscaling: a
+    // 720p channel gains nothing from a 1080p encode but spends the higher
+    // bitrate carrying interpolated pixels, and arrives softer than the
     // source. This matters for yt-dlp sources too — the format filter caps
-    // height at the preset, so a video whose best format is 720p arrives at
-    // 720p however high the preset is set.
-    const sourceHeight = await probeVideoHeight(resolvedSource);
-    const encodePreset = presetForHeight(this._videoPreset, sourceHeight);
-    if (encodePreset !== this._videoPreset) {
-      console.log(
-        `[VoiceBot ${this.config.id}] Source is ${sourceHeight}p, encoding at ${encodePreset} instead of ${this._videoPreset}`,
-      );
-      this._videoPreset = encodePreset;
+    // height at the limit, so a video whose best format is 720p arrives at
+    // 720p however high the limit is.
+    //
+    // A named preset skips the probe entirely. That is the operator's choice
+    // of size, and it is also how a single-connection IPTV service is
+    // streamed: the probe opens its own connection before FFmpeg does, and
+    // such a service can refuse the second.
+    this._videoPreset = await encodePresetFor(
+      followSource ? AUTO_PRESET : this._videoPreset,
+      () => probeVideoHeight(resolvedSource),
+      autoMax,
+    );
+    if (followSource) {
+      console.log(`[VoiceBot ${this.config.id}] Auto quality: encoding at ${this._videoPreset}`);
     }
 
     // Preset-derived settings follow the downgrade; an explicit framerate or

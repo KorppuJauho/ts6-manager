@@ -1,5 +1,15 @@
-import { describe, it, expect } from 'vitest';
-import { clampBitrate, presetForHeight, STREAM_PRESETS, MAX_STREAM_BITRATE_KBPS } from './types.js';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  clampBitrate,
+  presetForHeight,
+  encodePresetFor,
+  isPresetChoice,
+  STREAM_PRESETS,
+  MAX_STREAM_BITRATE_KBPS,
+  AUTO_PRESET,
+  DEFAULT_AUTO_MAX_PRESET,
+  autoMaxOrDefault,
+} from './types.js';
 
 describe('clampBitrate', () => {
   it('leaves a bitrate under the ceiling alone', () => {
@@ -81,3 +91,61 @@ describe('presetForHeight', () => {
   });
 });
 
+describe('encodePresetFor', () => {
+  const probeReturning = (height: number | null) => vi.fn(async () => height);
+
+  it('follows the source under Auto', async () => {
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(720))).resolves.toBe('720p');
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(480))).resolves.toBe('480p');
+  });
+
+  it('goes up to 4K by default', async () => {
+    expect(DEFAULT_AUTO_MAX_PRESET).toBe('2160p');
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(2160))).resolves.toBe('2160p');
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(1440))).resolves.toBe('1440p');
+  });
+
+  // The limit is what keeps upload (bitrate times viewers) within the line.
+  it('stops at the configured limit however large the source is', async () => {
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(2160), '1080p')).resolves.toBe('1080p');
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(720), '1080p')).resolves.toBe('720p');
+  });
+
+  it('uses the limit when the source cannot be measured', async () => {
+    await expect(encodePresetFor(AUTO_PRESET, probeReturning(null), '1080p')).resolves.toBe('1080p');
+  });
+
+  it('ignores the limit for a named preset', async () => {
+    await expect(encodePresetFor('2160p', probeReturning(480), '720p')).resolves.toBe('2160p');
+  });
+
+  // A named preset is the operator's choice of size, and the probe's extra
+  // connection is what a single-connection IPTV service refuses.
+  it('encodes a named preset as named, without probing', async () => {
+    for (const key of Object.keys(STREAM_PRESETS)) {
+      const probe = probeReturning(480);
+      await expect(encodePresetFor(key, probe)).resolves.toBe(key);
+      expect(probe).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe('isPresetChoice', () => {
+  it('accepts every preset and Auto', () => {
+    for (const key of Object.keys(STREAM_PRESETS)) expect(isPresetChoice(key)).toBe(true);
+    expect(isPresetChoice(AUTO_PRESET)).toBe(true);
+  });
+
+  it('rejects anything else, including object keys', () => {
+    for (const key of ['', 'AUTO', '999p', 'toString', '__proto__']) expect(isPresetChoice(key)).toBe(false);
+  });
+});
+
+describe('autoMaxOrDefault', () => {
+  // The limit comes from a database column; a stale or hand-edited value
+  // must not reach presetForHeight, which would pass it through unchanged.
+  it('falls back to the default for anything that is not a preset', () => {
+    expect(autoMaxOrDefault('1080p')).toBe('1080p');
+    for (const v of ['', 'auto', '999p', '__proto__']) expect(autoMaxOrDefault(v)).toBe(DEFAULT_AUTO_MAX_PRESET);
+  });
+});
