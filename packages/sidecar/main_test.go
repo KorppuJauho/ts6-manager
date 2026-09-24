@@ -100,12 +100,12 @@ func TestVideoCodecCarriesTheEncodedSize(t *testing.T) {
 	if cap.MimeType != webrtc.MimeTypeH264 {
 		t.Fatalf("mime = %q, want H264", cap.MimeType)
 	}
-	if !strings.Contains(cap.SDPFmtpLine, "profile-level-id=42e028") {
+	if !strings.Contains(cap.SDPFmtpLine, "profile-level-id=640c28") {
 		t.Errorf("1080p must advertise level 4.0, got %q", cap.SDPFmtpLine)
 	}
 
 	s.setActiveProfile(mustProfile(t, "h264_vaapi"), "/dev/dri/renderD128", 1280, 720, 30)
-	if got := s.videoCodec().SDPFmtpLine; !strings.Contains(got, "profile-level-id=42e01f") {
+	if got := s.videoCodec().SDPFmtpLine; !strings.Contains(got, "profile-level-id=640c1f") {
 		t.Errorf("720p must advertise level 3.1, got %q", got)
 	}
 }
@@ -171,7 +171,7 @@ func TestAlternativeH264StillCarriesItsFmtp(t *testing.T) {
 		if c.MimeType != webrtc.MimeTypeH264 {
 			continue
 		}
-		if !strings.Contains(c.SDPFmtpLine, "profile-level-id=42e028") {
+		if !strings.Contains(c.SDPFmtpLine, "profile-level-id=640c28") {
 			t.Errorf("H264 offered as an alternative at 1080p must still say level 4.0, got %q", c.SDPFmtpLine)
 		}
 		return

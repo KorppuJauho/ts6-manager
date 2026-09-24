@@ -63,7 +63,9 @@ identity too — built by `FmtpFor` from the frame size, because the advertised
 level has to cover the stream actually sent — and its encoder arguments must
 keep the in-band SPS/PPS bitstream filter. The H.264 profile is selectable
 (`SIDECAR_H264_PROFILE`); `-profile:v` and the profile-level-id prefix must
-come from the same `h264Profiles` entry, via `encodeArgs` and `FmtpFor`. Get either wrong and the stream
+come from the same `h264Profiles` entry, via `encodeArgs` and `FmtpFor`. The
+default is Constrained High (`640c`), the only H.264 profile the TeamSpeak
+client decodes — Constrained Baseline negotiates and renders black. Get either wrong and the stream
 connects, counts packets, and shows nothing.
 
 **`SOURCE_SEPARATOR` is a wire format between two processes.** A DASH source

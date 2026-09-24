@@ -421,10 +421,10 @@ than in CI:
 
 H.264 was tried in the pre-fork version, produced a black screen, and was
 replaced with VP9. It is in the registry on the `claude/h264-investigation`
-branch only — **not on `main`, because it still renders a black screen.** It
-negotiates, connects and delivers every packet; audio on the same peer
-connection plays. A codec that fails with nothing in any log saying so is
-worse than one that is absent.
+branch. It negotiated, connected and delivered every packet while rendering
+black, until it turned out the TeamSpeak client decodes H.264 only as
+**Constrained High** (`640c`): offered that, it renders 1080p30 through
+`FFmpeg (h264_cuvid)`. `constrained_high` is the default profile.
 
 What follows is what the branch carries and why. Several of the reasons were
 wrong and are marked as such — `docs/h264-findings.md` is the running record
@@ -537,8 +537,9 @@ sends them only inside STAP-A packets, so that path is load-bearing, not an
 edge case. Verified against FFmpeg's own SDP by `TestSpropMatchesFFmpegOwnSDP`.
 `SIDECAR_H264_SPROP=0` removes them without a rebuild.
 
-**The H.264 profile is selectable.** `SIDECAR_H264_PROFILE` chooses
-`constrained_baseline` (default), `main`, `high` or `constrained_high`, and
+**The H.264 profile is selectable, and Constrained High is the default.**
+`SIDECAR_H264_PROFILE` chooses `constrained_high` (default),
+`constrained_baseline`, `main` or `high`, and
 both the encoder's `-profile:v` and the SDP's `profile-level-id` come from the
 same `h264Profiles` entry. The reason: the TeamSpeak client runs libwebrtc,
 where `NullVideoDecoder` means the application's decoder factory returned
@@ -547,7 +548,10 @@ decoders for other TeamSpeak clients' H.264 — most likely Main, the default
 of the FFmpeg `h264_nvenc` those clients stream through — while declining our
 Constrained Baseline. The client's "Use Cisco OpenH264" toggle was on
 throughout, so a disabled OpenH264 is not the reason. `sprop-parameter-sets` did not
-change the outcome and stays as a harmless, verified extra.
+change the outcome and stays as a harmless, verified extra. The "most likely
+Main" guess was wrong: a TeamSpeak client's captured offer lists H.264 only
+as `640c1f`, Main and High were rejected outright, and `constrained_high`
+renders — which is why it became the default.
 
 **The bot can capture another client's stream offer.** With
 `TS6_CAPTURE_STREAM_OFFERS=1` on the backend, each bot sends

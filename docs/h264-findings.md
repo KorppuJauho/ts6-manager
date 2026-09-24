@@ -1,8 +1,15 @@
 # H.264: what is known, and what is not
 
-H.264 negotiates with the TeamSpeak client, connects, delivers every packet,
-and renders nothing. Audio on the same peer connection plays. This file is the
-record so the next attempt does not re-walk the same ground.
+**Solved (2026-09-24): the TeamSpeak client decodes H.264 only as Constrained
+High (`profile-level-id=640c…`).** Offered that, it builds
+`FFmpeg (h264_cuvid)` and renders 1080p30. See "Result: TeamSpeak offers only
+Constrained High" and "Confirmed" below; `constrained_high` is now the
+default. Everything else in this file is the record of how it was found, kept
+so it is not re-walked. Sections written before the answer say so where they
+turned out wrong.
+
+H.264 negotiated with the TeamSpeak client, connected, delivered every packet,
+and rendered nothing. Audio on the same peer connection played.
 
 ## Ruled out, with evidence
 
@@ -16,7 +23,9 @@ dumping the bitstream gives `00 00 00 01 67 42 40 28` — `0x67` is an SPS at th
 head of the stream. `-bsf:v dump_extra=freq=keyframe` works.
 
 **Not the profile.** Both sides agree on Constrained Baseline (`42e0…`), which
-is what the client's own answer asks for.
+is what the client's own answer asks for. *(Wrong: the profile was the whole
+cause. The client answers Constrained Baseline but has no decoder for it — see
+the result sections below.)*
 
 **Not the level, and not the resolution.** This one took two attempts:
 
@@ -690,11 +699,33 @@ lower than what we would advertise for 1080p (`28`, 4.0), but
 `level-asymmetry-allowed=1` makes the level a sender-side statement. Neither
 decides which decoder is built.
 
-**Next test:** `SIDECAR_H264_PROFILE=constrained_high`, which offers
+**Tested next, and it works (see below):** `SIDECAR_H264_PROFILE=constrained_high`, which offers
 `640c` + our level and encodes with `-profile:v high` and `-bf 0`. A High
 bitstream without B-frames satisfies Constrained High apart from the two
 constraint flags in the SPS, and libwebrtc chooses the decoder from the SDP,
 not from the SPS.
+
+## Confirmed: Constrained High renders
+
+`SIDECAR_H264_PROFILE=constrained_high`, same deploy, same client, a YouTube
+source through `h264_vaapi` at 1920x1080 30fps and 5500k:
+
+- sidecar: `[FFmpeg] H.264 profile: constrained_high (profile-level-id 640c…)`
+- FFmpeg: `Video: h264 (High), vaapi(...)` — High in the SPS, `640c` in the SDP
+- viewer's Connection Info: **Decoder `FFmpeg (h264_cuvid)`**, Quality
+  1920x1080 30fps, 0 lost, 0 retransmitted, 1ms decoding time
+
+No black screen. `constrained_high` is now the first `h264Profiles` entry and
+so the default; the others stay selectable.
+
+What each profile gets from the TeamSpeak client, all at 1080p30:
+
+| Offered | Result |
+|---|---|
+| `42e028` Constrained Baseline | answered `42e01f`, `NullVideoDecoder`, black |
+| `4d0028` Main | m-line rejected (port 0), stream does not start |
+| `640028` High | m-line rejected (port 0), stream does not start |
+| `640c28` Constrained High | `FFmpeg (h264_cuvid)`, renders |
 
 ## A third route: a known-good reference
 

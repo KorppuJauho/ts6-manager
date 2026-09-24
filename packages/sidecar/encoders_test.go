@@ -110,13 +110,13 @@ func TestH264ProfilesAgreeWithTheirSDP(t *testing.T) {
 	}
 }
 
-// Constrained Baseline is what every build of this branch has sent; an
-// unconfigured sidecar, or one given a typo, must keep sending it.
-func TestH264ProfileDefaultsToConstrainedBaseline(t *testing.T) {
+// Constrained High is the one profile the TeamSpeak client decodes; an
+// unconfigured sidecar, or one given a typo, must send it.
+func TestH264ProfileDefaultsToConstrainedHigh(t *testing.T) {
 	for _, v := range []string{"", "  ", "bogus", "High10"} {
 		t.Setenv("SIDECAR_H264_PROFILE", v)
-		if got := selectedH264Profile().name; got != "constrained_baseline" {
-			t.Errorf("SIDECAR_H264_PROFILE=%q selected %q", v, got)
+		if got := selectedH264Profile(); got.name != "constrained_high" || got.profileIOP != "640c" {
+			t.Errorf("SIDECAR_H264_PROFILE=%q selected %q (%s)", v, got.name, got.profileIOP)
 		}
 	}
 	t.Setenv("SIDECAR_H264_PROFILE", " HIGH ")
@@ -168,9 +168,8 @@ func TestEveryCodecHasASoftwareProfile(t *testing.T) {
 }
 
 // The level advertised in the SDP has to cover the stream actually sent. A
-// hardcoded 42e01f (level 3.1, which caps at 1280x720) was offered while
-// h264_vaapi stamped level 4.0 into the SPS of a 1080p stream; the peer
-// connected, received packets and rendered nothing.
+// hardcoded level 3.1, which caps at 1280x720, was once offered while
+// h264_vaapi stamped level 4.0 into the SPS of a 1080p stream.
 func TestH264LevelCoversEveryPreset(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -184,7 +183,7 @@ func TestH264LevelCoversEveryPreset(t *testing.T) {
 		{"2160p30", 3840, 2160, 30, "33"}, // 5.1
 	} {
 		got := h264FmtpLine(tc.w, tc.h, tc.fps, "")
-		want := "profile-level-id=42e0" + tc.wantLevelByte
+		want := "profile-level-id=640c" + tc.wantLevelByte
 		if !strings.Contains(got, want) {
 			t.Errorf("%s: got %q, want it to contain %q", tc.name, got, want)
 		}

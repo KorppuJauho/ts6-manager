@@ -76,11 +76,11 @@ var h264Levels = []h264Level{
 
 // h264LevelIdc returns the lowest level that can actually carry this stream.
 //
-// Getting this wrong is not cosmetic. A hardcoded 42e01f (level 3.1, which
-// caps at 1280x720) was advertised while h264_vaapi stamped level 4.0 into the
-// SPS of a 1080p stream. The peer negotiated, connected, received packets and
-// rendered nothing — the SDP promised a stream the decoder was then not
-// prepared for.
+// A hardcoded level 3.1, which caps at 1280x720, was once advertised while
+// h264_vaapi stamped level 4.0 into the SPS of a 1080p stream: the SDP
+// promising less than the stream carries. That turned out not to be what made
+// H.264 render black — the profile was — but a decoder is entitled to size
+// itself from the advertised level, so it has to cover the stream.
 func h264LevelIdc(width, height, fps int) uint8 {
 	if width <= 0 || height <= 0 {
 		return h264Levels[len(h264Levels)-1].idc
@@ -153,31 +153,29 @@ type h264Profile struct {
 
 // h264Profiles lists what can be selected; the first entry is the default.
 //
-// Constrained Baseline stays the default because it is what every build of
-// this branch has sent. It is also, as it turns out, the profile the TeamSpeak
-// client answers with and then refuses to build a decoder for: libwebrtc
-// installs NullVideoDecoder precisely when the application's decoder factory
-// returns nothing for the negotiated format, and that factory builds
-// FFmpeg (h264_cuvid) for H.264 from other TeamSpeak clients. Those stream
-// through FFmpeg's h264_nvenc, whose default profile is Main, and the client
-// exposes no profile setting — so Main looked like the likeliest thing it
-// accepts. Tested, it is not: the client rejects both Main and High offers
-// with a port-0 video m-line. They stay selectable because that is how it was
-// established, and the default is unchanged.
+// Constrained High is the default because it is the only H.264 profile the
+// TeamSpeak client decodes. Its own stream offer lists H.264 solely as
+// profile-level-id=640c1f, and offered 640c from here it builds
+// FFmpeg (h264_cuvid) and renders. Everything else fails, each in its own way:
+// Main and High are rejected with a port-0 video m-line, and Constrained
+// Baseline is accepted in the answer and then given NullVideoDecoder —
+// libwebrtc's placeholder for a format the application's decoder factory
+// returns nothing for — so it connects, counts packets and shows black. The
+// others stay selectable because that is how this was established.
 //
 // libwebrtc treats High (6400) and Constrained High (640c) as different
-// profiles when it matches an offer against what the receiver supports, and
-// which of them TeamSpeak lists is not known — offering the one it lacks gets
-// the H.264 m-line rejected rather than a black screen. Both are here. Every
-// profile encodes with B-frames off and progressive frames, which is what
-// Constrained High requires, so advertising it is truthful even though
-// neither encoder has a Constrained High spelling of its own; they encode
-// High and the constraint flags in the in-band SPS stay 00.
+// profiles when it matches an offer against what the receiver supports, which
+// is why the constraint flags matter even though neither encoder has a
+// Constrained High spelling of its own. They encode High, and every profile
+// encodes with B-frames off and progressive frames, which is what Constrained
+// High requires — so the advertisement is truthful, and the constraint flags
+// in the in-band SPS staying 00 does not matter: the decoder is chosen from
+// the SDP.
 var h264Profiles = []h264Profile{
+	{name: "constrained_high", profileIOP: "640c", vaapi: "high", x264: "high"},
 	{name: "constrained_baseline", profileIOP: "42e0", vaapi: "constrained_baseline", x264: "baseline"},
 	{name: "main", profileIOP: "4d00", vaapi: "main", x264: "main"},
 	{name: "high", profileIOP: "6400", vaapi: "high", x264: "high"},
-	{name: "constrained_high", profileIOP: "640c", vaapi: "high", x264: "high"},
 }
 
 // selectedH264Profile is the profile SIDECAR_H264_PROFILE names, or the
