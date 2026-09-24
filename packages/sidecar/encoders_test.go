@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/pion/webrtc/v4"
 )
 
 // The UI splits a profile key into codec and backend on the underscore, and
@@ -39,6 +41,113 @@ func TestPayloadTypeAndFmtpAgreePerCodec(t *testing.T) {
 		if p.PayloadType != first.PayloadType {
 			t.Errorf("%s: payload type %d != %d on %s", p.Key, p.PayloadType, first.PayloadType, first.Key)
 		}
+		if p.NeedsFmtp != first.NeedsFmtp {
+			t.Errorf("%s: fmtp requirement differs from %s", p.Key, first.Key)
+		}
+	}
+}
+
+// Every H.264 failure this guards against presents identically — a stream that
+// negotiates, connects, counts packets, and shows nothing. So for every
+// selectable profile, what the SDP names and what the encoder is asked for
+// must agree, and the stream must carry what a decoder needs.
+func TestH264ProfilesAgreeWithTheirSDP(t *testing.T) {
+	// profile_idc for each -profile:v spelling, as the SPS will carry it.
+	idc := map[string]string{
+		"baseline": "42", "constrained_baseline": "42",
+		"main": "4d", "high": "64",
+	}
+
+	for _, hp := range h264Profiles {
+		t.Run(hp.name, func(t *testing.T) {
+			t.Setenv("SIDECAR_H264_PROFILE", hp.name)
+
+			found := 0
+			for _, p := range encoderProfiles {
+				if p.MimeType != webrtc.MimeTypeH264 {
+					continue
+				}
+				found++
+				args := strings.Join(p.encodeArgs(), " ")
+				fmtp := p.FmtpFor(1920, 1080, 30)
+
+				want := hp.x264
+				if p.Encoder == "h264_vaapi" {
+					want = hp.vaapi
+				}
+				if !strings.Contains(args, "-profile:v "+want) {
+					t.Errorf("%s: encoder not asked for %q: %s", p.Key, want, args)
+				}
+				// The SDP's profile_idc must be the one the encoder writes.
+				if got := idc[want]; !strings.Contains(fmtp, "profile-level-id="+got) {
+					t.Errorf("%s: fmtp %q does not name profile_idc %s for -profile:v %s", p.Key, fmtp, got, want)
+				}
+				if !strings.Contains(fmtp, "profile-level-id="+hp.profileIOP) {
+					t.Errorf("%s: fmtp %q does not carry %s", p.Key, fmtp, hp.profileIOP)
+				}
+
+				// Without in-band parameter sets a decoder that joins mid-stream
+				// has nothing to configure itself from.
+				if !strings.Contains(args, "dump_extra") {
+					t.Errorf("%s: no in-band SPS/PPS", p.Key)
+				}
+				// No B-frames for any profile: they add latency and reorder,
+				// and Constrained High forbids them outright.
+				if !strings.Contains(args, "-bf 0") {
+					t.Errorf("%s: B-frames are not disabled", p.Key)
+				}
+				if !strings.Contains(fmtp, "packetization-mode=1") {
+					t.Errorf("%s: fmtp must match FFmpeg's STAP-A/FU-A packetisation: %q", p.Key, fmtp)
+				}
+				if strings.Count(args, "-profile:v") != 1 {
+					t.Errorf("%s: -profile:v given more than once: %s", p.Key, args)
+				}
+			}
+			if found != 2 {
+				t.Fatalf("expected a software and a hardware H.264 profile, found %d", found)
+			}
+		})
+	}
+}
+
+// Constrained High is the one profile the TeamSpeak client decodes; an
+// unconfigured sidecar, or one given a typo, must send it.
+func TestH264ProfileDefaultsToConstrainedHigh(t *testing.T) {
+	for _, v := range []string{"", "  ", "bogus", "High10"} {
+		t.Setenv("SIDECAR_H264_PROFILE", v)
+		if got := selectedH264Profile(); got.name != "constrained_high" || got.profileIOP != "640c" {
+			t.Errorf("SIDECAR_H264_PROFILE=%q selected %q (%s)", v, got.name, got.profileIOP)
+		}
+	}
+	t.Setenv("SIDECAR_H264_PROFILE", " HIGH ")
+	if got := selectedH264Profile().name; got != "high" {
+		t.Errorf("case and whitespace should not matter, got %q", got)
+	}
+}
+
+// VP8 and VP9 are untouched by the H.264 profile switch.
+func TestVpxArgsIgnoreH264Profile(t *testing.T) {
+	t.Setenv("SIDECAR_H264_PROFILE", "high")
+	for _, p := range encoderProfiles {
+		if p.MimeType == webrtc.MimeTypeH264 {
+			continue
+		}
+		if strings.Contains(strings.Join(p.encodeArgs(), " "), "-profile:v") {
+			t.Errorf("%s: an H.264 profile leaked into a VPx encode", p.Key)
+		}
+	}
+}
+
+// VP8 and VP9 negotiate on the codec name. Adding an fmtp line to them would
+// change an offer that is known to work.
+func TestVpxProfilesCarryNoFmtp(t *testing.T) {
+	for _, p := range encoderProfiles {
+		if p.MimeType == webrtc.MimeTypeH264 {
+			continue
+		}
+		if got := p.FmtpFor(1920, 1080, 30); got != "" {
+			t.Errorf("%s: unexpected fmtp line %q", p.Key, got)
+		}
 	}
 }
 
@@ -55,5 +164,47 @@ func TestEveryCodecHasASoftwareProfile(t *testing.T) {
 		if !software[p.MimeType] {
 			t.Errorf("%s has no software fallback for %s", p.Key, p.MimeType)
 		}
+	}
+}
+
+// The level advertised in the SDP has to cover the stream actually sent. A
+// hardcoded level 3.1, which caps at 1280x720, was once offered while
+// h264_vaapi stamped level 4.0 into the SPS of a 1080p stream.
+func TestH264LevelCoversEveryPreset(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		w, h, fps     int
+		wantLevelByte string
+	}{
+		{"480p24", 854, 480, 24, "1e"},    // 3.0
+		{"720p30", 1280, 720, 30, "1f"},   // 3.1, exactly at the limit
+		{"1080p30", 1920, 1080, 30, "28"}, // 4.0, what the GPU stamped
+		{"1440p30", 2560, 1440, 30, "32"}, // 5.0
+		{"2160p30", 3840, 2160, 30, "33"}, // 5.1
+	} {
+		got := h264FmtpLine(tc.w, tc.h, tc.fps)
+		want := "profile-level-id=640c" + tc.wantLevelByte
+		if !strings.Contains(got, want) {
+			t.Errorf("%s: got %q, want it to contain %q", tc.name, got, want)
+		}
+	}
+}
+
+// 720p at 60 needs more macroblocks per second than level 3.1 sustains, even
+// though the frame itself fits — the rate limit has to bind too, or a high
+// frame rate silently under-advertises again.
+func TestH264LevelRespectsFrameRate(t *testing.T) {
+	at30 := h264LevelIdc(1280, 720, 30)
+	at60 := h264LevelIdc(1280, 720, 60)
+	if at60 <= at30 {
+		t.Errorf("720p60 level 0x%02x should exceed 720p30 level 0x%02x", at60, at30)
+	}
+}
+
+// An unknown size must over-advertise rather than under-advertise: too low a
+// level promises the decoder less than the stream may carry.
+func TestH264LevelWithoutDimensions(t *testing.T) {
+	if got := h264LevelIdc(0, 0, 0); got != 0x34 {
+		t.Errorf("got 0x%02x, want the highest level 0x34", got)
 	}
 }

@@ -417,161 +417,63 @@ than in CI:
   without saying what of. Ending a video stream restores the queue track's
   nickname if one is playing, rather than wiping it.
 
-### H.264: attempted, not shipped
+### H.264: Constrained High, the one profile TeamSpeak decodes
 
 H.264 was tried before the fork, produced a black screen, and was replaced with
-VP9. It was attempted again here and **is not in the registry**, for the same
-reason it was absent before: a codec that negotiates, connects, delivers every
-packet and renders nothing is worse than one that is missing, because no log
-anywhere says it failed.
+VP9. It is back in the registry (`h264_vaapi`, and `h264_software` on
+`libx264`) and renders: 1080p30 through `h264_vaapi`, which the viewer decodes
+on its GPU with `FFmpeg (h264_cuvid)`, where VP9 is decoded in software with
+`libvpx`.
 
-The work and the evidence are preserved on `claude/h264-investigation`, and
-`docs/h264-findings.md` on that branch records what four rounds of testing on
-real hardware ruled out — the encoder, the parameter sets, the profile, the
-keyframe gate, the resolution and the level are all eliminated, and the client
-demonstrably accepts H.264 in its answer. The untested lead is that TeamSpeak
-natively uses AV1 and H.264, so a working H.264 stream exists to capture and
-diff against.
+**What was wrong was the profile.** The TeamSpeak client builds an H.264
+decoder only for Constrained High, `profile-level-id=640c…`. Its own stream
+offer lists H.264 solely as `640c1f`. What it does with each profile, at
+1080p30:
 
-What did survive into `main` from that work is `SIDECAR_DEBUG_LOGS=1` logging
-the full SDP offer and answer. It is what finally made the negotiation legible
-after two wrong guesses, and it is useful for any codec. Off by default: an SDP
-carries ICE credentials and every address the host gathered.
+| Offered | Result |
+|---|---|
+| `42e028` Constrained Baseline | answered `42e01f`, then `NullVideoDecoder`: black |
+| `4d0028` Main | m-line rejected (port 0), stream does not start |
+| `640028` High | m-line rejected (port 0), stream does not start |
+| `640c28` Constrained High | `FFmpeg (h264_cuvid)`, renders |
 
-### Quality of life: source-matched quality, and a bot that says what it plays
+Constrained Baseline is the dangerous one: the client runs libwebrtc, which
+installs `NullVideoDecoder` when the application's decoder factory returns
+nothing for a negotiated format, and that decoder swallows every frame and
+reports success. It negotiates, connects, counts packets and shows black, with
+no error anywhere — which is how the pre-fork attempt, and this fork's first
+four, failed without saying why.
 
-- **The encode follows the source's resolution.** A 720p TV channel streamed at
-  the 1080p preset was upscaled: no more detail, 5500k spent carrying
-  interpolated pixels, and a softer picture than the source. The backend now
-  probes the resolved source with `ffprobe` and drops the preset to the largest
-  one the source can fill. It only ever goes *down* — the configured preset is
-  a ceiling an operator chose, so a 4K source does not pull a deliberate 720p
-  stream up to 2160p — and an unmeasurable source keeps the configured preset
-  rather than being guessed at.
+`SIDECAR_H264_PROFILE` selects `constrained_high` (default),
+`constrained_baseline`, `main` or `high`; the others are kept because they
+are how this was established. The encoder's `-profile:v` and the SDP's
+`profile-level-id` come from one `h264Profiles` entry, via `encodeArgs` and
+`FmtpFor`, so they cannot disagree. Neither encoder has a Constrained High
+spelling: both encode High with B-frames off (`-bf 0`), which is what
+Constrained High permits, and the decoder is chosen from the SDP.
 
-  This applies to YouTube too, and not redundantly: the yt-dlp format filter
-  caps height *at* the preset, so a video whose best format is 720p already
-  arrived as 720p however high the preset was set.
+**The level is computed from the frame size.** `h264LevelIdc` walks Table A-1
+for the lowest level whose frame-size and macroblock-rate limits the stream
+fits: 720p30 offers 3.1, 1080p30 offers 4.0. The frame rate binds as well as
+the size. The fmtp line therefore depends on the resolution, so the sidecar
+records the dimensions with the active profile and `videoCodec()` builds the
+one capability the SDP and the local track both use.
 
-  The probe opens its own short-lived connection to the source before FFmpeg
-  opens one. `STREAM_PROBE_TIMEOUT_MS=0` disables it, for an IPTV subscription
-  that permits only one concurrent connection.
+**Parameter sets travel in-band.** FFmpeg hands SPS/PPS to the muxer as
+extradata; pion writes the SDP and never sees it, so
+`-bsf:v dump_extra=freq=keyframe` puts them ahead of every keyframe, where a
+viewer joining mid-stream finds them.
 
-  `setVideoSource` (changing source mid-stream) deliberately keeps the preset
-  it started with: renegotiating dimensions under connected peers is a larger
-  change than that path should make.
+**How it was found.** A diagnostic on the `claude/h264-investigation` branch
+(PR #6) made the bot ask to watch a TeamSpeak client's own H.264 stream and log
+the offer that came back, which named `640c`. That branch keeps the full
+record in `docs/h264-findings.md`, and the experiments that turned out not to
+matter — `sprop-parameter-sets` in the fmtp, the RTCP feedback set, a
+multi-codec offer, the offer capture itself — which are not on `main`.
 
-- **The bot's nickname says what it is streaming** — `Boten Anna - Streaming
-  'MTV3'`. This extends the existing music/ICY nickname rather than restoring
-  something: the pre-fork snapshot renamed the bot for queue tracks and radio
-  metadata, never for video.
-
-  `!tv` passes the channel name the viewer asked for, which reads better than
-  the playlist URL behind it. A YouTube source gets its title from a second,
-  parallel yt-dlp call — deliberately not another `--print` on the URL
-  resolution, because that call is what makes streaming work and a cosmetic
-  feature must not be able to change its output shape. The cost is one extra
-  metadata request per stream start, counting against YouTube's bot-detection
-  budget like any other. Anything else falls back to the source's hostname.
-
-  TeamSpeak caps a nickname at 30 characters, and `" - Streaming ''"` spends 15
-  of them. A bot name long enough to crowd out the title drops to the compact
-  `Boten Anna ▶ MTV3` form instead, so the nickname never announces a stream
-  without saying what of. Ending a video stream restores the queue track's
-  nickname if one is playing, rather than wiping it.
-
-### H.264
-
-H.264 was tried in the pre-fork version, produced a black screen, and was
-replaced with VP9. It is now in the registry, and the two things that make it
-work are the two that were missing.
-
-**In-band parameter sets.** FFmpeg gives SPS/PPS to the muxer as extradata.
-When FFmpeg also writes the SDP, they come out as `sprop-parameter-sets`; here
-pion writes the SDP and never sees that extradata, so unless the parameter sets
-are *also* in the bitstream the decoder has nothing to configure itself from.
-It renders nothing while FFmpeg, ICE and the RTP counters all look healthy —
-the same silent black screen the stale keyframe gate produced, from a
-completely different cause. `-bsf:v dump_extra=freq=keyframe` puts them ahead
-of every keyframe. The filter compares before prepending, so it is harmless
-where they are already present.
-
-**Constrained Baseline, and saying so.** TeamSpeak decodes with Cisco's
-OpenH264, which implements Constrained Baseline. Main and High negotiate
-cleanly and then fail to decode. So both profiles encode Constrained Baseline
-with B-frames off, and the offer advertises
-`profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1`.
-
-That fmtp line is a third thing the codec sites must agree on, alongside the
-mime type and the payload type: it is carried on `RegisterCodec` *and* on the
-local track's capability, because a track whose capability does not match the
-registered codec is not bound to it. Both come from one `videoCodec()` call so
-they cannot drift apart.
-
-**The level is computed from the frame size, not hardcoded.** The first
-version advertised `42e01f` — Constrained Baseline *level 3.1*, which caps at
-1280x720 — on the reasoning that every WebRTC implementation offers that string
-and decoders do not enforce it. That reasoning was wrong, and a deploy proved
-it: at 1080p, `h264_vaapi` stamps level 4.0 into the SPS (`00 00 00 01 67 42 40
-28`, where `28` is level_idc 40) while the SDP promised 3.1. The peer
-negotiated, connected, counted packets and rendered nothing — the third
-variation of the same silent failure.
-
-`h264LevelIdc` now walks Table A-1 and returns the lowest level whose frame and
-macroblock-rate limits the stream fits inside, so 720p30 offers 3.1, 1080p30
-offers 4.0 and 2160p30 offers 5.1. The frame *rate* has to bind as well as the
-size: 720p60 needs a higher level than 720p30 even though the frame is
-identical. The constraint bits stay at `e0`, the spelling every H.264 WebRTC
-implementation uses; only the level byte moves.
-
-Because the level depends on the resolution, the fmtp line cannot live in the
-registry as a constant — the sidecar records the dimensions alongside the
-active profile and `videoCodec()` builds the capability that the SDP and the
-local track both use. An unknown size deliberately over-advertises (5.2): too
-*low* a level is what breaks decoding.
-
-`h264_vaapi` asks the driver for `constrained_baseline`. A GPU that exposes no
-such encode entrypoint fails the probe and falls back to `libx264` — the right
-outcome, since Main or High would encode and not decode. Expect that fallback
-to be common.
-
-**Debugging aid.** `SIDECAR_DEBUG_LOGS=1` now logs the SDP offer and the
-answer in full. A codec that negotiates and then renders nothing leaves no
-error anywhere — the disagreement is only visible with both halves side by
-side, which is how two wrong guesses were made before it existed. Off by
-default: an SDP carries ICE credentials and host addresses.
-
-**The client caps H.264 at 720p, and says so in the answer.** With both
-halves of the SDP visible the cause was immediate:
-
-```
-Offer  a=fmtp:102 …profile-level-id=42e028    level 4.0, what a 1080p encode is
-Answer a=fmtp:102 …profile-level-id=42e01f    level 3.1, what the client accepts
-```
-
-The TeamSpeak client does support H.264 — the answer carries the m-line,
-`recvonly`, `rtpmap:102 H264/90000` — but it answers 42e01f *whatever level is
-offered*. Level 3.1 allows 3600 macroblocks at 108000 per second: exactly
-1280x720 at 30fps. A 1080p H.264 stream is one the receiver has already
-refused, and it presents as black.
-
-`presetForCodec` and `framerateForCodec` hold H.264 to 720p30. They only ever
-reduce, so they compose with the source probe — whichever binds harder wins.
-This is why VP9 streams 1080p happily: VPx carries no level in its SDP, so
-there is nothing to exceed. It also explains the earlier level fix: that made
-the *offer* honest, which is what made the answer's disagreement legible.
-
-The cap is a property of this client, not of H.264. If a future TeamSpeak
-answers with a higher level, the ceiling in `types.ts` is the one place to
-raise.
-
-**Partly verified against a TeamSpeak client.** A deploy confirmed that the GPU
-does expose a ConstrainedBaseline encode entrypoint (the fallback to libx264
-never fired), that the parameter sets reach the bitstream, and that the per-peer
-gate opens. It also produced the level mismatch described above. Whether fixing
-the level is *sufficient* has still not been observed, only argued.
-`packages/sidecar/encoders_test.go` pins the registry and level invariants, not
-the wire behaviour.
+`SIDECAR_DEBUG_LOGS=1` logs the full SDP offer and answer. It is what made
+the negotiation legible, and it is useful for any codec. Off by default: an
+SDP carries ICE credentials and every address the host gathered.
 
 ### Images published to GHCR
 
