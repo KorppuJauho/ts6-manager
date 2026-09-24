@@ -180,9 +180,15 @@ the caller passed**. On a private server every member should be able to watch
 any bot stream, and the upstream default was turning away viewers who were
 entitled to watch.
 
-Resolved. `StreamSignaling` honours the caller's `accessibility` again, and
-the decision is made in `VoiceBot` from the `streamPublic` setting, still
-defaulting to public.
+Resolved. `StreamSignaling` honours the caller's `accessibility` again. The
+decision was then a `streamPublic` setting, which has since been removed:
+turning it off made no difference anyone could see, because the bot accepts
+every join request itself. What viewers took for "waiting to be let in" was
+the sidecar's ICE gathering (see "Viewers waited five seconds to join"
+below). `VoiceBot` sends `accessibility=0`, what the setting defaulted to. The
+`streamPublic` column stays in the schema, unread: the container applies the
+schema with a plain `prisma db push`, which refuses to drop a column holding
+data, and a failed push would leave every later schema change unapplied.
 
 ### Bot speaks English
 
@@ -242,7 +248,7 @@ enforced instead.
 
 The hardcoded values above are now a `StreamSettings` row, edited in
 Settings → Streaming: hardware encoding and its device, the encoder profile,
-the default preset, stream visibility, and the IPTV playlist, filter and sort.
+the default preset, and the IPTV playlist, filter and sort.
 The bot's language sits with the other bot settings in Settings → Music
 Commands.
 
@@ -377,22 +383,30 @@ than in CI:
 
 ### Quality of life: source-matched quality, and a bot that says what it plays
 
-- **The encode follows the source's resolution.** A 720p TV channel streamed at
-  the 1080p preset was upscaled: no more detail, 5500k spent carrying
-  interpolated pixels, and a softer picture than the source. The backend now
-  probes the resolved source with `ffprobe` and drops the preset to the largest
-  one the source can fill. It only ever goes *down* — the configured preset is
-  a ceiling an operator chose, so a 4K source does not pull a deliberate 720p
-  stream up to 2160p — and an unmeasurable source keeps the configured preset
-  rather than being guessed at.
+- **Auto quality follows the source's resolution.** A 720p TV channel streamed
+  at the 1080p preset was upscaled: no more detail, 5500k spent carrying
+  interpolated pixels, and a softer picture than the source. The quality list
+  now starts with **Auto**, the default for a new install: the backend probes
+  the resolved source with `ffprobe` and encodes at the largest preset it can
+  fill, up to 1080p (`AUTO_PRESET_CEILING`). The ceiling is there because the
+  stream is sent to each viewer separately, so the upload is the bitrate
+  times the audience; 1440p and 4K are for choosing deliberately. An
+  unmeasurable source gets the ceiling rather than a guess.
+
+  A **named preset** is the opposite: encoded at exactly that size with no
+  probe, upscaling a smaller source. The probe opens its own short-lived
+  connection to the source before FFmpeg does, so a named preset is also how
+  an IPTV subscription that permits one concurrent connection is streamed.
+  That replaces `STREAM_PROBE_TIMEOUT_MS`, the environment variable that
+  switched the probe off.
+
+  An existing install keeps its saved preset, which now means a fixed size:
+  before, a saved 1080p was a ceiling the source could lower. Choose Auto in
+  Settings → Streaming for the old behaviour.
 
   This applies to YouTube too, and not redundantly: the yt-dlp format filter
-  caps height *at* the preset, so a video whose best format is 720p already
-  arrived as 720p however high the preset was set.
-
-  The probe opens its own short-lived connection to the source before FFmpeg
-  opens one. `STREAM_PROBE_TIMEOUT_MS=0` disables it, for an IPTV subscription
-  that permits only one concurrent connection.
+  caps height *at* the ceiling, so a video whose best format is 720p arrives
+  as 720p however high the ceiling is.
 
   `setVideoSource` (changing source mid-stream) deliberately keeps the preset
   it started with: renegotiating dimensions under connected peers is a larger
@@ -474,6 +488,38 @@ multi-codec offer, the offer capture itself — which are not on `main`.
 `SIDECAR_DEBUG_LOGS=1` logs the full SDP offer and answer. It is what made
 the negotiation legible, and it is useful for any codec. Off by default: an
 SDP carries ICE credentials and every address the host gathered.
+
+### The source is decoded on the GPU too
+
+With hardware encoding on, the sidecar used the GPU only for the encode. The
+source was decoded in software — `vp9 (native) -> h264 (h264_vaapi)` in
+FFmpeg's log — so a 1080p VP9 YouTube stream spent its most expensive step on
+the CPU. The video input now gets `-hwaccel vaapi`, reusing the device
+`-vaapi_device` opened.
+
+Only the decode moves. The frames come back to system memory for the `fps`,
+`scale` and `pad` filters, which are software filters, and are uploaded again
+for the encoder; that copy costs far less than the decode it replaces. A fully
+GPU-side chain (`scale_vaapi`) is the next step, not taken here: padding to
+the frame size has no VAAPI filter in the image's FFmpeg 5.1.
+
+A GPU that cannot decode the source's codec or profile does not fail the
+stream. The hwaccel's initialisation fails, libavcodec drops that format and
+asks again, and FFmpeg picks the software one (`ff_get_format` and FFmpeg's
+own `get_format`, release/5.1). `SIDECAR_HW_DECODE=0` turns it off without a
+rebuild, should a driver decode something wrongly.
+
+### Viewers waited five seconds to join
+
+The sidecar answers a viewer's join request only once ICE gathering has
+completed, and gathering completes only when every STUN request has been
+answered or has timed out. pion's STUN timeout is five seconds, and the list
+has nine servers; one that does not answer held every viewer at "waiting to
+be let in" for exactly five seconds. Reproduced locally with an address that
+never answers: 5.0 s to create a peer, 1.0 s with the timeout set to one
+second, which is what `stunGatherTimeout` now is. A reachable STUN server
+answers in a fraction of that, so the server-reflexive candidates remote
+viewers need are kept.
 
 ### Images published to GHCR
 

@@ -33,11 +33,12 @@ and what to preserve when merging upstream, are in
   decode on the viewer's GPU.
 - **1080p and above from YouTube**: separate video and audio (DASH) streams,
   since YouTube's combined formats stop at 720p.
-- **Presets up to 2160p**, 1080p at 5500k by default. The stream follows the
-  source's resolution, so a 720p channel is not upscaled to 1080p.
+- **Auto quality**, the default: the stream follows the source's resolution,
+  up to 1080p, so a 720p channel is not upscaled. Or a fixed preset, up to
+  2160p.
+- **The GPU decodes the source as well as encoding it**, where it supports the
+  source's codec; otherwise decoding falls back to the CPU.
 - **Idle streams stop themselves** after five minutes with no viewers.
-- **Stream visibility** (public, or the server's own access rules) is a
-  setting, public by default.
 - Several fixes to streams that negotiated and then showed a black picture
   (keyframe gate, ICE candidates, codec mismatches).
 
@@ -161,7 +162,6 @@ is fixed at container start, so they travel with each stream instead.
 | `JWT_ACCESS_EXPIRY` / `JWT_REFRESH_EXPIRY` | `15m` / `7d` | Token lifetimes. |
 | `MUSIC_DIR` | `/data/music` | Downloaded music. |
 | `YT_COOKIE_FILE` | — | Netscape cookies.txt for yt-dlp; also settable in Settings → YouTube. |
-| `STREAM_PROBE_TIMEOUT_MS` | `6000` | Timeout for probing a source's resolution; `0` disables the probe, for an IPTV service that allows one connection. |
 
 **Sidecar**
 
@@ -169,6 +169,7 @@ is fixed at container start, so they travel with each stream instead.
 |---|---|---|
 | `SIDECAR_LISTEN_ADDR` | `127.0.0.1` | API interface (`0.0.0.0` inside Docker, set by the image). Never publish port 9800. |
 | `SIDECAR_H264_PROFILE` | `constrained_high` | H.264 profile. The others (`constrained_baseline`, `main`, `high`) do not play in the TeamSpeak client; they exist for testing. |
+| `SIDECAR_HW_DECODE` | on | With hardware encoding, also decode the source on the GPU. `0` decodes on the CPU. |
 | `SIDECAR_DEBUG_LOGS` | off | `1` logs per-packet detail and the full SDP offer and answer. Leave off: an SDP carries ICE credentials and host addresses. |
 | `STUN_SERVERS` | — | Comma-separated STUN URLs. |
 | `VIDEO_QUEUE_SIZE` / `AUDIO_QUEUE_SIZE` | `1024` / `2048` | RTP queue lengths. |

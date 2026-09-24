@@ -26,7 +26,7 @@ reaches the GPU the way the earlier hardcoded version did.
 
 Everything else this project does can be exercised locally: the settings UI
 and its persistence, software VP8/VP9 streaming end to end, the DASH
-video+audio resolution, presets, stream visibility, the idle auto-stop, the
+video+audio resolution, presets, the idle auto-stop, the
 bot's six reply languages, and `!tv` — which can point at a real IPTV proxy on
 your LAN, since the backend does the fetching.
 
