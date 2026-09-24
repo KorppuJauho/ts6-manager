@@ -1812,7 +1812,14 @@ function StreamingTab() {
 
           <div className="space-y-1.5">
             <Label className="text-xs">{t('settings.streaming.autoMaxPreset')}</Label>
-            <Select value={form.autoMaxPreset} onValueChange={(v) => set('autoMaxPreset', v)}>
+            {/* Only Auto reads the limit, so with a fixed default it has nothing
+                to limit. `!stream <url> auto` still uses it; switch the default to
+                Auto to change it. */}
+            <Select
+              value={form.autoMaxPreset}
+              onValueChange={(v) => set('autoMaxPreset', v)}
+              disabled={form.defaultPreset !== 'auto'}
+            >
               <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {(options?.presets ?? []).map((p) => (
