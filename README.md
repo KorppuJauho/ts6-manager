@@ -24,7 +24,7 @@ and what to preserve when merging upstream, are in
 [`docs/fork-changes.md`](docs/fork-changes.md).
 
 **Video streaming**
-- **Hardware encoding** on a VAAPI GPU (Intel), configured in
+- **Hardware encoding** on a VAAPI GPU (Intel or AMD), configured in
   Settings → Streaming: encoder, GPU device, on/off. The UI probes the sidecar
   and greys out encoders the host cannot run; one that fails falls back to
   software instead of failing the stream.
@@ -127,10 +127,13 @@ English, French, German, Spanish and Italian.
    TeamSpeak server under **Settings → Connections** (host, WebQuery port, API
    key).
 
-**Hardware encoding** also needs the GPU passed through to the sidecar
-container, with its unprivileged user in the group that owns the render node.
-Both are set up in `docker-compose.yml`; `RENDER_GID` in `.env` overrides the
-group. Then turn it on under Settings → Streaming.
+**Hardware encoding** works on Intel and AMD GPUs through VAAPI. AMD
+hardware has no VP9 encoder, so on AMD choose H.264; VP9 there falls back to
+software. NVIDIA is not supported: it has no VAAPI encoder. The GPU has to be
+passed through to the sidecar container, with its unprivileged user in the
+group that owns the render node. Both are set up in `docker-compose.yml`;
+`RENDER_GID` in `.env` overrides the group. Then turn it on under
+Settings → Streaming.
 
 **Behind a reverse proxy** (Coolify and similar), start from
 [`docker-compose.coolify.yml`](docker-compose.coolify.yml): no published
