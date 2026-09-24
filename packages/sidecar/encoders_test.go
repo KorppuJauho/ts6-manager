@@ -72,8 +72,11 @@ func TestH264ProfilesAgreeWithTheirSDP(t *testing.T) {
 				fmtp := p.FmtpFor(1920, 1080, 30)
 
 				want := hp.x264
-				if p.Encoder == "h264_vaapi" {
+				switch p.Encoder {
+				case "h264_vaapi":
 					want = hp.vaapi
+				case "h264_nvenc":
+					want = hp.nvenc
 				}
 				if !strings.Contains(args, "-profile:v "+want) {
 					t.Errorf("%s: encoder not asked for %q: %s", p.Key, want, args)
@@ -103,8 +106,8 @@ func TestH264ProfilesAgreeWithTheirSDP(t *testing.T) {
 					t.Errorf("%s: -profile:v given more than once: %s", p.Key, args)
 				}
 			}
-			if found != 2 {
-				t.Fatalf("expected a software and a hardware H.264 profile, found %d", found)
+			if found != 3 {
+				t.Fatalf("expected software, VAAPI and NVENC H.264 profiles, found %d", found)
 			}
 		})
 	}
@@ -206,5 +209,77 @@ func TestH264LevelRespectsFrameRate(t *testing.T) {
 func TestH264LevelWithoutDimensions(t *testing.T) {
 	if got := h264LevelIdc(0, 0, 0); got != 0x34 {
 		t.Errorf("got 0x%02x, want the highest level 0x34", got)
+	}
+}
+
+// Profile and constraint flags only hold for 4:2:0 input. Handed RGB,
+// h264_nvenc was seen to encode High 4:4:4 Predictive and ignore -profile:v —
+// a stream that negotiates as Constrained High and cannot be decoded as one.
+func TestH264ProfilesEncode420(t *testing.T) {
+	for _, p := range encoderProfiles {
+		if p.MimeType != webrtc.MimeTypeH264 {
+			continue
+		}
+		if p.PixelFormat != "nv12" && p.PixelFormat != "yuv420p" {
+			t.Errorf("%s: pixel format %q is not 4:2:0", p.Key, p.PixelFormat)
+		}
+	}
+}
+
+// Only VAAPI is addressed by a render node. NVENC given one would pass it to
+// -vaapi_device and try to open an Intel or AMD driver on an NVIDIA host.
+func TestOnlyVAAPINeedsARenderNode(t *testing.T) {
+	for _, p := range encoderProfiles {
+		if got, want := p.NeedsDevice(), p.HWAccel == "vaapi"; got != want {
+			t.Errorf("%s: NeedsDevice() = %v, want %v", p.Key, got, want)
+		}
+		if p.HWAccel != "" && p.DecodeHWAccel == "" {
+			t.Errorf("%s: a hardware profile with no GPU decode", p.Key)
+		}
+		if p.HWAccel == "" && p.DecodeHWAccel != "" {
+			t.Errorf("%s: a software profile decoding on the GPU", p.Key)
+		}
+	}
+}
+
+func stubCanEncode(t *testing.T, usable ...string) {
+	t.Helper()
+	ok := map[string]bool{}
+	for _, k := range usable {
+		ok[k] = true
+	}
+	prev := canEncode
+	canEncode = func(p EncoderProfile, _ string) bool { return ok[p.Key] }
+	t.Cleanup(func() { canEncode = prev })
+}
+
+// The settings compose codec and backend independently, so VP9 with NVENC
+// asks for a profile that does not exist. It must stay VP9.
+func TestUnregisteredBackendKeepsTheCodec(t *testing.T) {
+	stubCanEncode(t, "vp8_software", "vp9_software", "h264_software")
+	for key, want := range map[string]string{
+		"vp9_nvenc": "vp9_software",
+		"vp8_nvenc": "vp8_software",
+		"bogus":     defaultProfileKey,
+	} {
+		p, warning := resolveProfile(key, "")
+		if p.Key != want {
+			t.Errorf("%s resolved to %s, want %s", key, p.Key, want)
+		}
+		if warning == "" {
+			t.Errorf("%s: resolving to another profile must say so", key)
+		}
+	}
+}
+
+// A host without an NVIDIA GPU fails the NVENC probe and keeps H.264.
+func TestNVENCFallsBackToSoftwareH264(t *testing.T) {
+	stubCanEncode(t, "vp8_software", "h264_software")
+	if p, _ := resolveProfile("h264_nvenc", ""); p.Key != "h264_software" {
+		t.Errorf("got %s, want h264_software", p.Key)
+	}
+	stubCanEncode(t, "h264_nvenc", "h264_software")
+	if p, w := resolveProfile("h264_nvenc", ""); p.Key != "h264_nvenc" || w != "" {
+		t.Errorf("a usable NVENC must be used as is, got %s (%q)", p.Key, w)
 	}
 }

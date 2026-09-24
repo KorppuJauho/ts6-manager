@@ -1033,7 +1033,7 @@ func (s *Sidecar) ClosePeer(id string) {
 
 // inputArgs is the FFmpeg input half of the command line for a source.
 //
-// With hwDecode the video input is decoded on the GPU as well as encoded
+// With hwaccel set the video input is decoded on the GPU as well as encoded
 // there. Without it FFmpeg decodes in software — for a 1080p VP9 YouTube
 // source that is the most expensive step of the whole stream, on the CPU,
 // while the GPU that is about to encode the result sits idle for it. The
@@ -1041,8 +1041,9 @@ func (s *Sidecar) ClosePeer(id string) {
 // -hwaccel_output_format), because the fps, scale and pad filters that follow
 // are software filters; that copy costs far less than the decode it replaces.
 //
-// No device is named: -hwaccel reuses the one -vaapi_device already opened.
-// Nor is a fallback needed. A GPU that cannot decode the source's codec or
+// No device is named: VAAPI's -hwaccel reuses the one -vaapi_device already
+// opened, and CUDA's opens the one GPU the container runtime exposes. Nor is
+// a fallback needed. A GPU that cannot decode the source's codec or
 // profile fails the hwaccel's initialisation, and libavcodec then drops that
 // format and hands FFmpeg the software one, so the stream decodes on the CPU
 // as it always did.
@@ -1050,7 +1051,7 @@ func (s *Sidecar) ClosePeer(id string) {
 // Input options apply to the next -i only. -hwaccel goes on the first input,
 // which is the video in both source shapes: a progressive URL carries video
 // and audio together, and a DASH pair is video then audio.
-func inputArgs(sources []string, hwDecode bool) []string {
+func inputArgs(sources []string, hwaccel string) []string {
 	var args []string
 	if strings.HasPrefix(sources[0], "http://") || strings.HasPrefix(sources[0], "https://") {
 		args = append(args, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5")
@@ -1060,12 +1061,25 @@ func inputArgs(sources []string, hwDecode bool) []string {
 
 	args = append(args, "-fflags", "+genpts+discardcorrupt", "-re")
 	for i, src := range sources {
-		if i == 0 && hwDecode {
-			args = append(args, "-hwaccel", "vaapi")
+		if i == 0 && hwaccel != "" {
+			args = append(args, "-hwaccel", hwaccel)
 		}
 		args = append(args, "-i", src)
 	}
 	return args
+}
+
+// decodeHWAccel is the -hwaccel to decode the source with, or "" for the CPU:
+// the encoding profile's own GPU, when it has one that can be reached and
+// SIDECAR_HW_DECODE has not turned it off.
+func decodeHWAccel(p EncoderProfile, device string) string {
+	if p.DecodeHWAccel == "" || (p.NeedsDevice() && device == "") {
+		return ""
+	}
+	if !envBoolOrDefault("SIDECAR_HW_DECODE", true) {
+		return ""
+	}
+	return p.DecodeHWAccel
 }
 
 func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate int, bitrate string, profile EncoderProfile, device string) {
@@ -1109,15 +1123,15 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	sources := splitSources(source)
 
 	if len(sources) > 0 {
-		hwDecode := profile.NeedsDevice() && device != "" && envBoolOrDefault("SIDECAR_HW_DECODE", true)
-		args = append(args, inputArgs(sources, hwDecode)...)
+		args = append(args, inputArgs(sources, decodeHWAccel(profile, device))...)
 	} else {
 		args = append(args, "-re", "-f", "lavfi", "-i", fmt.Sprintf("color=c=black:s=%dx%d:r=1", w, h))
 	}
 	hwUploadOnly := len(sources) == 0
 
-	// Hardware encoders take frames from GPU memory, so the filter chain has
-	// to upload after the pixel-format conversion. Software encoders must not.
+	// VAAPI encoders take frames from GPU memory, so the filter chain has to
+	// upload after the pixel-format conversion. Software encoders must not,
+	// and NVENC need not: it uploads system-memory frames itself.
 	hwUpload := ""
 	if profile.NeedsDevice() {
 		hwUpload = ",hwupload"

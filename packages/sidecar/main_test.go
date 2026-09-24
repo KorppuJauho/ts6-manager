@@ -114,7 +114,7 @@ func TestVideoCodecCarriesTheEncodedSize(t *testing.T) {
 func TestInputArgsDecodeVideoOnTheGPU(t *testing.T) {
 	video, audio := "https://example.test/v.m3u8", "https://example.test/a.webm"
 
-	got := strings.Join(inputArgs([]string{video, audio}, true), " ")
+	got := strings.Join(inputArgs([]string{video, audio}, "vaapi"), " ")
 	if !strings.Contains(got, "-hwaccel vaapi -i "+video) {
 		t.Errorf("DASH video input is not GPU-decoded: %q", got)
 	}
@@ -123,13 +123,13 @@ func TestInputArgsDecodeVideoOnTheGPU(t *testing.T) {
 	}
 
 	// A progressive source carries video and audio in the one input.
-	if got := strings.Join(inputArgs([]string{video}, true), " "); !strings.Contains(got, "-hwaccel vaapi -i "+video) {
+	if got := strings.Join(inputArgs([]string{video}, "vaapi"), " "); !strings.Contains(got, "-hwaccel vaapi -i "+video) {
 		t.Errorf("progressive input is not GPU-decoded: %q", got)
 	}
 }
 
 func TestInputArgsWithoutHardwareDecodeAreUnchanged(t *testing.T) {
-	got := inputArgs([]string{"https://example.test/v.m3u8", "https://example.test/a.webm"}, false)
+	got := inputArgs([]string{"https://example.test/v.m3u8", "https://example.test/a.webm"}, "")
 	want := []string{
 		"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
 		"-fflags", "+genpts+discardcorrupt", "-re",
@@ -141,8 +141,40 @@ func TestInputArgsWithoutHardwareDecodeAreUnchanged(t *testing.T) {
 	}
 
 	// A local file loops instead of reconnecting.
-	if got := strings.Join(inputArgs([]string{"/media/clip.mp4"}, false), " "); !strings.HasPrefix(got, "-stream_loop -1 ") {
+	if got := strings.Join(inputArgs([]string{"/media/clip.mp4"}, ""), " "); !strings.HasPrefix(got, "-stream_loop -1 ") {
 		t.Errorf("local file should loop: %q", got)
+	}
+}
+
+// Each backend decodes through its own hwaccel, which for NVIDIA is not named
+// after its encoder. VAAPI needs its render node to decode at all; NVENC
+// needs none, and software profiles never touch a GPU.
+func TestDecodeHWAccelFollowsTheEncodingGPU(t *testing.T) {
+	for _, c := range []struct {
+		key, device, want string
+	}{
+		{"h264_vaapi", "/dev/dri/renderD128", "vaapi"},
+		{"vp9_vaapi", "/dev/dri/renderD128", "vaapi"},
+		{"h264_vaapi", "", ""},
+		{"h264_nvenc", "", "cuda"},
+		{"h264_software", "/dev/dri/renderD128", ""},
+	} {
+		if got := decodeHWAccel(mustProfile(t, c.key), c.device); got != c.want {
+			t.Errorf("%s with device %q: got %q, want %q", c.key, c.device, got, c.want)
+		}
+	}
+
+	t.Setenv("SIDECAR_HW_DECODE", "0")
+	if got := decodeHWAccel(mustProfile(t, "h264_nvenc"), ""); got != "" {
+		t.Errorf("SIDECAR_HW_DECODE=0 must decode on the CPU, got %q", got)
+	}
+}
+
+func TestInputArgsDecodeWithCUDA(t *testing.T) {
+	video, audio := "https://example.test/v.m3u8", "https://example.test/a.webm"
+	got := strings.Join(inputArgs([]string{video, audio}, "cuda"), " ")
+	if !strings.Contains(got, "-hwaccel cuda -i "+video) || strings.Count(got, "-hwaccel") != 1 {
+		t.Errorf("CUDA must decode the video input only: %q", got)
 	}
 }
 

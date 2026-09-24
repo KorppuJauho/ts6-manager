@@ -62,9 +62,8 @@ This fork encodes VP9 on the Intel GPU.
 libva picks the one matching the render node's kernel driver. AMD hardware has
 no VP9 encoder, so there the encoder probe reports VP9 (VAAPI) unavailable and
 H.264 is the codec to choose; decoding works for VP9 and H.264. Not tested on
-AMD hardware. **NVIDIA** is not covered: it has no VA-API encoder, and NVENC
-would be a separate encoder profile needing the NVIDIA container runtime
-rather than `/dev/dri`.
+AMD hardware. **NVIDIA** has no VA-API encoder; it has its own profile,
+`h264_nvenc` — see "NVIDIA: H.264 on NVENC" below.
 
 The codec appears in **three places that must agree**, or the stream negotiates
 one format and carries another:
@@ -519,6 +518,43 @@ stream. The hwaccel's initialisation fails, libavcodec drops that format and
 asks again, and FFmpeg picks the software one (`ff_get_format` and FFmpeg's
 own `get_format`, release/5.1). `SIDECAR_HW_DECODE=0` turns it off without a
 rebuild, should a driver decode something wrongly.
+
+### NVIDIA: H.264 on NVENC
+
+A second hardware backend beside VAAPI: the `h264_nvenc` profile, chosen in
+Settings → Streaming → GPU. H.264 only, because NVENC has no VP8 or VP9
+encoder — and H.264 Constrained High is what the TeamSpeak client decodes
+anyway. The source is decoded on the same GPU with `-hwaccel cuda` (NVDEC),
+with the same software fallback as VAAPI for a codec or profile the GPU
+cannot decode.
+
+What differs from VAAPI, and why:
+
+- **No render node.** NVENC reaches the GPU through the CUDA driver, and the
+  container runtime decides which GPU that is. `NeedsDevice()` is now true
+  for VAAPI only, the device field is dimmed for NVIDIA, and the backend
+  sends no device with an NVENC stream.
+- **No `hwupload`.** NVENC takes system-memory frames and uploads them
+  itself, so the filter chain is the software one.
+- **The 4:2:0 conversion is load-bearing.** Given RGB input, `h264_nvenc`
+  encoded *High 4:4:4 Predictive* and ignored `-profile:v high` (seen on the
+  first test run). The stream's chain ends in `format=nv12`, and
+  `TestH264ProfilesEncode420` keeps every H.264 profile there.
+- **The profile key's backend half is now a setting** (`hwBackend`, default
+  `vaapi`). VP9 with NVENC composes `vp9_nvenc`, which nothing registers;
+  the sidecar resolves an unregistered key to the same codec's software
+  profile, where it used to answer with its default and turn VP9 into VP8.
+- **Deployment is an override file**, `docker-compose.nvidia.yml`: the GPU
+  reservation makes Compose refuse to start on a host without the NVIDIA
+  runtime, so it cannot live in the main compose files. The image is
+  unchanged — Debian's FFmpeg 5.1 already has `h264_nvenc` and loads the
+  driver libraries the NVIDIA Container Toolkit mounts in (capability
+  `video`).
+
+Verified by hand on an RTX 5080 under WSL2 with the published sidecar image:
+`h264_nvenc` encodes (`-profile:v high -bf 0` from `nv12`), and so does the
+toolkit's passthrough. The whole path through the app — setting, probe,
+stream, TeamSpeak client — is the part still to confirm.
 
 ### Viewers waited five seconds to join
 

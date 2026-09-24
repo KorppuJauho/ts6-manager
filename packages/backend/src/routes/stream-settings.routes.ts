@@ -15,6 +15,8 @@ import {
   invalidateStreamSettings,
   codecFromProfile,
   composeProfile,
+  isHwBackend,
+  HW_BACKENDS,
   IPTV_SORTS,
   STREAM_SETTINGS_DEFAULTS,
 } from '../utils/stream-settings.js';
@@ -37,6 +39,7 @@ const FALLBACK_ENCODERS: EncoderCapability[] = [
   { key: 'vp9_vaapi', label: 'VP9 (VAAPI hardware)', mimeType: 'video/VP9', payloadType: 98, hwAccel: 'vaapi', encoder: 'vp9_vaapi', available: false },
   { key: 'h264_software', label: 'H.264 (software)', mimeType: 'video/H264', payloadType: 102, hwAccel: '', encoder: 'libx264', available: false },
   { key: 'h264_vaapi', label: 'H.264 (VAAPI hardware)', mimeType: 'video/H264', payloadType: 102, hwAccel: 'vaapi', encoder: 'h264_vaapi', available: false },
+  { key: 'h264_nvenc', label: 'H.264 (NVIDIA NVENC)', mimeType: 'video/H264', payloadType: 102, hwAccel: 'nvenc', encoder: 'h264_nvenc', available: false },
 ];
 
 /**
@@ -104,20 +107,22 @@ streamSettingsRoutes.get('/options', async (req: Request, res: Response, next: N
       // everything reads as unavailable.
     }
 
-    // The UI offers a codec and a hardware toggle, not a flat profile list:
-    // those are independent choices, and presenting the cross product invites
-    // picking a combination that contradicts the toggle. Group the probed
-    // profiles so the UI can say which codecs have working hardware support.
-    const byCodec = new Map<string, { codec: string; label: string; softwareAvailable: boolean; hardwareAvailable: boolean }>();
+    // The UI offers a codec, a hardware toggle and a backend, not a flat
+    // profile list: those are independent choices, and presenting the cross
+    // product invites picking a combination that contradicts the toggle.
+    // Group the probed profiles so the UI can say which codecs each backend
+    // can encode — per backend, since it can switch backends before saving.
+    type CodecEntry = { codec: string; label: string; softwareAvailable: boolean; hardware: Record<string, boolean> };
+    const byCodec = new Map<string, CodecEntry>();
     for (const enc of encoders) {
       const codec = codecFromProfile(enc.key);
       const entry = byCodec.get(codec) ?? {
         codec,
         label: CODEC_LABELS[codec] ?? codec.toUpperCase(),
         softwareAvailable: false,
-        hardwareAvailable: false,
+        hardware: Object.fromEntries(HW_BACKENDS.map((b) => [b, false])),
       };
-      if (enc.hwAccel) entry.hardwareAvailable ||= enc.available;
+      if (enc.hwAccel) entry.hardware[enc.hwAccel] ||= enc.available;
       else entry.softwareAvailable ||= enc.available;
       byCodec.set(codec, entry);
     }
@@ -140,13 +145,18 @@ streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunc
     const body = req.body ?? {};
 
     const hwAccelEnabled = asBool(body.hwAccelEnabled, current.hwAccelEnabled);
+    const hwBackend = asText(body.hwBackend, 16) ?? current.hwBackend;
+    if (!isHwBackend(hwBackend)) {
+      throw new AppError(400, `Unknown hardware backend "${hwBackend}"`);
+    }
 
-    // The UI sends a codec; the backend half comes from the toggle. An older
-    // client sending a whole profile key still works — its codec is taken and
-    // its backend discarded, since the toggle is what decides that.
+    // The UI sends a codec; the backend half comes from the toggle and the
+    // backend setting. An older client sending a whole profile key still
+    // works — its codec is taken and its backend discarded, since those two
+    // settings are what decide that.
     const videoCodec = asText(body.videoCodec, 32)
       ?? codecFromProfile(asText(body.encoderProfile, 64) ?? current.encoderProfile);
-    const encoderProfile = composeProfile(videoCodec, hwAccelEnabled);
+    const encoderProfile = composeProfile(videoCodec, hwAccelEnabled, hwBackend);
     const defaultPreset = asText(body.defaultPreset, 32) ?? current.defaultPreset;
     if (!isPresetChoice(defaultPreset)) {
       throw new AppError(400, `Unknown preset "${defaultPreset}"`);
@@ -177,6 +187,7 @@ streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunc
     const data = {
       hwAccelEnabled,
       hwAccelDevice: hwAccelDevice || STREAM_SETTINGS_DEFAULTS.hwAccelDevice,
+      hwBackend,
       encoderProfile,
       defaultPreset,
       autoMaxPreset,

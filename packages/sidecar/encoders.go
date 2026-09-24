@@ -34,9 +34,15 @@ type EncoderProfile struct {
 	// so it is built per stream by FmtpFor rather than stored here.
 	NeedsFmtp bool `json:"needsFmtp,omitempty"`
 
-	// HWAccel is "" for software encoding, otherwise the FFmpeg hwaccel name
-	// ("vaapi"). A profile with a backend needs a device path.
+	// HWAccel is "" for software encoding, otherwise the hardware backend:
+	// "vaapi" (Intel, AMD) or "nvenc" (NVIDIA). It is also the second half of
+	// the profile key, which is how the settings compose codec and backend.
 	HWAccel string `json:"hwAccel"`
+
+	// DecodeHWAccel is the -hwaccel that decodes the source on the same GPU,
+	// or "" to decode on the CPU. It is not HWAccel: NVIDIA's encoder is
+	// NVENC, but its decoder is reached through FFmpeg's "cuda" hwaccel.
+	DecodeHWAccel string `json:"-"`
 
 	// Encoder is the FFmpeg encoder name, and what availability is probed on.
 	Encoder string `json:"encoder"`
@@ -50,7 +56,11 @@ type EncoderProfile struct {
 }
 
 // NeedsDevice reports whether this profile has to be given a DRM render node.
-func (p EncoderProfile) NeedsDevice() bool { return p.HWAccel != "" }
+//
+// Only VAAPI does. NVENC opens the GPU through the CUDA driver, and which GPU
+// that is gets decided by the container runtime (NVIDIA_VISIBLE_DEVICES), so
+// inside the container it is always the first one.
+func (p EncoderProfile) NeedsDevice() bool { return p.HWAccel == "vaapi" }
 
 // h264Level is one row of Table A-1: the level_idc byte, the largest frame it
 // allows in macroblocks, and the macroblocks per second it can sustain.
@@ -133,8 +143,10 @@ type h264Profile struct {
 	// profileIOP is profile_idc and the constraint flags: the first four hex
 	// digits of profile-level-id, spelled the way libwebrtc spells them.
 	profileIOP string
-	// vaapi and x264 are the -profile:v values each encoder knows it by.
+	// vaapi, nvenc and x264 are the -profile:v values each encoder knows it
+	// by.
 	vaapi string
+	nvenc string
 	x264  string
 }
 
@@ -159,10 +171,10 @@ type h264Profile struct {
 // in the in-band SPS staying 00 does not matter: the decoder is chosen from
 // the SDP.
 var h264Profiles = []h264Profile{
-	{name: "constrained_high", profileIOP: "640c", vaapi: "high", x264: "high"},
-	{name: "constrained_baseline", profileIOP: "42e0", vaapi: "constrained_baseline", x264: "baseline"},
-	{name: "main", profileIOP: "4d00", vaapi: "main", x264: "main"},
-	{name: "high", profileIOP: "6400", vaapi: "high", x264: "high"},
+	{name: "constrained_high", profileIOP: "640c", vaapi: "high", nvenc: "high", x264: "high"},
+	{name: "constrained_baseline", profileIOP: "42e0", vaapi: "constrained_baseline", nvenc: "baseline", x264: "baseline"},
+	{name: "main", profileIOP: "4d00", vaapi: "main", nvenc: "main", x264: "main"},
+	{name: "high", profileIOP: "6400", vaapi: "high", nvenc: "high", x264: "high"},
 }
 
 // selectedH264Profile is the profile SIDECAR_H264_PROFILE names, or the
@@ -188,8 +200,11 @@ func (p EncoderProfile) encodeArgs() []string {
 	}
 	hp := selectedH264Profile()
 	name := hp.x264
-	if p.Encoder == "h264_vaapi" {
+	switch p.Encoder {
+	case "h264_vaapi":
 		name = hp.vaapi
+	case "h264_nvenc":
+		name = hp.nvenc
 	}
 	return append([]string{"-profile:v", name}, p.ExtraArgs...)
 }
@@ -233,12 +248,12 @@ var encoderProfiles = []EncoderProfile{
 	{
 		Key: "vp8_vaapi", Label: "VP8 (VAAPI hardware)",
 		MimeType: webrtc.MimeTypeVP8, PayloadType: 96,
-		HWAccel: "vaapi", Encoder: "vp8_vaapi", PixelFormat: "nv12",
+		HWAccel: "vaapi", DecodeHWAccel: "vaapi", Encoder: "vp8_vaapi", PixelFormat: "nv12",
 	},
 	{
 		Key: "vp9_vaapi", Label: "VP9 (VAAPI hardware)",
 		MimeType: webrtc.MimeTypeVP9, PayloadType: 98,
-		HWAccel: "vaapi", Encoder: "vp9_vaapi", PixelFormat: "nv12",
+		HWAccel: "vaapi", DecodeHWAccel: "vaapi", Encoder: "vp9_vaapi", PixelFormat: "nv12",
 		ExtraArgs: []string{"-strict", "experimental"},
 	},
 	{
@@ -259,11 +274,34 @@ var encoderProfiles = []EncoderProfile{
 		Key: "h264_vaapi", Label: "H.264 (VAAPI hardware)",
 		MimeType: webrtc.MimeTypeH264, PayloadType: 102,
 		NeedsFmtp: true,
-		HWAccel:   "vaapi", Encoder: "h264_vaapi", PixelFormat: "nv12",
+		HWAccel:   "vaapi", DecodeHWAccel: "vaapi", Encoder: "h264_vaapi", PixelFormat: "nv12",
 		// -profile:v comes from encodeArgs. A driver with no encode
 		// entrypoint for the selected profile fails the probe and falls back
 		// to libx264, which can encode all three.
 		ExtraArgs: append([]string{
+			"-bf", "0",
+		}, h264InBandParameterSets...),
+	},
+	{
+		// NVIDIA has no VP8 or VP9 encoder, so H.264 is its only profile —
+		// which is also the codec the TeamSpeak client decodes on its GPU.
+		Key: "h264_nvenc", Label: "H.264 (NVIDIA NVENC)",
+		MimeType: webrtc.MimeTypeH264, PayloadType: 102,
+		NeedsFmtp: true,
+		HWAccel:   "nvenc", DecodeHWAccel: "cuda", Encoder: "h264_nvenc",
+		// NVENC takes frames from system memory and uploads them itself, so
+		// unlike VAAPI there is no hwupload. The 4:2:0 format is not optional:
+		// handed RGB, h264_nvenc switches to High 4:4:4 Predictive and ignores
+		// -profile:v, which is a profile the TeamSpeak client cannot decode.
+		PixelFormat: "nv12",
+		// p4 with the low-latency tune is NVENC's balanced real-time setting;
+		// zerolatency drops the frame of reordering delay it would otherwise
+		// keep. -profile:v comes from encodeArgs.
+		ExtraArgs: append([]string{
+			"-preset", "p4",
+			"-tune", "ll",
+			"-rc", "cbr",
+			"-zerolatency", "1",
 			"-bf", "0",
 		}, h264InBandParameterSets...),
 	},
@@ -341,6 +379,12 @@ func probeEncoder(p EncoderProfile, device string) bool {
 	if p.NeedsDevice() && device == "" {
 		return false
 	}
+	// A profile that takes no device ignores it, so the answer must not be
+	// cached — and the probe rerun — once per device the caller happens to
+	// pass.
+	if !p.NeedsDevice() {
+		device = ""
+	}
 
 	key := probeKey{encoder: p.Encoder, device: device}
 	if cached, ok := probeCache.Load(key); ok {
@@ -414,18 +458,30 @@ func resolveProfile(key string, device string) (EncoderProfile, string) {
 	}
 	p, ok := profileByKey(key)
 	if !ok {
+		// A codec the chosen backend has no encoder for — VP9 with NVENC —
+		// composes a key nothing registers. Keep the codec and drop the
+		// backend: answering with the default instead would quietly swap VP9
+		// for VP8 as well as the GPU for the CPU.
+		codec, _, _ := strings.Cut(key, "_")
+		if alt, ok := profileByKey(codec + "_software"); ok && canEncode(alt, device) {
+			return alt, fmt.Sprintf("no encoder profile %q, using %s", key, alt.Key)
+		}
 		return defaultProfile(), fmt.Sprintf("unknown encoder profile %q, using %s", key, defaultProfileKey)
 	}
-	if probeEncoder(p, device) {
+	if canEncode(p, device) {
 		return p, ""
 	}
 
 	// Prefer the software encoder for the same codec, so the negotiated codec
 	// does not change underneath a peer that has already connected.
 	for _, alt := range encoderProfiles {
-		if alt.MimeType == p.MimeType && alt.HWAccel == "" && probeEncoder(alt, device) {
+		if alt.MimeType == p.MimeType && alt.HWAccel == "" && canEncode(alt, device) {
 			return alt, fmt.Sprintf("encoder %q cannot run on this host, falling back to %s", p.Encoder, alt.Key)
 		}
 	}
 	return defaultProfile(), fmt.Sprintf("encoder %q cannot run on this host, falling back to %s", p.Encoder, defaultProfileKey)
 }
+
+// canEncode is probeEncoder, replaceable in tests: a probe runs FFmpeg, and
+// the fallback order should be testable on a machine without it.
+var canEncode = probeEncoder

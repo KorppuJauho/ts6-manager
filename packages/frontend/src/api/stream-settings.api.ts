@@ -2,10 +2,13 @@ import api from './client';
 
 export interface StreamSettings {
   hwAccelEnabled: boolean;
+  /** Render node for VAAPI. NVENC takes the GPU the container is given. */
   hwAccelDevice: string;
+  /** Which GPU encodes when hwAccelEnabled: "vaapi" (Intel, AMD) or "nvenc" (NVIDIA). */
+  hwBackend: string;
   /**
    * Stored profile key. The UI edits `videoCodec` instead — the backend half
-   * is decided by hwAccelEnabled, so the two cannot contradict.
+   * is decided by hwAccelEnabled and hwBackend, so they cannot contradict.
    */
   encoderProfile: string;
   /** Codec half of encoderProfile, e.g. "vp9". What the UI presents. */
@@ -38,12 +41,13 @@ export interface EncoderOption {
   available: boolean;
 }
 
-/** A codec, and whether this host can encode it in software and in hardware. */
+/** A codec, and whether this host can encode it in software and on each GPU backend. */
 export interface CodecOption {
   codec: string;
   label: string;
   softwareAvailable: boolean;
-  hardwareAvailable: boolean;
+  /** Keyed by backend ("vaapi", "nvenc"). */
+  hardware: Record<string, boolean>;
 }
 
 export interface StreamSettingsOptions {

@@ -24,8 +24,8 @@ and what to preserve when merging upstream, are in
 [`docs/fork-changes.md`](docs/fork-changes.md).
 
 **Video streaming**
-- **Hardware encoding** on a VAAPI GPU (Intel or AMD), configured in
-  Settings → Streaming: encoder, GPU device, on/off. The UI probes the sidecar
+- **Hardware encoding** on Intel and AMD (VAAPI) or NVIDIA (NVENC, H.264),
+  configured in Settings → Streaming: GPU, encoder, device, on/off. The UI probes the sidecar
   and greys out encoders the host cannot run; one that fails falls back to
   software instead of failing the stream.
 - **VP8, VP9 and H.264**, software or hardware. H.264 is sent as Constrained
@@ -129,11 +129,19 @@ English, French, German, Spanish and Italian.
 
 **Hardware encoding** works on Intel and AMD GPUs through VAAPI. AMD
 hardware has no VP9 encoder, so on AMD choose H.264; VP9 there falls back to
-software. NVIDIA is not supported: it has no VAAPI encoder. The GPU has to be
-passed through to the sidecar container, with its unprivileged user in the
-group that owns the render node. Both are set up in `docker-compose.yml`;
-`RENDER_GID` in `.env` overrides the group. Then turn it on under
-Settings → Streaming.
+software. The GPU has to be passed through to the sidecar container, with its
+unprivileged user in the group that owns the render node. Both are set up in
+`docker-compose.yml`; `RENDER_GID` in `.env` overrides the group. Then turn it
+on under Settings → Streaming.
+
+**NVIDIA** GPUs encode H.264 through NVENC. The host needs the NVIDIA driver
+and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html);
+then add the override file and choose GPU → NVIDIA, codec H.264:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+docker compose -f docker-compose.ghcr.yml -f docker-compose.nvidia.yml up -d   # prebuilt
+```
 
 `docker-compose.hub.yml` runs clusterzx's Docker Hub images, which contain
 none of this fork's changes, and uses different internal ports, so never mix

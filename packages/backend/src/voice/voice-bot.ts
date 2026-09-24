@@ -25,6 +25,7 @@ import { validateUrl } from '../utils/url-validator.js';
 import {
   STREAM_SETTINGS_DEFAULTS,
   effectiveEncoder,
+  effectiveHwDevice,
   type StreamSettingsValue,
 } from '../utils/stream-settings.js';
 
@@ -1021,7 +1022,7 @@ export class VoiceBot extends EventEmitter {
     }
 
     this._videoEncoder = effectiveEncoder(settings);
-    this._videoHwDevice = settings.hwAccelEnabled ? settings.hwAccelDevice : '';
+    this._videoHwDevice = effectiveHwDevice(settings);
     const effectiveFramerate = framerate && framerate > 0
       ? framerate
       : presetConfig.framerate;

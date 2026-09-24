@@ -82,7 +82,11 @@ per-stream must travel in the `POST /source` body**, never an env var.
 
 **Hardware encoding needs more than the Dockerfile.** VAAPI needs `/dev/dri`
 passed through *and* the unprivileged `sidecar` user in the group owning the
-render node. See the comments in `docker-compose.yml`.
+render node. See the comments in `docker-compose.yml`. NVIDIA needs the NVIDIA
+Container Toolkit on the host and `docker-compose.nvidia.yml` layered on top;
+that override cannot move into the main compose files, because Compose refuses
+to start without the NVIDIA runtime. NVENC encodes H.264 only, and must be fed
+4:2:0 — given RGB it silently encodes High 4:4:4, which TeamSpeak cannot decode.
 
 ## Conventions
 
