@@ -17,20 +17,6 @@ const PROTOCOL_WHITELIST = 'http,https,tcp,tls,crypto';
 export const DEFAULT_PROBE_TIMEOUT_MS = 6_000;
 
 /**
- * The probe opens its own connection to the source, briefly, before FFmpeg
- * opens one. An IPTV subscription that allows a single concurrent connection
- * can refuse the second — so `STREAM_PROBE_TIMEOUT_MS=0` turns the probe off
- * and streams always encode at the configured preset.
- */
-export function probeTimeoutMs(): number {
-  const raw = process.env.STREAM_PROBE_TIMEOUT_MS;
-  if (raw === undefined || raw.trim() === '') return DEFAULT_PROBE_TIMEOUT_MS;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_PROBE_TIMEOUT_MS;
-  return parsed;
-}
-
-/**
  * Read the height of the first video stream out of `ffprobe -of json` output.
  *
  * Separate from the spawn so the parsing is testable without ffprobe present.
@@ -68,9 +54,8 @@ export function parseProbedHeight(stdout: string): number | null {
  */
 export async function probeVideoHeight(
   source: string,
-  timeoutMs: number = probeTimeoutMs(),
+  timeoutMs: number = DEFAULT_PROBE_TIMEOUT_MS,
 ): Promise<number | null> {
-  if (timeoutMs <= 0) return null;
 
   // A DASH pair carries video first; probing the audio URL would find no
   // video stream and report nothing.

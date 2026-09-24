@@ -1,9 +1,7 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   parseProbedHeight,
   probeVideoHeight,
-  probeTimeoutMs,
-  DEFAULT_PROBE_TIMEOUT_MS,
 } from './probe.js';
 
 describe('parseProbedHeight', () => {
@@ -36,36 +34,5 @@ describe('probeVideoHeight', () => {
     await expect(probeVideoHeight('concat:/etc/passwd')).resolves.toBeNull();
     await expect(probeVideoHeight('-i')).resolves.toBeNull();
     await expect(probeVideoHeight('')).resolves.toBeNull();
-  });
-});
-
-describe('probeTimeoutMs', () => {
-  const original = process.env.STREAM_PROBE_TIMEOUT_MS;
-  afterEach(() => {
-    if (original === undefined) delete process.env.STREAM_PROBE_TIMEOUT_MS;
-    else process.env.STREAM_PROBE_TIMEOUT_MS = original;
-  });
-
-  it('defaults when unset', () => {
-    delete process.env.STREAM_PROBE_TIMEOUT_MS;
-    expect(probeTimeoutMs()).toBe(DEFAULT_PROBE_TIMEOUT_MS);
-  });
-
-  it('honours an explicit timeout', () => {
-    process.env.STREAM_PROBE_TIMEOUT_MS = '2000';
-    expect(probeTimeoutMs()).toBe(2000);
-  });
-
-  it('treats a nonsense value as unset rather than as zero', () => {
-    // Zero disables probing, so a typo must not silently switch it off.
-    process.env.STREAM_PROBE_TIMEOUT_MS = 'soon';
-    expect(probeTimeoutMs()).toBe(DEFAULT_PROBE_TIMEOUT_MS);
-    process.env.STREAM_PROBE_TIMEOUT_MS = '-5';
-    expect(probeTimeoutMs()).toBe(DEFAULT_PROBE_TIMEOUT_MS);
-  });
-
-  it('does not spawn ffprobe when disabled', async () => {
-    process.env.STREAM_PROBE_TIMEOUT_MS = '0';
-    await expect(probeVideoHeight('https://example.com/stream.m3u8')).resolves.toBeNull();
   });
 });

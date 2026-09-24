@@ -9,7 +9,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { AppError } from '../middleware/error-handler.js';
 import { requireRole } from '../middleware/rbac.js';
-import { STREAM_PRESETS } from '../voice/streaming/types.js';
+import { STREAM_PRESETS, isPresetChoice } from '../voice/streaming/types.js';
 import {
   getStreamSettings,
   invalidateStreamSettings,
@@ -148,7 +148,7 @@ streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunc
       ?? codecFromProfile(asText(body.encoderProfile, 64) ?? current.encoderProfile);
     const encoderProfile = composeProfile(videoCodec, hwAccelEnabled);
     const defaultPreset = asText(body.defaultPreset, 32) ?? current.defaultPreset;
-    if (!STREAM_PRESETS[defaultPreset]) {
+    if (!isPresetChoice(defaultPreset)) {
       throw new AppError(400, `Unknown preset "${defaultPreset}"`);
     }
 
@@ -174,7 +174,6 @@ streamSettingsRoutes.put('/', async (req: Request, res: Response, next: NextFunc
       hwAccelDevice: hwAccelDevice || STREAM_SETTINGS_DEFAULTS.hwAccelDevice,
       encoderProfile,
       defaultPreset,
-      streamPublic: asBool(body.streamPublic, current.streamPublic),
       iptvEnabled: asBool(body.iptvEnabled, current.iptvEnabled),
       iptvPlaylistUrl,
       iptvChannelFilter: asText(body.iptvChannelFilter, 2000) ?? current.iptvChannelFilter,
