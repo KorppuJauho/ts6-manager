@@ -25,7 +25,8 @@ and what to preserve when merging upstream, are in
 
 **Video streaming**
 - **Hardware encoding** on Intel and AMD (VAAPI) or NVIDIA (NVENC, H.264),
-  configured in Settings → Streaming: GPU, encoder, device, on/off. The UI probes the sidecar
+  configured in Settings → Streaming: encoder, GPU device, on/off. Which GPU
+  is set by the compose file that passes it through. The UI probes the sidecar
   and greys out encoders the host cannot run; one that fails falls back to
   software instead of failing the stream.
 - **VP8, VP9 and H.264**, software or hardware. H.264 is sent as Constrained
@@ -136,7 +137,8 @@ on under Settings → Streaming.
 
 **NVIDIA** GPUs encode H.264 through NVENC. The host needs the NVIDIA driver
 and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html);
-then add the override file and choose GPU → NVIDIA, codec H.264:
+then add the override file, which passes the GPU through and sets
+`SIDECAR_HW_BACKEND=nvenc`, and turn on hardware encoding with codec H.264:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
@@ -175,6 +177,7 @@ is fixed at container start, so they travel with each stream instead.
 |---|---|---|
 | `SIDECAR_LISTEN_ADDR` | `127.0.0.1` | API interface (`0.0.0.0` inside Docker, set by the image). Never publish port 9800. |
 | `SIDECAR_H264_PROFILE` | `constrained_high` | H.264 profile. The others (`constrained_baseline`, `main`, `high`) do not play in the TeamSpeak client; they exist for testing. |
+| `SIDECAR_HW_BACKEND` | `vaapi` | Which GPU hardware encoding uses: `vaapi` (Intel, AMD) or `nvenc` (NVIDIA, H.264 only). Set by `docker-compose.nvidia.yml`. |
 | `SIDECAR_HW_DECODE` | on | With hardware encoding, also decode the source on the GPU. `0` decodes on the CPU. |
 | `SIDECAR_DEBUG_LOGS` | off | `1` logs per-packet detail and the full SDP offer and answer. Leave off: an SDP carries ICE credentials and host addresses. |
 | `STUN_SERVERS` | — | Comma-separated STUN URLs. |

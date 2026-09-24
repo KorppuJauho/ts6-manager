@@ -253,13 +253,34 @@ func stubCanEncode(t *testing.T, usable ...string) {
 	t.Cleanup(func() { canEncode = prev })
 }
 
-// The settings compose codec and backend independently, so VP9 with NVENC
-// asks for a profile that does not exist. It must stay VP9.
+// The backend asks for "hardware" without knowing which GPU the container
+// has, so the sidecar's own backend decides what a hardware key means.
+func TestHardwareKeysMapToThisHostsBackend(t *testing.T) {
+	for _, c := range []struct{ env, key, want string }{
+		{"", "h264_vaapi", "h264_vaapi"},
+		{"vaapi", "h264_nvenc", "h264_vaapi"},
+		{"nvenc", "h264_vaapi", "h264_nvenc"},
+		{" NVENC ", "vp9_vaapi", "vp9_nvenc"},
+		{"nvenc", "h264_software", "h264_software"},
+		{"cuda", "h264_vaapi", "h264_vaapi"}, // unknown value: the default
+		{"nvenc", "bogus", "bogus"},
+	} {
+		t.Setenv("SIDECAR_HW_BACKEND", c.env)
+		if got := forThisHost(c.key); got != c.want {
+			t.Errorf("SIDECAR_HW_BACKEND=%q: %s mapped to %s, want %s", c.env, c.key, got, c.want)
+		}
+	}
+}
+
+// NVENC has no VP8 or VP9 encoder, so hardware VP9 on an NVIDIA sidecar maps
+// to a key nothing registers. It must stay VP9, not become the default VP8.
 func TestUnregisteredBackendKeepsTheCodec(t *testing.T) {
+	t.Setenv("SIDECAR_HW_BACKEND", "nvenc")
 	stubCanEncode(t, "vp8_software", "vp9_software", "h264_software")
 	for key, want := range map[string]string{
+		"vp9_vaapi": "vp9_software",
+		"vp8_vaapi": "vp8_software",
 		"vp9_nvenc": "vp9_software",
-		"vp8_nvenc": "vp8_software",
 		"bogus":     defaultProfileKey,
 	} {
 		p, warning := resolveProfile(key, "")
@@ -272,14 +293,16 @@ func TestUnregisteredBackendKeepsTheCodec(t *testing.T) {
 	}
 }
 
-// A host without an NVIDIA GPU fails the NVENC probe and keeps H.264.
+// On an NVIDIA sidecar the hardware toggle means NVENC; a host where NVENC
+// then fails its probe keeps H.264 in software.
 func TestNVENCFallsBackToSoftwareH264(t *testing.T) {
-	stubCanEncode(t, "vp8_software", "h264_software")
-	if p, _ := resolveProfile("h264_nvenc", ""); p.Key != "h264_software" {
-		t.Errorf("got %s, want h264_software", p.Key)
-	}
+	t.Setenv("SIDECAR_HW_BACKEND", "nvenc")
 	stubCanEncode(t, "h264_nvenc", "h264_software")
-	if p, w := resolveProfile("h264_nvenc", ""); p.Key != "h264_nvenc" || w != "" {
+	if p, w := resolveProfile("h264_vaapi", "/dev/dri/renderD128"); p.Key != "h264_nvenc" || w != "" {
 		t.Errorf("a usable NVENC must be used as is, got %s (%q)", p.Key, w)
+	}
+	stubCanEncode(t, "vp8_software", "h264_software")
+	if p, _ := resolveProfile("h264_vaapi", ""); p.Key != "h264_software" {
+		t.Errorf("got %s, want h264_software", p.Key)
 	}
 }

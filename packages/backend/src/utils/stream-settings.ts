@@ -13,7 +13,6 @@ import type { PrismaClient } from '../../generated/prisma/index.js';
 export interface StreamSettingsValue {
   hwAccelEnabled: boolean;
   hwAccelDevice: string;
-  hwBackend: string;
   encoderProfile: string;
   defaultPreset: string;
   autoMaxPreset: string;
@@ -32,7 +31,6 @@ export interface StreamSettingsValue {
 export const STREAM_SETTINGS_DEFAULTS: StreamSettingsValue = {
   hwAccelEnabled: false,
   hwAccelDevice: '/dev/dri/renderD128',
-  hwBackend: 'vaapi',
   encoderProfile: 'vp8_software',
   defaultPreset: 'auto',
   autoMaxPreset: '2160p',
@@ -60,7 +58,6 @@ export async function getStreamSettings(prisma: PrismaClient): Promise<StreamSet
   const value: StreamSettingsValue = {
     hwAccelEnabled: row?.hwAccelEnabled ?? STREAM_SETTINGS_DEFAULTS.hwAccelEnabled,
     hwAccelDevice: row?.hwAccelDevice || STREAM_SETTINGS_DEFAULTS.hwAccelDevice,
-    hwBackend: isHwBackend(row?.hwBackend) ? row!.hwBackend : STREAM_SETTINGS_DEFAULTS.hwBackend,
     encoderProfile: row?.encoderProfile || STREAM_SETTINGS_DEFAULTS.encoderProfile,
     defaultPreset: row?.defaultPreset || STREAM_SETTINGS_DEFAULTS.defaultPreset,
     autoMaxPreset: row?.autoMaxPreset || STREAM_SETTINGS_DEFAULTS.autoMaxPreset,
@@ -74,16 +71,14 @@ export async function getStreamSettings(prisma: PrismaClient): Promise<StreamSet
 }
 
 /**
- * The hardware backends the sidecar registers, as the second half of a
- * profile key. Which one encodes is a setting: a host's GPU is not something
- * the backend can see, and the sidecar only reports what each one can do.
+ * The backend half of a hardware profile key.
+ *
+ * It stands for "the sidecar's GPU", not a particular one: which GPU the
+ * sidecar can reach is fixed by its deployment (SIDECAR_HW_BACKEND, set by
+ * docker-compose.nvidia.yml), and the sidecar maps a hardware key onto its
+ * own backend — h264_vaapi on an NVIDIA sidecar encodes with h264_nvenc.
  */
-export const HW_BACKENDS = ['vaapi', 'nvenc'] as const;
-export type HwBackend = (typeof HW_BACKENDS)[number];
-
-export function isHwBackend(value: unknown): value is HwBackend {
-  return typeof value === 'string' && (HW_BACKENDS as readonly string[]).includes(value);
-}
+const HARDWARE_BACKEND = 'vaapi';
 
 /** The codec half of a profile key: "vp9_vaapi" -> "vp9". */
 export function codecFromProfile(profile: string): string {
@@ -91,15 +86,9 @@ export function codecFromProfile(profile: string): string {
   return codec || 'vp8';
 }
 
-/**
- * Build a profile key from its independent halves.
- *
- * A codec the backend has no encoder for (VP9 on NVENC) still composes — to a
- * key the sidecar does not register, which it resolves to the software
- * encoder for the same codec rather than to its default.
- */
-export function composeProfile(codec: string, hardware: boolean, backend: string = 'vaapi'): string {
-  return `${codec}_${hardware ? backend : 'software'}`;
+/** Build a profile key from its two independent halves. */
+export function composeProfile(codec: string, hardware: boolean): string {
+  return `${codec}_${hardware ? HARDWARE_BACKEND : 'software'}`;
 }
 
 /**
@@ -117,15 +106,7 @@ export function composeProfile(codec: string, hardware: boolean, backend: string
  * same codec, logging why.
  */
 export function effectiveEncoder(settings: StreamSettingsValue): string {
-  return composeProfile(codecFromProfile(settings.encoderProfile), settings.hwAccelEnabled, settings.hwBackend);
-}
-
-/**
- * The render node to send with a stream, or '' for none. Only VAAPI is
- * addressed by one; NVENC's GPU is whichever the container runtime exposes.
- */
-export function effectiveHwDevice(settings: StreamSettingsValue): string {
-  return settings.hwAccelEnabled && settings.hwBackend === 'vaapi' ? settings.hwAccelDevice : '';
+  return composeProfile(codecFromProfile(settings.encoderProfile), settings.hwAccelEnabled);
 }
 
 /** Split the stored comma-separated filter into lowercase substrings. */

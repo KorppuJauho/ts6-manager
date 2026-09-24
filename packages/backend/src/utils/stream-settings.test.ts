@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   effectiveEncoder,
-  effectiveHwDevice,
-  isHwBackend,
   codecFromProfile,
   composeProfile,
   parseChannelFilter,
@@ -31,33 +29,6 @@ describe('composeProfile', () => {
     expect(composeProfile('vp9', true)).toBe('vp9_vaapi');
     expect(composeProfile('vp9', false)).toBe('vp9_software');
   });
-
-  it('takes the backend half from the backend setting', () => {
-    expect(composeProfile('h264', true, 'nvenc')).toBe('h264_nvenc');
-    expect(composeProfile('h264', false, 'nvenc')).toBe('h264_software');
-    // Composes to a key the sidecar does not register; it resolves that to
-    // vp9_software, keeping the codec.
-    expect(composeProfile('vp9', true, 'nvenc')).toBe('vp9_nvenc');
-  });
-});
-
-describe('isHwBackend', () => {
-  it('accepts the registered backends only', () => {
-    expect(isHwBackend('vaapi')).toBe(true);
-    expect(isHwBackend('nvenc')).toBe(true);
-    for (const v of ['', 'software', 'cuda', 'NVENC', null, undefined, 1]) {
-      expect(isHwBackend(v), String(v)).toBe(false);
-    }
-  });
-});
-
-describe('effectiveHwDevice', () => {
-  it('sends the render node for VAAPI only', () => {
-    const device = '/dev/dri/renderD129';
-    expect(effectiveHwDevice(settings({ hwAccelEnabled: true, hwBackend: 'vaapi', hwAccelDevice: device }))).toBe(device);
-    expect(effectiveHwDevice(settings({ hwAccelEnabled: true, hwBackend: 'nvenc', hwAccelDevice: device }))).toBe('');
-    expect(effectiveHwDevice(settings({ hwAccelEnabled: false, hwBackend: 'vaapi', hwAccelDevice: device }))).toBe('');
-  });
 });
 
 describe('effectiveEncoder', () => {
@@ -85,13 +56,6 @@ describe('effectiveEncoder', () => {
       .toBe('vp9_vaapi');
     expect(effectiveEncoder(settings({ hwAccelEnabled: false, encoderProfile: 'vp8_software' })))
       .toBe('vp8_software');
-  });
-
-  it('encodes on NVENC when that is the backend', () => {
-    expect(effectiveEncoder(settings({ hwAccelEnabled: true, hwBackend: 'nvenc', encoderProfile: 'h264_vaapi' })))
-      .toBe('h264_nvenc');
-    expect(effectiveEncoder(settings({ hwAccelEnabled: false, hwBackend: 'nvenc', encoderProfile: 'h264_nvenc' })))
-      .toBe('h264_software');
   });
 
   it('never returns empty, which the sidecar would read as no preference', () => {

@@ -1729,13 +1729,10 @@ function StreamingTab() {
   // Hardware for the chosen codec may simply not exist on this GPU — the
   // sidecar probes by encoding, so this reflects what will actually happen
   // rather than what FFmpeg was built with.
-  const backend = form.hwBackend || 'vaapi';
-  const hasHardware = (c: { hardware?: Record<string, boolean> }) => c.hardware?.[backend] ?? false;
-  const hardwareUnavailable = form.hwAccelEnabled && codec !== undefined && !hasHardware(codec);
-  // A backend none of whose profiles passed the probe is not on this host, or
-  // not passed through to the sidecar. Only meaningful when the probe ran.
-  const backendDetected = (b: string) => !options?.sidecarReachable
-    || (options.encoders ?? []).some((e) => e.hwAccel === b && e.available);
+  const hardwareUnavailable = form.hwAccelEnabled && codec !== undefined && !codec.hardwareAvailable;
+  // docker-compose.nvidia.yml hands the sidecar an NVIDIA GPU, which has no
+  // render node to choose: the device field has nothing to set.
+  const nvidia = options?.hwBackend === 'nvenc';
 
   return (
     <div className="space-y-4">
@@ -1752,33 +1749,17 @@ function StreamingTab() {
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">{t('settings.streaming.hwBackend')}</Label>
-            <Select value={backend} onValueChange={(v) => set('hwBackend', v)} disabled={!form.hwAccelEnabled}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(['vaapi', 'nvenc'] as const).map((b) => (
-                  <SelectItem key={b} value={b}>
-                    {t(b === 'vaapi' ? 'settings.streaming.hwBackendVaapi' : 'settings.streaming.hwBackendNvenc')}
-                    {!backendDetected(b) && ` — ${t('settings.streaming.hwBackendNotDetected')}`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.hwBackendHint')}</p>
-          </div>
-
-          <div className="space-y-1.5">
             <Label className="text-xs">{t('settings.streaming.hwAccelDevice')}</Label>
-            {/* Only VAAPI is addressed by a render node; NVENC uses the GPU the
-                container runtime hands the sidecar. */}
             <Input
               className="h-8 text-xs font-mono"
               placeholder="/dev/dri/renderD128"
               value={form.hwAccelDevice}
-              disabled={!form.hwAccelEnabled || backend !== 'vaapi'}
+              disabled={!form.hwAccelEnabled || nvidia}
               onChange={(e) => set('hwAccelDevice', e.target.value)}
             />
-            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.hwAccelDeviceHint')}</p>
+            <p className="text-[10px] text-muted-foreground">
+              {t(nvidia ? 'settings.streaming.hwAccelDeviceNvidia' : 'settings.streaming.hwAccelDeviceHint')}
+            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -1790,10 +1771,10 @@ function StreamingTab() {
                   <SelectItem
                     key={c.codec}
                     value={c.codec}
-                    disabled={form.hwAccelEnabled ? !hasHardware(c) && !c.softwareAvailable : !c.softwareAvailable}
+                    disabled={form.hwAccelEnabled ? !c.hardwareAvailable && !c.softwareAvailable : !c.softwareAvailable}
                   >
                     {c.label}
-                    {form.hwAccelEnabled && !hasHardware(c) && ` — ${t('settings.streaming.noHardwareForCodec')}`}
+                    {form.hwAccelEnabled && !c.hardwareAvailable && ` — ${t('settings.streaming.noHardwareForCodec')}`}
                   </SelectItem>
                 ))}
               </SelectContent>

@@ -382,9 +382,6 @@ model StreamSettings {
   hwAccelEnabled Boolean @default(false)
   hwAccelDevice  String  @default("/dev/dri/renderD128")
   encoderProfile String  @default("vp8_software")
-  // Which GPU encodes when hwAccelEnabled: "vaapi" (Intel, AMD) or "nvenc"
-  // (NVIDIA). hwAccelDevice is read for VAAPI only.
-  hwBackend      String  @default("vaapi")
 
   // Preset a stream uses when the caller does not name one.
   defaultPreset String @default("720p")

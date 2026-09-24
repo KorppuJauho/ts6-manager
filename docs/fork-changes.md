@@ -521,8 +521,8 @@ rebuild, should a driver decode something wrongly.
 
 ### NVIDIA: H.264 on NVENC
 
-A second hardware backend beside VAAPI: the `h264_nvenc` profile, chosen in
-Settings → Streaming → GPU. H.264 only, because NVENC has no VP8 or VP9
+A second hardware backend beside VAAPI: the `h264_nvenc` profile, used when
+the sidecar runs with `SIDECAR_HW_BACKEND=nvenc`. H.264 only, because NVENC has no VP8 or VP9
 encoder — and H.264 Constrained High is what the TeamSpeak client decodes
 anyway. The source is decoded on the same GPU with `-hwaccel cuda` (NVDEC),
 with the same software fallback as VAAPI for a codec or profile the GPU
@@ -532,20 +532,25 @@ What differs from VAAPI, and why:
 
 - **No render node.** NVENC reaches the GPU through the CUDA driver, and the
   container runtime decides which GPU that is. `NeedsDevice()` is now true
-  for VAAPI only, the device field is dimmed for NVIDIA, and the backend
-  sends no device with an NVENC stream.
+  for VAAPI only; a device sent with an NVENC stream is ignored.
 - **No `hwupload`.** NVENC takes system-memory frames and uploads them
   itself, so the filter chain is the software one.
 - **The 4:2:0 conversion is load-bearing.** Given RGB input, `h264_nvenc`
   encoded *High 4:4:4 Predictive* and ignored `-profile:v high` (seen on the
   first test run). The stream's chain ends in `format=nv12`, and
   `TestH264ProfilesEncode420` keeps every H.264 profile there.
-- **The profile key's backend half is now a setting** (`hwBackend`, default
-  `vaapi`). VP9 with NVENC composes `vp9_nvenc`, which nothing registers;
-  the sidecar resolves an unregistered key to the same codec's software
-  profile, where it used to answer with its default and turn VP9 into VP8.
-- **Deployment is an override file**, `docker-compose.nvidia.yml`: the GPU
-  reservation makes Compose refuse to start on a host without the NVIDIA
+- **The backend is deployment configuration, not a setting.** Which GPU the
+  container can reach is fixed by the compose file, so a UI choice could only
+  agree with it or fail. The web UI still composes `<codec>_vaapi` for
+  "hardware"; the sidecar maps that onto its own backend (`forThisHost`) and
+  reports the backend in `/capabilities`, which the settings page uses to dim
+  the device field and mark VP8/VP9 as having no GPU support. VP9 on NVENC
+  maps to `vp9_nvenc`, which nothing registers; the sidecar resolves an
+  unregistered key to the same codec's software profile, where it used to
+  answer with its default and turn VP9 into VP8. Nor does it probe the other
+  vendor's encoders, which are never passed through.
+- **Deployment is an override file**, `docker-compose.nvidia.yml`, which also
+  sets `SIDECAR_HW_BACKEND=nvenc`: the GPU reservation makes Compose refuse to start on a host without the NVIDIA
   runtime, so it cannot live in the main compose files. The image is
   unchanged — Debian's FFmpeg 5.1 already has `h264_nvenc` and loads the
   driver libraries the NVIDIA Container Toolkit mounts in (capability

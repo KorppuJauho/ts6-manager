@@ -36,7 +36,7 @@ type EncoderProfile struct {
 
 	// HWAccel is "" for software encoding, otherwise the hardware backend:
 	// "vaapi" (Intel, AMD) or "nvenc" (NVIDIA). It is also the second half of
-	// the profile key, which is how the settings compose codec and backend.
+	// the profile key. Which backend a host has is hwBackend's to say.
 	HWAccel string `json:"hwAccel"`
 
 	// DecodeHWAccel is the -hwaccel that decodes the source on the same GPU,
@@ -307,6 +307,46 @@ var encoderProfiles = []EncoderProfile{
 	},
 }
 
+// hwBackends are the values SIDECAR_HW_BACKEND takes; the first is the
+// default.
+var hwBackends = []string{"vaapi", "nvenc"}
+
+// hwBackend is the GPU backend this sidecar encodes on when a stream asks for
+// hardware, from SIDECAR_HW_BACKEND.
+//
+// It is deployment configuration, not a UI setting, because it cannot vary
+// independently of the deployment: which GPU the container can reach is fixed
+// by the compose file that passes it through (docker-compose.nvidia.yml sets
+// nvenc), and a setting that disagreed with it could only fail. An unknown
+// value reads as the default, the same as SIDECAR_H264_PROFILE.
+func hwBackend() string {
+	want := strings.ToLower(strings.TrimSpace(os.Getenv("SIDECAR_HW_BACKEND")))
+	for _, b := range hwBackends {
+		if b == want {
+			return b
+		}
+	}
+	return hwBackends[0]
+}
+
+// forThisHost maps a hardware profile key onto this sidecar's backend.
+//
+// The backend composes keys from a codec and the hardware toggle, and cannot
+// see which GPU the container was given, so a key's backend half means "the
+// GPU" rather than naming one. h264_vaapi on an NVENC sidecar is h264_nvenc.
+func forThisHost(key string) string {
+	codec, backend, ok := strings.Cut(key, "_")
+	if !ok || backend == "software" {
+		return key
+	}
+	for _, b := range hwBackends {
+		if backend == b {
+			return codec + "_" + hwBackend()
+		}
+	}
+	return key
+}
+
 // defaultProfileKey is what a stream uses when none is requested.
 const defaultProfileKey = "vp8_software"
 
@@ -374,6 +414,12 @@ var probeCache sync.Map // probeKey -> bool
 // the process runs, and a probe costs an FFmpeg launch.
 func probeEncoder(p EncoderProfile, device string) bool {
 	if !availableEncoders()[p.Encoder] {
+		return false
+	}
+	// The other vendor's GPU is not passed through to this container. Not
+	// probing it saves an FFmpeg launch and a misleading "unusable" line on
+	// every host.
+	if p.HWAccel != "" && p.HWAccel != hwBackend() {
 		return false
 	}
 	if p.NeedsDevice() && device == "" {
@@ -456,10 +502,11 @@ func resolveProfile(key string, device string) (EncoderProfile, string) {
 	if key == "" {
 		return defaultProfile(), ""
 	}
+	key = forThisHost(key)
 	p, ok := profileByKey(key)
 	if !ok {
-		// A codec the chosen backend has no encoder for — VP9 with NVENC —
-		// composes a key nothing registers. Keep the codec and drop the
+		// A codec this host's backend has no encoder for — VP9 on NVENC —
+		// maps to a key nothing registers. Keep the codec and drop the
 		// backend: answering with the default instead would quietly swap VP9
 		// for VP8 as well as the GPU for the CPU.
 		codec, _, _ := strings.Cut(key, "_")

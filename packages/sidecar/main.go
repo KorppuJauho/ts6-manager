@@ -1347,6 +1347,11 @@ func main() {
 		log.Fatal("SIDECAR_TOKEN is required — set the same value on the backend and the sidecar")
 	}
 
+	if want := os.Getenv("SIDECAR_HW_BACKEND"); want != "" && !strings.EqualFold(strings.TrimSpace(want), hwBackend()) {
+		log.Printf("[Startup] SIDECAR_HW_BACKEND=%q is not a known backend; using %s", want, hwBackend())
+	}
+	log.Printf("[Startup] Hardware backend: %s", hwBackend())
+
 	sidecar := NewSidecar()
 	if err := sidecar.StartRTP(); err != nil {
 		log.Fatalf("Failed to start RTP: %v", err)
@@ -1503,7 +1508,12 @@ func main() {
 			http.Error(w, "invalid device", 400)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"encoders": encoderCapabilities(device)})
+		// hwBackend lets the settings page say which GPU hardware encoding
+		// means here, since the page cannot choose it.
+		json.NewEncoder(w).Encode(map[string]any{
+			"encoders":  encoderCapabilities(device),
+			"hwBackend": hwBackend(),
+		})
 	})
 
 	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
