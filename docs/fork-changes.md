@@ -57,6 +57,15 @@ yt-dlp argument injection, unauthenticated WebSocket, and the unguarded reads.
 Upstream encodes VP8 with libvpx on the CPU, which saturates a core at 1080p30.
 This fork encodes VP9 on the Intel GPU.
 
+**AMD** is covered too: the sidecar image carries Mesa's VA-API driver
+(`mesa-va-drivers`, radeonsi) next to Intel's (`intel-media-va-driver`), and
+libva picks the one matching the render node's kernel driver. AMD hardware has
+no VP9 encoder, so there the encoder probe reports VP9 (VAAPI) unavailable and
+H.264 is the codec to choose; decoding works for VP9 and H.264. Not tested on
+AMD hardware. **NVIDIA** is not covered: it has no VA-API encoder, and NVENC
+would be a separate encoder profile needing the NVIDIA container runtime
+rather than `/dev/dri`.
+
 The codec appears in **three places that must agree**, or the stream negotiates
 one format and carries another:
 
