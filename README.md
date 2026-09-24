@@ -174,6 +174,7 @@ is fixed at container start, so they travel with each stream instead.
 | `VIDEO_QUEUE_SIZE` / `AUDIO_QUEUE_SIZE` | `1024` / `2048` | RTP queue lengths. |
 | `VIDEO_RTP_READ_BUFFER` / `AUDIO_RTP_READ_BUFFER` | 4 MiB / 1 MiB | UDP socket buffers. |
 | `AUDIO_BITRATE` | `128k` | Opus bitrate. |
+| `AUDIO_DELAY_MS` | `0` | Delays the stream's audio by this much, to correct a source whose audio runs ahead. |
 
 ## Music bot text commands
 
