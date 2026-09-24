@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StreamOfferCapture, redactSdp, type CaptureClient } from './offer-capture.js';
 
 const OWN_CLID = 7;
+const OWN_CHANNEL = 3;
 
 // An offer shaped like libwebrtc's, with the parts that must not leak.
 const OFFER = [
@@ -32,11 +33,15 @@ class FakeClient extends EventEmitter implements CaptureClient {
   sendCommand(cmd: string): void {
     this.sent.push(cmd);
   }
+  channel = OWN_CHANNEL;
   getClientId(): number {
     return OWN_CLID;
   }
-  command(name: string, params: Record<string, string>): void {
-    this.emit('command', { name, params });
+  getChannelId(): number {
+    return this.channel;
+  }
+  command(name: string, params: Record<string, string>, groups?: Record<string, string>[]): void {
+    this.emit('command', { name, params, groups });
   }
 }
 
@@ -83,7 +88,45 @@ describe('StreamOfferCapture', () => {
 
   it('asks to watch a stream another client starts, in the native command shape', () => {
     client.command('notifystreamstarted', { id: 'abc-123', clid: '95' });
-    expect(client.sent).toEqual(['joinstreamrequest id=abc-123 clid=95 msg= is_remove=0']);
+    expect(client.sent).toEqual(['joinstreamrequest id=abc-123 clid=95 msg= is_remove=0 muted=0 volume=0 hidden=0']);
+  });
+
+  // A stream is announced only when it starts; one already running is found
+  // by asking, and its answer is handled like a start.
+  it('asks clients in its channel for a stream already running', () => {
+    client.command('notifycliententerview', { clid: '95', ctid: String(OWN_CHANNEL) }, [
+      { clid: '95', ctid: String(OWN_CHANNEL) },
+      { clid: '96', ctid: '9' },
+      { clid: String(OWN_CLID), ctid: String(OWN_CHANNEL) },
+      { clid: '97', ctid: String(OWN_CHANNEL) },
+    ]);
+    expect(client.sent).toEqual(['requeststreaminfo clid=95', 'requeststreaminfo clid=97']);
+
+    client.sent = [];
+    client.command('notifystreaminfo', { id: 'live-1', clid: '95' });
+    expect(client.sent).toEqual(['joinstreamrequest id=live-1 clid=95 msg= is_remove=0 muted=0 volume=0 hidden=0']);
+  });
+
+  it('asks a client that moves into its channel', () => {
+    client.command('notifyclientmoved', { clid: '95', ctid: String(OWN_CHANNEL) });
+    client.command('notifyclientmoved', { clid: '96', ctid: '9' });
+    expect(client.sent).toEqual(['requeststreaminfo clid=95']);
+  });
+
+  // The connect snapshot lists the whole server; asking all of it before the
+  // channel is known would be one command per client.
+  it('asks nobody while its channel is unknown', () => {
+    client.channel = 0;
+    client.command('notifycliententerview', { clid: '95', ctid: '9' }, [
+      { clid: '95', ctid: '9' },
+      { clid: '96', ctid: '4' },
+    ]);
+    expect(client.sent).toEqual([]);
+  });
+
+  it('ignores a stream info answer that carries no stream', () => {
+    client.command('notifystreaminfo', { clid: '95' });
+    expect(client.sent).toEqual([]);
   });
 
   it('ignores its own stream', () => {
@@ -99,7 +142,7 @@ describe('StreamOfferCapture', () => {
     const logged = logs.join('\n');
     expect(logged).toContain('profile-level-id=42e01f');
     expect(logged).not.toContain('84.251.200.91');
-    expect(client.sent).toEqual(['joinstreamrequest id=abc-123 clid=95 msg= is_remove=1']);
+    expect(client.sent).toEqual(['joinstreamrequest id=abc-123 clid=95 msg= is_remove=1 muted=0 volume=0 hidden=0']);
   });
 
   // StreamSignaling sees the same commands; a response to someone else's

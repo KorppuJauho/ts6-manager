@@ -10,11 +10,13 @@
  * in its own H.264 offer is the one thing left to compare against, and asking
  * to watch a stream is how a client is made to produce one.
  *
- * The exchange is the viewer half of TS6's stream signaling, as recovered by
- * webspeak3 from TeamSpeak.dll: `joinstreamrequest id clid msg is_remove` is
- * answered by `notifyrespondjoinstreamrequest` carrying the streamer's offer.
- * The offer is logged and the request withdrawn with `is_remove=1`; it is never
- * answered, so no media flows.
+ * The exchange is the viewer half of TS6's stream signaling. webspeak3
+ * recovered `joinstreamrequest` from TeamSpeak.dll; WebSpeak
+ * (EchoSixHIYA/WebSpeak-client-for-TeamSpeak), whose browser viewers watch
+ * native TS6 streams, sends it with `muted volume hidden` as well and is the
+ * shape copied here. It is answered by `notifyrespondjoinstreamrequest`
+ * carrying the streamer's offer. The offer is logged and the request withdrawn
+ * with `is_remove=1`; it is never answered, so no media flows.
  */
 
 import { buildCommand } from '../tslib/commands.js';
@@ -22,6 +24,7 @@ import { buildCommand } from '../tslib/commands.js';
 interface ParsedCommand {
   name: string;
   params: Record<string, string>;
+  groups?: Record<string, string>[];
 }
 
 /** The slice of Ts3Client this needs, so it can be tested without a server. */
@@ -30,6 +33,7 @@ export interface CaptureClient {
   removeListener(event: 'command', listener: (parsed: ParsedCommand) => void): unknown;
   sendCommand(cmd: string): void;
   getClientId(): number;
+  getChannelId(): number;
 }
 
 /** How long to wait for the streamer's client to answer a join request. */
@@ -71,7 +75,7 @@ export class StreamOfferCapture {
     for (const event of ['channel', 'server', 'textchannel']) {
       this.client.sendCommand(buildCommand('servernotifyregister', { event }));
     }
-    this.log('[OfferCapture] Enabled: will request the SDP offer of any stream started where this bot can see it');
+    this.log('[OfferCapture] Enabled: will request the SDP offer of any stream this bot can see');
   }
 
   stop(): void {
@@ -82,11 +86,31 @@ export class StreamOfferCapture {
 
   private handle(parsed: ParsedCommand): void {
     const p = parsed.params ?? {};
-    if (parsed.name === 'notifystreamstarted') {
+    if (parsed.name === 'notifystreamstarted' || parsed.name === 'notifystreaminfo') {
       this.requestOffer(p);
     } else if (parsed.name === 'notifyrespondjoinstreamrequest') {
       this.receiveOffer(p);
+    } else if (parsed.name === 'notifycliententerview' || parsed.name === 'notifyclientmoved') {
+      for (const entry of parsed.groups ?? [p]) this.queryStream(entry);
     }
+  }
+
+  /**
+   * TS6 announces a stream once, when it starts; the snapshot a client gets on
+   * connecting does not replay it. `requeststreaminfo` asks a client for the
+   * stream it is running, answered by `notifystreaminfo` — so a share that was
+   * already live when the bot connected, or whose owner walks into the bot's
+   * channel, is captured too. Asked only of clients in the bot's channel, and
+   * not at all while that channel is unknown: the connect snapshot lists every
+   * client on the server, and one command per client of a busy server is what
+   * anti-flood exists to stop.
+   */
+  private queryStream(p: Record<string, string>): void {
+    const clid = parseInt(p.clid, 10) || 0;
+    const channel = this.client.getChannelId();
+    if (!clid || clid === this.client.getClientId()) return;
+    if (!channel || parseInt(p.ctid, 10) !== channel) return;
+    this.client.sendCommand(buildCommand('requeststreaminfo', { clid }));
   }
 
   private requestOffer(p: Record<string, string>): void {
@@ -131,10 +155,12 @@ export class StreamOfferCapture {
   }
 
   private sendJoin(id: string, clid: number, remove: boolean): void {
-    // Parameter names and order as webspeak3 recovered them; msg is sent even
-    // when empty so the command has the native client's shape.
+    // WebSpeak's parameters, which it sends to real TS6 clients; msg is sent
+    // even when empty so the command has the native client's shape.
     this.client.sendCommand(
-      buildCommand('joinstreamrequest', { id, clid, msg: '', is_remove: remove }),
+      buildCommand('joinstreamrequest', {
+        id, clid, msg: '', is_remove: remove, muted: false, volume: 0, hidden: false,
+      }),
     );
   }
 }

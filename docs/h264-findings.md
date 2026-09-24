@@ -618,12 +618,23 @@ unchanged, and it is how this was established.)
 ## Capturing a TeamSpeak client's own offer
 
 `TS6_CAPTURE_STREAM_OFFERS=1` on the **backend** makes each bot ask to watch any
-stream another client starts where the bot can see it — the viewer half of
-TS6's stream signaling, `joinstreamrequest id clid msg is_remove`, whose
-parameters webspeak3 recovered from `TeamSpeak.dll`. The streamer's client
-answers with `notifyrespondjoinstreamrequest` carrying its SDP offer. The bot
-logs the offer and withdraws with `is_remove=1`; it never answers, so no media
-flows. (`streaming/offer-capture.ts`)
+stream another client runs where the bot can see it — the viewer half of TS6's
+stream signaling, `joinstreamrequest id clid msg is_remove muted volume hidden`.
+webspeak3 recovered the command from `TeamSpeak.dll`; the full parameter set is
+the one [WebSpeak](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak)
+sends, whose browser viewers watch real TS6 clients' streams. The streamer's
+client answers with `notifyrespondjoinstreamrequest` carrying its SDP offer. The
+bot logs the offer and withdraws with `is_remove=1`; it never answers, so no
+media flows. (`streaming/offer-capture.ts`)
+
+A stream is announced once, when it starts, and not replayed to a client that
+connects later. So, as WebSpeak does, the bot also sends `requeststreaminfo
+clid=…` for each client in its own channel — on connecting, and when a client
+enters or moves in — and treats the `notifystreaminfo` answer like a start.
+
+WebSpeak is a signaling reference, not a codec one: when a browser publishes to
+TS6 viewers it puts VP8 first in its codec preferences, and nothing in it
+touches H.264.
 
 The logged offer has its addresses, ICE credentials and DTLS fingerprint
 removed, so it can be pasted: what decides the decoder is the `m=`, `rtpmap`,
@@ -636,13 +647,14 @@ To capture:
    `environment:` block and redeploy. The backend logs
    `[OfferCapture] Enabled` when the bot connects.
 2. In a TeamSpeak client, in the bot's channel, start a stream (screen share)
-   with the client set to H.264 — after the bot has connected, since it reacts
-   to the stream starting.
+   with the client set to H.264. A stream already running when the bot
+   connects is asked about too, but only once the bot has moved into its
+   channel; if nothing is logged, restart the stream.
 3. Accept the bot's request to watch if the client asks.
 4. The backend logs `[OfferCapture] Offer from clid=…` through
    `[OfferCapture] End of offer`.
 5. Remove the variable again afterwards: while set, the bot asks to watch every
-   stream started where it can see.
+   stream it can see.
 
 Diffing that offer against ours is the comparison this file has been missing
 since the beginning.
