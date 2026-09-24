@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- The sidebar's "TS" badge. The letters are drawn rather than set in
+       JetBrains Mono because a favicon cannot load the app's web font, and at
+       16px a fallback font would render differently on every system. -->
+  <rect width="32" height="32" rx="7" fill="#0f2d34"/>
+  <g fill="none" stroke="#1ea9b8" stroke-width="2.6" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M5.3 11.3 H14.1 M9.7 11.3 V21.7"/>
+    <path d="M25.9 11.3 H20.2 A2.35 2.35 0 0 0 20.2 16 H23.4 A2.35 2.35 0 0 1 23.4 20.7 H17.1"/>
+  </g>
+</svg>
