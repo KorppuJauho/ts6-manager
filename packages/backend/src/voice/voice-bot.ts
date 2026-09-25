@@ -177,7 +177,10 @@ export class VoiceBot extends EventEmitter {
   private sidecarProc: SidecarProcess | null = null;
   private sidecarHttp: SidecarClient | null = null;
   private _videoStreaming: boolean = false;
-  private _videoStarting: boolean = false;
+  // The start and stop in flight, if any. Both take seconds, and commands
+  // arrive in between: each waits for the other instead of racing it.
+  private _videoStart: Promise<void> | null = null;
+  private _videoStop: Promise<void> | null = null;
   private _videoTitle: string | null = null;
   private _activeStreamId: string | null = null;
   private _videoSource: string | null = null;
@@ -941,8 +944,14 @@ export class VoiceBot extends EventEmitter {
 
   // ─── Video Streaming ────────────────────────────────────────
 
+  /** Streaming, and not on its way out: a stream being stopped is not one to change. */
   get videoStreaming(): boolean {
-    return this._videoStreaming;
+    return this._videoStreaming && !this._videoStop;
+  }
+
+  /** A start is waiting on the server or the source; a stop now waits for it. */
+  get videoStarting(): boolean {
+    return this._videoStart !== null;
   }
 
   get videoStreamStatus(): VideoStreamStatus {
@@ -991,6 +1000,10 @@ export class VoiceBot extends EventEmitter {
     bitrate?: string,
     opts: { operatorConfigured?: boolean; title?: string } = {},
   ): Promise<void> {
+    // A stop still tearing down would otherwise run its last steps — the
+    // signaling disposal, the nickname reset — over the stream started here.
+    if (this._videoStop) await this._videoStop;
+
     if (this._status !== 'connected' && this._status !== 'playing' && this._status !== 'paused') {
       throw new Error('Bot is not connected');
     }
@@ -999,19 +1012,24 @@ export class VoiceBot extends EventEmitter {
     }
     // A start takes seconds before _videoStreaming is set, and a second one
     // in that window would build its own signaling over the first's.
-    if (this._videoStarting) {
+    if (this._videoStart) {
       throw new Error('Video stream is already starting');
     }
 
-    this._videoStarting = true;
+    const start = (async () => {
+      try {
+        await this.setUpVideoStream(source, preset, framerate, bitrate, opts);
+      } catch (err: any) {
+        console.warn(`[VoiceBot ${this.config.id}] Video stream failed to start: ${err?.message ?? err}`);
+        await this.abandonVideoStart();
+        throw err;
+      }
+    })();
+    this._videoStart = start;
     try {
-      await this.setUpVideoStream(source, preset, framerate, bitrate, opts);
-    } catch (err: any) {
-      console.warn(`[VoiceBot ${this.config.id}] Video stream failed to start: ${err?.message ?? err}`);
-      await this.abandonVideoStart();
-      throw err;
+      await start;
     } finally {
-      this._videoStarting = false;
+      this._videoStart = null;
     }
   }
 
@@ -1026,8 +1044,9 @@ export class VoiceBot extends EventEmitter {
    */
   private async abandonVideoStart(): Promise<void> {
     if (this._videoStreaming) {
-      // The server has the stream: a full stop also ends it there.
-      await this.stopVideoStream().catch(() => { });
+      // The server has the stream: a full stop also ends it there. Not
+      // stopVideoStream(), which would wait for this very start to finish.
+      await this.endVideoStream().catch(() => { });
       return;
     }
     this.signaling?.dispose();
@@ -1207,8 +1226,23 @@ export class VoiceBot extends EventEmitter {
 
   /** Stop video streaming */
   async stopVideoStream(): Promise<void> {
-    if (!this._videoStreaming) return;
+    // A stop given while a start is still waiting is meant for the stream
+    // that start produces; returning early would leave it running.
+    if (this._videoStart) await this._videoStart.catch(() => { });
+    return this.endVideoStream();
+  }
 
+  /** One teardown at a time: a second stop joins the one in flight. */
+  private endVideoStream(): Promise<void> {
+    if (this._videoStop) return this._videoStop;
+    if (!this._videoStreaming) return Promise.resolve();
+    this._videoStop = this.tearDownVideoStream().finally(() => {
+      this._videoStop = null;
+    });
+    return this._videoStop;
+  }
+
+  private async tearDownVideoStream(): Promise<void> {
     // Remove all viewers from TS6 stream first
     if (this.signaling && this._activeStreamId) {
       for (const [clid] of this._viewers) {
@@ -1293,18 +1327,26 @@ export class VoiceBot extends EventEmitter {
 
   /** Change video source while streaming */
   async setVideoSource(source: string): Promise<void> {
-    if (!this._videoStreaming || !this.sidecarHttp) {
+    if (!this.videoStreaming || !this.sidecarHttp) {
       throw new Error('No active video stream');
     }
+    // Resolving takes seconds, and the stream can be stopped meanwhile. Going
+    // on regardless restarted FFmpeg for a stream the server had already
+    // ended, and put the streaming nickname back after the stop reset it.
+    const streamId = this._activeStreamId;
+    const stillCurrent = () => this.videoStreaming && this._activeStreamId === streamId;
+    const sidecar = this.sidecarHttp;
+
     this._videoSource = source;
     const currentPreset = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     // A source swapped mid-stream is a fresh URL from the caller, so it is
     // only trusted if this stream was started from the operator's playlist.
     const resolvedSource = await resolveVideoUrl(source, currentPreset.height, this._videoOperatorConfigured);
+    if (!stillCurrent()) throw new Error('The video stream was stopped');
 
     // Reuses the encoder resolved at stream start: changing it here would
     // renegotiate the codec under peers that are already connected.
-    await this.sidecarHttp.setSource(
+    await sidecar.setSource(
       resolvedSource,
       currentPreset.width,
       currentPreset.height,
@@ -1317,7 +1359,14 @@ export class VoiceBot extends EventEmitter {
     // are already connected is a bigger change than this path should make.
     // A source whose resolution differs is therefore encoded at the preset
     // chosen for the previous one.
-    this.updateStreamingNickname(await this.resolveStreamTitle(source));
+    if (!stillCurrent()) {
+      // The stop ran while the sidecar was being given the new source.
+      await sidecar.stopSource().catch(() => { });
+      throw new Error('The video stream was stopped');
+    }
+    const title = await this.resolveStreamTitle(source);
+    if (!stillCurrent()) throw new Error('The video stream was stopped');
+    this.updateStreamingNickname(title);
 
     console.log(`[VoiceBot ${this.config.id}] Video source changed: ${source}`);
     this.emit('videoSourceChanged', source);

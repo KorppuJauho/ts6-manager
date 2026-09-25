@@ -1140,7 +1140,9 @@ export class MusicCommandHandler {
   }
 
   private async handleStopStream(bot: VoiceBot, reply: ReplyFn): Promise<void> {
-    if (!bot.videoStreaming) {
+    // A start still in progress counts: stopVideoStream() waits for it and
+    // stops what it produces, where answering "none" let it run on.
+    if (!bot.videoStreaming && !bot.videoStarting) {
       reply(this.m.streamNone);
       return;
     }
