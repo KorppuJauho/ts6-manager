@@ -4,7 +4,7 @@ import { Ts3Client, type Ts3ClientOptions, generateIdentity, type IdentityData, 
 import { AudioPipeline, FRAME_MS, BYTES_PER_FRAME } from './audio/pipeline.js';
 import { PlayQueue, type QueueItem } from './playlist/queue.js';
 import { fetchIcyMetadata } from './audio/icy-metadata.js';
-import { StreamSignaling, type ActiveStream, type SignalingMessage } from './streaming/stream-signaling.js';
+import { StreamSignaling, type SignalingMessage } from './streaming/stream-signaling.js';
 import { SidecarClient } from './streaming/sidecar-client.js';
 import { SidecarProcess, type SidecarConfig } from './streaming/sidecar-process.js';
 import {
@@ -1085,21 +1085,7 @@ export class VoiceBot extends EventEmitter {
     this.setupSignalingListeners();
     this.signaling.registerStreamNotifications();
 
-    // Wait for server to confirm stream
-    const streamPromise = new Promise<ActiveStream>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('setupstream timeout')), 10000);
-      const handler = (stream: ActiveStream) => {
-        if (stream.clid === this.client.getClientId()) {
-          clearTimeout(timeout);
-          this.signaling!.removeListener('streamStarted', handler);
-          resolve(stream);
-        }
-      };
-      this.signaling!.on('streamStarted', handler);
-    });
-
-    // Send setupstream command
-    this.signaling.sendSetupStream({
+    const stream = await this.signaling.setupStream({
       name: `${this.config.nickname} Stream`,
       type: 3,
       bitrate: 4608,
@@ -1112,8 +1098,6 @@ export class VoiceBot extends EventEmitter {
       viewerLimit: 0,
       audio: true,
     });
-
-    const stream = await streamPromise;
     this._activeStreamId = stream.id;
     this._videoStreaming = true;
     this._videoSource = source;
