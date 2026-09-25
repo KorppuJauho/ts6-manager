@@ -737,6 +737,30 @@ picture. **Decided: kept at one second.** With `-minrate` a 4K VP9 stream
 was measured in the client at about 10 Mbit/s, peaking near 13.5, with no
 packet loss; a longer wait for joining viewers is not worth the rest.
 
+### Which errors end a connection
+
+The client and the bot treated three error ids as "the server refused us,
+do not reconnect", commented as 2568 invalid password, 3329 banned, 1796
+max clients. Each case was provoked on the TeamSpeak 6 test server
+(6.0.0-beta13.1) — a server password set, the slot count lowered, a ban
+added, each undone straight after — and only 3329 was right:
+
+| Case | Error the server sends |
+|---|---|
+| A command the client may not run | 2568 insufficient client permissions |
+| Wrong server password | 1028 invalid server password |
+| Server full | 1027 server maxclient reached |
+| Banned | 3329 connection failed, you are banned |
+
+So one command the bot was not permitted — a `setupstream`, for instance —
+disconnected it for good, while a wrong password or a full server went
+unrecognised: the connect waited out its fifteen-second timeout and the
+manager retried, ten times over. 1796 never appeared.
+
+`CONNECTION_REFUSED_ERRORS` in `tslib/client.ts` now holds 1027, 1028 and
+3329, and the bot reads the same set. A refused connection fails at once
+with the server's reason; 2568 is the error of the one command that drew it.
+
 ## Open follow-ups
 
 1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
@@ -773,13 +797,7 @@ packet loss; a longer wait for joining viewers is not worth the rest.
    an SPS rather than opening on the first packet. The same gap VP9 has; less
    pressing than it looks, because the PLI interceptor asks for a keyframe and
    the parameter sets are repeated at every one.
-5. **Error 2568 disconnects the bot.** `Ts3Client` and `VoiceBot` treat it as
-   fatal, commented as "invalid password", but 2568 is *insufficient client
-   permissions* — the answer to any single command the bot is not permitted,
-   a `setupstream` included. Found while writing the tests for the section
-   above; the invalid-password code needs confirming against a server before
-   the list is corrected.
-6. **Exempting the bot from flood protection.** The server has a permission
+5. **Exempting the bot from flood protection.** The server has a permission
    for it, `b_client_ignore_antiflood` (present on 6.0.0-beta13.1). Granted to
    the bot's identity or a group it is in, fast stream restarts could not trip
    the block at all. Not done by the manager: it is a property of each
