@@ -349,3 +349,43 @@ describe('VoiceBot stream start order', () => {
     expect(harness.timeline).toEqual(['probe', 'setSource', 'setupstream']);
   });
 });
+
+describe('VoiceBot and the server’s error replies', () => {
+  it('stays connected when a command it may not run is refused (2568)', () => {
+    const { bot, client } = connectedBot();
+    const fatal = vi.fn();
+    bot.on('fatalError', fatal);
+
+    client.emit('ts3error', { id: '2568', msg: 'insufficient client permissions', failed_permid: '54' });
+
+    expect(fatal).not.toHaveBeenCalled();
+    expect(bot.status).toBe('connected');
+  });
+
+  it('reports a stream it may not start as that, and stays connected', async () => {
+    const { bot, client, setupCommands } = connectedBot();
+
+    const start = bot.startVideoStream(SOURCE);
+    await vi.waitFor(() => expect(setupCommands()).toHaveLength(1));
+    const code = /return_code=(\S+)/.exec(setupCommands()[0])![1];
+    client.emit('ts3error', { id: '2568', msg: 'insufficient client permissions', return_code: code });
+
+    await expect(start).rejects.toThrow('insufficient client permissions (error 2568)');
+    expect(bot.status).toBe('connected');
+  });
+
+  it.each([
+    ['1027', 'server maxclient reached'],
+    ['1028', 'invalid server password'],
+    ['3329', 'connection failed, you are banned'],
+  ])('gives up without a reconnect when the server refuses the connection (%s)', (id, msg) => {
+    const { bot, client } = connectedBot();
+    const fatal = vi.fn();
+    bot.on('fatalError', fatal);
+
+    client.emit('ts3error', { id, msg });
+
+    expect(fatal).toHaveBeenCalledWith(`TS3 error ${id}: ${msg}`);
+    expect(bot.status).toBe('error');
+  });
+});

@@ -66,6 +66,23 @@ interface ResendPacket {
   lastSend: number;
 }
 
+/**
+ * Errors with which the server refuses the connection itself: trying again
+ * gets the same answer, so they end the attempt at once and are not retried.
+ * Checked against a TeamSpeak 6 server (6.0.0-beta13.1):
+ *   1027  server maxclient reached
+ *   1028  invalid server password
+ *   3329  connection failed, you are banned
+ *
+ * Every other error belongs to the one command that drew it. The list used to
+ * hold 2568 as "invalid password", but 2568 is "insufficient client
+ * permissions" — the reply to any single command the client may not run — so
+ * one refused command disconnected the bot, while a wrong password (1028) and
+ * a full server (1027) were not recognised and ran into the connect timeout,
+ * then a reconnect, again and again.
+ */
+export const CONNECTION_REFUSED_ERRORS: ReadonlySet<number> = new Set([1027, 1028, 3329]);
+
 export interface Ts3ClientOptions {
   host: string;
   port: number;
@@ -774,9 +791,10 @@ export class Ts3Client extends EventEmitter {
         break;
       case "error": {
         this.emit("ts3error", parsed.params);
-        // Fatal TS3 errors: reject connect promise and disconnect immediately
+        // A refused connection rejects the connect promise and disconnects
+        // at once, rather than waiting out the connect timeout.
         const errId = parseInt(parsed.params.id || "0");
-        if (errId === 2568 || errId === 3329 || errId === 1796) {
+        if (CONNECTION_REFUSED_ERRORS.has(errId)) {
           const errMsg = parsed.params.msg || "unknown error";
           this.emit("error", new Error(`TS3 error ${errId}: ${errMsg}`));
           this.disconnect();

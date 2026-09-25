@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { randomBytes } from 'crypto';
-import { Ts3Client, type Ts3ClientOptions, generateIdentity, type IdentityData, buildCommand } from './tslib/index.js';
+import { Ts3Client, CONNECTION_REFUSED_ERRORS, type Ts3ClientOptions, generateIdentity, type IdentityData, buildCommand } from './tslib/index.js';
 import { AudioPipeline, FRAME_MS, BYTES_PER_FRAME } from './audio/pipeline.js';
 import { PlayQueue, type QueueItem } from './playlist/queue.js';
 import { fetchIcyMetadata } from './audio/icy-metadata.js';
@@ -249,9 +249,9 @@ export class VoiceBot extends EventEmitter {
         // has heard nothing for long enough, not from the first refusal.
         this._floodedUntil = Date.now() + FLOOD_COOLDOWN_MS;
       }
-      // Fatal errors that should not trigger reconnect
-      // 2568 = invalid password, 3329 = banned, 1796 = max clients reached
-      if (id === 2568 || id === 3329 || id === 1796) {
+      // The server refused the connection itself (full, wrong password,
+      // banned): a reconnect would get the same answer, so none is made.
+      if (CONNECTION_REFUSED_ERRORS.has(id)) {
         this._status = 'error';
         this.emit('statusChange', this._status);
         this.emit('fatalError', this._lastError);
