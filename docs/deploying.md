@@ -80,7 +80,7 @@ Set it back in **Settings → Streaming**:
 |---|---|
 | Use hardware encoding | on |
 | Encoding device | `/dev/dri/renderD128` |
-| Encoder | VP9 (VAAPI hardware) |
+| Video codec | VP9, or H.264 |
 
 While you are there, the IPTV playlist URL and channel filter also moved out
 of the source and into **Settings → Streaming**, and the bot's reply language
@@ -92,8 +92,9 @@ Confirm on the first stream:
 docker compose logs -f sidecar | grep FFmpeg
 ```
 
-`[FFmpeg] Starting: … encoder=vp9_vaapi` is what you want. Any other encoder
-means the fallback fired, and the line above it says why.
+`[FFmpeg] Starting: … encoder=vp9_vaapi` (or `h264_vaapi`) is what you want.
+A software encoder there means the fallback fired, and the line above it says
+why.
 
 ## Rolling back
 

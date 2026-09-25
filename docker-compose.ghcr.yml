@@ -31,8 +31,6 @@ services:
       - MUSIC_DIR=/data/music
       - SIDECAR_URL=http://ts6-sidecar:9800
       - "SIDECAR_TOKEN=${SIDECAR_TOKEN:?set SIDECAR_TOKEN in .env - generate with openssl rand -hex 32}"
-      # 0 disables the source resolution probe — see .env.example.
-      - STREAM_PROBE_TIMEOUT_MS=${STREAM_PROBE_TIMEOUT_MS:-6000}
     volumes:
       - backend-data:/app/packages/backend/data
       - music-data:/data/music

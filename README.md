@@ -145,10 +145,6 @@ docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
 docker compose -f docker-compose.ghcr.yml -f docker-compose.nvidia.yml up -d   # prebuilt
 ```
 
-`docker-compose.hub.yml` runs clusterzx's Docker Hub images, which contain
-none of this fork's changes, and uses different internal ports, so never mix
-it with the other compose files.
-
 ## Configuration
 
 Most settings (encoder, GPU device, presets, IPTV, bot language, Discord,
@@ -249,12 +245,6 @@ the query configuration. See
 **Hardware encoding stopped after an upgrade:** from a version that predates
 the streaming settings, it is off until re-enabled in Settings → Streaming.
 See [`docs/deploying.md`](docs/deploying.md).
-
-## Translations
-
-[Français](README.fr.md) · [Deutsch](README.de.md) · [Español](README.es.md) ·
-[Italiano](README.it.md): these describe `coom/ts6-manager` and do not cover this
-fork's changes.
 
 ## License
 

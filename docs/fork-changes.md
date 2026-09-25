@@ -55,7 +55,13 @@ yt-dlp argument injection, unauthenticated WebSocket, and the unguarded reads.
 | Files | `packages/sidecar/main.go`, `Dockerfile.sidecar`, `docker-compose*.yml` |
 
 Upstream encodes VP8 with libvpx on the CPU, which saturates a core at 1080p30.
-This fork encodes VP9 on the Intel GPU.
+This fork encodes VP9 on the Intel GPU. That ran in production from 2026-08
+with `vp9_vaapi` hardcoded; the settings-driven path described below (encoder
+registry, `/capabilities` probe, `POST /source` body) has since been confirmed
+on the same NAS with both `h264_vaapi` and `vp9_vaapi`, the source decoded on
+the GPU too (`vp9 (native) -> vp9 (vp9_vaapi)`): a 1440p VP9 stream at 13 %
+sidecar CPU against 40 % for the same stream in software. Software VP8, VP9
+and H.264 were run in the same pass.
 
 **AMD** is covered too: the sidecar image carries Mesa's VA-API driver
 (`mesa-va-drivers`, radeonsi) next to Intel's (`intel-media-va-driver`), and
@@ -252,6 +258,8 @@ enforced instead.
 | Radio stations ordered by id | `fix(bot): list radio stations…` | `!radio <id>` means ids are what users type; alphabetical order renumbered them on every insert |
 | `python3` + `build-essential` in base images | `build(docker): install a native-module toolchain…` | node-gyp builds `@discordjs/opus`, `cpu-features`, `ssh2` at install time |
 | `docker-compose.coolify.yml` removed | `chore(compose): remove the Coolify compose file…` | It ran upstream's Docker Hub images with no sidecar and no `SIDECAR_TOKEN`, and pinned one install's Coolify network ID; nobody deploys this fork on Coolify to keep it working |
+| `docker-compose.hub.yml` and `docker-compose.dev.yml` removed | `chore: remove upstream's Docker Hub compose files…` | Both ran clusterzx's Docker Hub images (`clusterzx/ts6-manager:backend`, `:backend-dev`), so a deployment using either ran upstream's code with none of this fork in it. `docker-compose.yml` builds this fork and `docker-compose.ghcr.yml` runs its CI images |
+| Translated READMEs removed | same commit | `README.{fr,de,es,it}.md` described `coom/ts6-manager` and none of this fork, and linked the removed Docker Hub compose file. The web UI keeps its five languages; only the READMEs went |
 
 ### Settings, and the dependency fixes
 
@@ -556,10 +564,15 @@ What differs from VAAPI, and why:
   driver libraries the NVIDIA Container Toolkit mounts in (capability
   `video`).
 
-Verified by hand on an RTX 5080 under WSL2 with the published sidecar image:
-`h264_nvenc` encodes (`-profile:v high -bf 0` from `nv12`), and so does the
-toolkit's passthrough. The whole path through the app — setting, probe,
-stream, TeamSpeak client — is the part still to confirm.
+Verified end to end on an RTX 5080 under WSL2: the test stack
+(`docker-compose.test.yml` + `docker-compose.nvidia.yml`) against a
+TeamSpeak 6 server (6.0.0-beta13.1) and the Windows client. A 4K VP9 YouTube
+source decoded with NVDEC and encoded with `h264_nvenc` as Constrained High,
+which the client decoded (`h264_cuvid`) with no loss; GPU load rose from 2 %
+to 9 % while CPU stayed low. The settings page dims the device field and
+marks VP8/VP9 as having no GPU support, VP9 with hardware on falls back to
+`vp9_software`, and without the override the sidecar reports `vaapi` and
+probes no NVENC encoder. The full results are on PR #12.
 
 ### Viewers waited five seconds to join
 
@@ -580,10 +593,10 @@ pushes them to `ghcr.io/korppujauho/ts6-manager-{backend,frontend,sidecar}`,
 tagged by branch, by commit SHA, and `latest` on the default branch.
 `docker-compose.ghcr.yml` runs them.
 
-Upstream has no equivalent, and `docker-compose.hub.yml` — which does exist
-upstream — points at `clusterzx/ts6-manager:*`, so a deployment using it runs
-**upstream's** code, not this fork's. That file is left alone; the new one
-is separate rather than a rewrite of it.
+Upstream has no equivalent. Its `docker-compose.hub.yml` pointed at
+`clusterzx/ts6-manager:*`, so a deployment using it ran **upstream's** code,
+not this fork's; it was kept at first and has since been removed (see
+"Smaller changes").
 
 The motive is that building on the deployment host has failed twice in ways CI
 could not reproduce: a `cpu-features` toolchain error, and the umask problem
@@ -763,41 +776,17 @@ with the server's reason; 2568 is the error of the one command that drew it.
 
 ## Open follow-ups
 
-1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
-   question is settled: VP9 VAAPI encoding has run in production on a UGREEN
-   NASync DXP4800 Plus since 2026-08, with `devices: /dev/dri:/dev/dri` and
-   `group_add: "105"`, streaming both IPTV and YouTube. The GPU is capable and
-   the passthrough config is known good.
-
-   What is *not* confirmed is the path this fork now takes to reach it. The
-   deployed version hardcoded `vp9_vaapi`; `main` selects it through the
-   encoder registry, the `/capabilities` probe and the `POST /source` body.
-   Same destination, different plumbing — so a failure after upgrading is a
-   code regression against a known-good reference, not a hardware unknown.
-
-   **Upgrading from the pre-settings version silently disables hardware
-   encoding.** `StreamSettings` defaults to `hwAccelEnabled: false` and
-   `vp8_software` — correct for a fresh install on a host with no GPU, wrong
-   for a deployment that was already using the GPU. After deploying, set
-   hardware encoding on, the device to `/dev/dri/renderD128`, and the encoder
-   to VP9 (VAAPI) in Settings → Streaming, or streams quietly fall back to
-   software.
-
-   Verify with the sidecar log on the first stream: `[FFmpeg] Starting: …
-   encoder=vp9_vaapi`. Anything else means the fallback fired, and the line
-   above it says why.
-
-2. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8
+1. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8
    streams gate correctly again.) Note that FFmpeg's VP9 RTP packetizer is not
    known to set the descriptor's P bit, so "P clear means keyframe" needs
    checking against a real capture before it can be relied on; gating on the B
    bit alone would at least align the gate to a frame start.
-3. Confirm whether removing A/V pacing causes audio drift on long streams.
-4. An H.264 parameter-set detector, so a peer joining mid-stream is held until
+2. Confirm whether removing A/V pacing causes audio drift on long streams.
+3. An H.264 parameter-set detector, so a peer joining mid-stream is held until
    an SPS rather than opening on the first packet. The same gap VP9 has; less
    pressing than it looks, because the PLI interceptor asks for a keyframe and
    the parameter sets are repeated at every one.
-5. **Exempting the bot from flood protection.** The server has a permission
+4. **Exempting the bot from flood protection.** The server has a permission
    for it, `b_client_ignore_antiflood` (present on 6.0.0-beta13.1). Granted to
    the bot's identity or a group it is in, fast stream restarts could not trip
    the block at all. Not done by the manager: it is a property of each
