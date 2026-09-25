@@ -181,6 +181,11 @@ export class VoiceBot extends EventEmitter {
   // arrive in between: each waits for the other instead of racing it.
   private _videoStart: Promise<void> | null = null;
   private _videoStop: Promise<void> | null = null;
+  /**
+   * Notification registrations last as long as the connection, so they are
+   * sent once per connection rather than with every stream start.
+   */
+  private _streamNotificationsRegistered = false;
   private _videoTitle: string | null = null;
   private _activeStreamId: string | null = null;
   private _videoSource: string | null = null;
@@ -210,6 +215,7 @@ export class VoiceBot extends EventEmitter {
     });
 
     this.client.on('disconnected', () => {
+      this._streamNotificationsRegistered = false;
       this.stopIcyPolling();
       this.stopPlayback();
       this._status = 'stopped';
@@ -398,6 +404,8 @@ export class VoiceBot extends EventEmitter {
     this.emit('statusChange', this._status);
 
     this.identity = this.config.identity ?? generateIdentity(8);
+    // A new connection starts with no registrations, whatever the old one had.
+    this._streamNotificationsRegistered = false;
 
     const opts: Ts3ClientOptions = {
       host: this.config.serverHost,
@@ -1151,7 +1159,13 @@ export class VoiceBot extends EventEmitter {
     // Setup stream signaling on the TS3 client
     this.signaling = new StreamSignaling(this.client);
     this.setupSignalingListeners();
-    this.signaling.registerStreamNotifications();
+    // Three of the five commands a start used to send, repeated every time,
+    // were these registrations — spent flood points for nothing after the
+    // first.
+    if (!this._streamNotificationsRegistered) {
+      this.signaling.registerStreamNotifications();
+      this._streamNotificationsRegistered = true;
+    }
 
     const stream = await this.signaling.setupStream({
       name: `${this.config.nickname} Stream`,

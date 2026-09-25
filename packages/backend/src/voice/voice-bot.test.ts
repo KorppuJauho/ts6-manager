@@ -206,3 +206,21 @@ describe('VoiceBot stream commands that overlap', () => {
     expect(stopCommands()).toHaveLength(1);
   });
 });
+
+describe('VoiceBot stream notification registration', () => {
+  it('registers once per connection, not on every start', async () => {
+    const { bot, client, sent, startStream } = connectedBot();
+    const registrations = () => sent.filter((c) => c.startsWith('servernotifyregister ')).length;
+
+    await startStream();
+    await bot.stopVideoStream();
+    await startStream();
+    expect(registrations()).toBe(3); // channel, server, textchannel — once
+
+    await bot.stopVideoStream();
+    client.emit('disconnected');
+    (bot as any)._status = 'connected';
+    await startStream();
+    expect(registrations()).toBe(6); // a new connection registers afresh
+  });
+});
