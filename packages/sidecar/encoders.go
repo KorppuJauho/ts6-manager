@@ -209,6 +209,23 @@ func (p EncoderProfile) encodeArgs() []string {
 	return append([]string{"-profile:v", name}, p.ExtraArgs...)
 }
 
+// rateArgs are the flags that hold the encoder to bitrate.
+//
+// -maxrate alone is enough for x264, VAAPI and NVENC (which also sets -rc
+// cbr), but libvpx takes it as a hint: it runs variable bitrate unless
+// -minrate equals -b:v and -maxrate, and only then switches to constant.
+// Without it, measured at the 1080p preset's 5500k, VP9 came out at 10.4
+// Mbit/s on a detailed source and 3.8 on a plain one — the first too much for
+// the viewers' links, the second a budget left unspent — and a real 4K
+// YouTube source at 13.4 Mbit/s against 9.5.
+func (p EncoderProfile) rateArgs(bitrate string) []string {
+	args := []string{"-b:v", bitrate, "-maxrate", bitrate, "-bufsize", encoderBufsize(bitrate)}
+	if p.Encoder == "libvpx" || p.Encoder == "libvpx-vp9" {
+		args = append(args, "-minrate", bitrate)
+	}
+	return args
+}
+
 // h264InBandParameterSets re-inserts SPS/PPS ahead of every keyframe.
 //
 // FFmpeg hands the parameter sets to the muxer as extradata, where an SDP the
