@@ -1156,13 +1156,9 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	if hwUploadOnly {
 		args = append(args, "-vf", fmt.Sprintf("format=%s%s", profile.PixelFormat, hwUpload))
 	}
-	args = append(args,
-		"-c:v", profile.Encoder,
-		"-b:v", vBitrate,
-		"-maxrate", vBitrate,
-		"-bufsize", encoderBufsize(vBitrate),
-		"-g", "30",
-	)
+	args = append(args, "-c:v", profile.Encoder)
+	args = append(args, profile.rateArgs(vBitrate)...)
+	args = append(args, "-g", "30")
 	args = append(args, profile.encodeArgs()...)
 	if profile.MimeType == webrtc.MimeTypeH264 {
 		hp := selectedH264Profile()

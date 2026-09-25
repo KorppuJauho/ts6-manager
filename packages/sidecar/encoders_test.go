@@ -306,3 +306,48 @@ func TestNVENCFallsBackToSoftwareH264(t *testing.T) {
 		t.Errorf("got %s, want h264_software", p.Key)
 	}
 }
+
+// flagValue returns the value following flag in args, or "" if it is absent.
+func flagValue(args []string, flag string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+// libvpx only switches to constant bitrate when -minrate matches the target;
+// without it VP8 and VP9 ran variable bitrate, well over the preset on
+// detailed video and under it on plain video.
+func TestLibvpxRunsAtConstantBitrate(t *testing.T) {
+	seen := 0
+	for _, p := range encoderProfiles {
+		if p.Encoder != "libvpx" && p.Encoder != "libvpx-vp9" {
+			continue
+		}
+		seen++
+		args := p.rateArgs("5500k")
+		for _, flag := range []string{"-b:v", "-maxrate", "-minrate"} {
+			if got := flagValue(args, flag); got != "5500k" {
+				t.Errorf("%s: %s = %q, want 5500k", p.Key, flag, got)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Errorf("expected the VP8 and VP9 software profiles, found %d libvpx profiles", seen)
+	}
+}
+
+// Every other encoder already holds -maxrate; their flags stay as they were.
+func TestOtherEncodersKeepTheirRateFlags(t *testing.T) {
+	want := []string{"-b:v", "9500k", "-maxrate", "9500k", "-bufsize", "19000k"}
+	for _, p := range encoderProfiles {
+		if p.Encoder == "libvpx" || p.Encoder == "libvpx-vp9" {
+			continue
+		}
+		if got := p.rateArgs("9500k"); strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Errorf("%s: rate flags %v, want %v", p.Key, got, want)
+		}
+	}
+}
