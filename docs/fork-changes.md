@@ -556,10 +556,15 @@ What differs from VAAPI, and why:
   driver libraries the NVIDIA Container Toolkit mounts in (capability
   `video`).
 
-Verified by hand on an RTX 5080 under WSL2 with the published sidecar image:
-`h264_nvenc` encodes (`-profile:v high -bf 0` from `nv12`), and so does the
-toolkit's passthrough. The whole path through the app — setting, probe,
-stream, TeamSpeak client — is the part still to confirm.
+Verified end to end on an RTX 5080 under WSL2: the test stack
+(`docker-compose.test.yml` + `docker-compose.nvidia.yml`) against a
+TeamSpeak 6 server (6.0.0-beta13.1) and the Windows client. A 4K VP9 YouTube
+source decoded with NVDEC and encoded with `h264_nvenc` as Constrained High,
+which the client decoded (`h264_cuvid`) with no loss; GPU load rose from 2 %
+to 9 % while CPU stayed low. The settings page dims the device field and
+marks VP8/VP9 as having no GPU support, VP9 with hardware on falls back to
+`vp9_software`, and without the override the sidecar reports `vaapi` and
+probes no NVENC encoder. The full results are on PR #12.
 
 ### Viewers waited five seconds to join
 
@@ -769,11 +774,14 @@ with the server's reason; 2568 is the error of the one command that drew it.
    `group_add: "105"`, streaming both IPTV and YouTube. The GPU is capable and
    the passthrough config is known good.
 
-   What is *not* confirmed is the path this fork now takes to reach it. The
-   deployed version hardcoded `vp9_vaapi`; `main` selects it through the
-   encoder registry, the `/capabilities` probe and the `POST /source` body.
-   Same destination, different plumbing — so a failure after upgrading is a
-   code regression against a known-good reference, not a hardware unknown.
+   The refactored path itself — the encoder registry, the `/capabilities`
+   probe and the `POST /source` body — is confirmed on that NAS with
+   `h264_vaapi`, including GPU decode of the source (4K at 18 % sidecar CPU),
+   and again after the AMD driver was added. What remains is VP9 through it:
+   the deployed version hardcoded `vp9_vaapi`, and no stream since the
+   refactor has selected it. Same destination, different plumbing — so a
+   failure there is a code regression against a known-good reference, not a
+   hardware unknown.
 
    **Upgrading from the pre-settings version silently disables hardware
    encoding.** `StreamSettings` defaults to `hwAccelEnabled: false` and
