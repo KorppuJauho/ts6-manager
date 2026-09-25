@@ -28,6 +28,17 @@ import {
   type StreamSettingsValue,
 } from '../utils/stream-settings.js';
 
+/** "client is flooding": the server's anti-flood has blocked this client. */
+const FLOOD_ERROR_ID = 524;
+/**
+ * How long to send the server nothing after it reports flooding. At the
+ * server defaults a client is blocked at 150 points and sheds 5 a second, so
+ * 30 s of silence clears the worst case. Every command sent meanwhile — a
+ * retry, even a chat reply saying why — is refused and adds points, which is
+ * how a few quick retries kept a bot unable to stream for minutes.
+ */
+export const FLOOD_COOLDOWN_MS = 30_000;
+
 /** Resolve a YouTube/yt-dlp-compatible URL to a direct stream URL */
 /** Sites whose URLs are page addresses yt-dlp must turn into media URLs. */
 function isYtDlpSource(url: string): boolean {
@@ -181,6 +192,8 @@ export class VoiceBot extends EventEmitter {
   // arrive in between: each waits for the other instead of racing it.
   private _videoStart: Promise<void> | null = null;
   private _videoStop: Promise<void> | null = null;
+  /** Until when the server's flood protection is presumed to block us. */
+  private _floodedUntil = 0;
   /**
    * Notification registrations last as long as the connection, so they are
    * sent once per connection rather than with every stream start.
@@ -228,6 +241,14 @@ export class VoiceBot extends EventEmitter {
       const id = parseInt(params.id || '0');
       const msg = params.msg || 'unknown error';
       this._lastError = `TS3 error ${id}: ${msg}`;
+      if (id === FLOOD_ERROR_ID) {
+        if (this.floodCooldownMs === 0) {
+          console.warn(`[VoiceBot ${this.config.id}] Server flood protection is blocking the bot; holding stream commands for ${FLOOD_COOLDOWN_MS / 1000}s`);
+        }
+        // Each refusal restarts the wait: the block lasts until the server
+        // has heard nothing for long enough, not from the first refusal.
+        this._floodedUntil = Date.now() + FLOOD_COOLDOWN_MS;
+      }
       // Fatal errors that should not trigger reconnect
       // 2568 = invalid password, 3329 = banned, 1796 = max clients reached
       if (id === 2568 || id === 3329 || id === 1796) {
@@ -962,6 +983,11 @@ export class VoiceBot extends EventEmitter {
     return this._videoStart !== null;
   }
 
+  /** Time left before the server should accept commands again; 0 if not flooded. */
+  get floodCooldownMs(): number {
+    return Math.max(0, this._floodedUntil - Date.now());
+  }
+
   get videoStreamStatus(): VideoStreamStatus {
     return {
       streaming: this._videoStreaming,
@@ -1017,6 +1043,12 @@ export class VoiceBot extends EventEmitter {
     }
     if (this._videoStreaming) {
       throw new Error('Video stream already active');
+    }
+    // Refused here, before a single command goes out: trying anyway is what
+    // keeps the block from ever lifting.
+    const floodMs = this.floodCooldownMs;
+    if (floodMs > 0) {
+      throw new Error(`The TeamSpeak server's flood protection is blocking the bot; try again in ${Math.ceil(floodMs / 1000)}s`);
     }
     // A start takes seconds before _videoStreaming is set, and a second one
     // in that window would build its own signaling over the first's.

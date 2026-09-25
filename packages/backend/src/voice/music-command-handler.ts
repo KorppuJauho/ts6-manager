@@ -66,6 +66,8 @@ interface MusicCommandSettingsRow extends MusicCommandAccessSettings {
  */
 export class MusicCommandHandler {
   private registeredBots = new Set<number>();
+  /** Bots with a "flood protection has cleared" message already scheduled. */
+  private floodNotices = new Set<VoiceBot>();
   // Maps a music bot to the virtual server id (sid) of the TS server it sits
   // on, resolved once from its voice port via serveridgetbyport.
   private sidCache = new Map<number, number>();
@@ -142,7 +144,7 @@ export class MusicCommandHandler {
     // Reply where we were asked: privately to a private message (targetmode 1),
     // in the channel to a channel message (targetmode 2).
     const inChannel = String(data.targetmode || '') === '2';
-    const reply: ReplyFn = (m: string) => {
+    const send: ReplyFn = (m: string) => {
       try {
         if (inChannel) bot.sendChannelMessage(m);
         else bot.sendTextMessage(userClid, m);
@@ -150,8 +152,28 @@ export class MusicCommandHandler {
         console.error(`[MusicCmd] Failed to send reply: ${err.message}`);
       }
     };
+    // A command can trip the block part-way — its setupstream refused, say —
+    // and whatever it would say after that is dropped rather than sent into
+    // the block.
+    const reply: ReplyFn = (m: string) => {
+      if (bot.floodCooldownMs > 0) {
+        this.replyWhenFloodClears(bot, send);
+        return;
+      }
+      send(m);
+    };
 
     console.log(`[MusicCmd] Bot ${botId}: !${command} ${args} (from clid=${userClid}, ${inChannel ? 'channel' : 'private'})`);
+
+    // While the server's flood protection holds the bot, anything it sends is
+    // refused and prolongs the block — a reply as much as an action. So every
+    // command is set aside, not only those that start streams, and the user
+    // hears once, when it has cleared, why the bot went quiet.
+    if (bot.floodCooldownMs > 0) {
+      console.log(`[MusicCmd] Bot ${botId}: !${command} ignored, the server's flood protection is blocking the bot`);
+      this.replyWhenFloodClears(bot, send);
+      return;
+    }
 
     // Access control: music vs admin tier, gated by configured server groups.
     if (!(await this.checkAccess(botId, command, userClid, reply))) return;
@@ -777,6 +799,8 @@ export class MusicCommandHandler {
   private async onNowPlaying(bot: VoiceBot, item: QueueItem): Promise<void> {
     const settings = await this.getSettings();
     if (!settings.notifyNowPlaying) return;
+    // Unasked-for, so simply skipped while the flood protection holds the bot.
+    if (bot.floodCooldownMs > 0) return;
     const artist = item.artist ? `${item.artist} - ` : '';
     bot.sendChannelMessage(`♪ Now playing : ${artist}${item.title}`);
   }
@@ -1072,6 +1096,30 @@ export class MusicCommandHandler {
     } catch (err: any) {
       reply(this.m.streamFailed(err.message));
     }
+  }
+
+  /**
+   * Tells the user once the server's flood protection has let go of the bot.
+   *
+   * While it is blocked, anything the bot sends — a reply included — is
+   * refused and extends the block, so the user hears nothing until it has
+   * cleared, and then one message however many commands were set aside
+   * meanwhile. Saying why the bot went quiet is also the one hint that
+   * slower commands would have worked.
+   */
+  private replyWhenFloodClears(bot: VoiceBot, reply: ReplyFn): void {
+    if (this.floodNotices.has(bot)) return;
+    this.floodNotices.add(bot);
+    const check = () => {
+      const remaining = bot.floodCooldownMs;
+      if (remaining > 0) {
+        setTimeout(check, remaining + 250).unref?.();
+        return;
+      }
+      this.floodNotices.delete(bot);
+      reply(this.m.floodCleared);
+    };
+    check();
   }
 
   /**

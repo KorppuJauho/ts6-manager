@@ -25,7 +25,7 @@ vi.mock('../utils/url-validator.js', () => ({
 }));
 vi.mock('./streaming/probe.js', () => ({ probeVideoHeight: async () => 1080 }));
 
-const { VoiceBot } = await import('./voice-bot.js');
+const { VoiceBot, FLOOD_COOLDOWN_MS } = await import('./voice-bot.js');
 
 const OWN_CLID = 7;
 const SOURCE = 'https://video.test/a.mp4';
@@ -83,6 +83,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   delete process.env.SIDECAR_URL;
   delete process.env.SIDECAR_TOKEN;
   vi.restoreAllMocks();
@@ -222,5 +223,54 @@ describe('VoiceBot stream notification registration', () => {
     (bot as any)._status = 'connected';
     await startStream();
     expect(registrations()).toBe(6); // a new connection registers afresh
+  });
+});
+
+describe('VoiceBot and the server’s flood protection', () => {
+  const flood = (client: any, returnCode?: string) =>
+    client.emit('ts3error', { id: '524', msg: 'client is flooding', ...(returnCode ? { return_code: returnCode } : {}) });
+
+  it('sends nothing for a start while the server reports flooding, whichever command drew it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { bot, client, sent } = connectedBot();
+
+    flood(client, 'some-chat-reply');
+    const sentBefore = sent.length;
+
+    expect(bot.floodCooldownMs).toBe(FLOOD_COOLDOWN_MS);
+    await expect(bot.startVideoStream(SOURCE)).rejects.toThrow('flood protection');
+    expect(sent.length).toBe(sentBefore);
+  });
+
+  it('counts the wait from the last refusal, and lets a start through once it has passed', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { bot, client, setupCommands, acceptLatest } = connectedBot();
+
+    flood(client);
+    vi.setSystemTime(Date.now() + FLOOD_COOLDOWN_MS - 1000);
+    flood(client); // refused again just before the wait was up
+    vi.setSystemTime(Date.now() + 2000);
+    expect(bot.floodCooldownMs).toBeGreaterThan(0);
+
+    vi.setSystemTime(Date.now() + FLOOD_COOLDOWN_MS);
+    expect(bot.floodCooldownMs).toBe(0);
+    const start = bot.startVideoStream(SOURCE);
+    await vi.waitFor(() => expect(setupCommands()).toHaveLength(1));
+    acceptLatest();
+    await start;
+    expect(bot.videoStreaming).toBe(true);
+  });
+
+  it('a setupstream refused for flooding holds the next start back', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { bot, client, setupCommands } = connectedBot();
+
+    const start = bot.startVideoStream(SOURCE);
+    await vi.waitFor(() => expect(setupCommands()).toHaveLength(1));
+    flood(client, /return_code=(\S+)/.exec(setupCommands()[0])![1]);
+    await expect(start).rejects.toThrow('client is flooding (error 524)');
+
+    await expect(bot.startVideoStream(SOURCE)).rejects.toThrow('flood protection');
+    expect(setupCommands()).toHaveLength(1);
   });
 });
