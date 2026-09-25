@@ -106,22 +106,44 @@ both. Test while production is not streaming.
 
 ## One-time WSL setup
 
-### Mirrored networking
+### Networking and idle shutdown
 
 Put this in `C:\Users\<you>\.wslconfig`:
 
 ```ini
 [wsl2]
 networkingMode=mirrored
+vmIdleTimeout=-1
+
+[general]
+instanceIdleTimeout=-1
+
+[experimental]
+hostAddressLoopback=true
 ```
 
-Then from PowerShell: `wsl --shutdown`, and start WSL again.
+Then from PowerShell: `wsl --shutdown`, and start WSL again. Each line is
+there for a failure it prevents:
 
-This matters because the TeamSpeak voice port is **UDP**. Without mirrored
-mode, WSL2 forwards TCP over `localhost` reasonably but UDP unreliably, so a
-Windows TeamSpeak client connecting to a server inside WSL fails in ways that
-look like a server problem. Mirrored mode makes `localhost` work in both
-directions for both protocols.
+- **`networkingMode=mirrored`** — the TeamSpeak voice port is **UDP**. Without
+  mirrored mode, WSL2 forwards TCP from Windows reasonably but UDP unreliably,
+  so a Windows TeamSpeak client connecting to a server inside WSL fails in
+  ways that look like a server problem.
+- **`hostAddressLoopback=true`** — without it the server connects but **video
+  never does**: the stream stays at "connecting" and the sidecar logs
+  `ICE: checking` and nothing after. Mirrored mode gives WSL the same LAN
+  address as Windows, so the sidecar's WebRTC packets to the Windows client's
+  candidate at that address are delivered inside WSL instead of to Windows.
+  This setting passes them through.
+- **The two idle timeouts** — WSL otherwise shuts the distro down seconds
+  after the last terminal closes, and the test stack with it. With them off,
+  WSL runs until `wsl --shutdown` or a reboot, and holds its memory until
+  then; the containers restart on their own the next time WSL starts.
+
+Mirrored mode does **not** mirror IPv6 loopback. From Windows, reach the rig
+at **`127.0.0.1`**, not `localhost`: `localhost` tries `::1` first and times
+out (browsers often fall back to IPv4; the TeamSpeak client and PowerShell
+may not). Inside WSL, `localhost` is fine.
 
 ### Docker
 
@@ -186,7 +208,8 @@ pnpm db:generate
 pnpm dev
 ```
 
-The UI is on http://localhost:5173 and the API on http://localhost:3001.
+The UI is on http://127.0.0.1:5173 and the API on http://127.0.0.1:3001 (from
+Windows; see the `127.0.0.1` note under networking).
 
 Generate the three secrets — they have no defaults, and the backend refuses to
 start without them:
@@ -206,6 +229,9 @@ Then add the server in the UI under Settings → Connections:
 | API key | the admin key from the server's first-start log |
 | Use HTTPS | off |
 
+Here the manager runs directly in WSL, so it reaches the server through the
+published ports: a music bot's voice port is **`9988`** too.
+
 ## Before deploying: the full stack
 
 Mirrors production, and catches Dockerfile and compose problems the native
@@ -213,17 +239,34 @@ loop cannot see.
 
 ```bash
 docker compose -p ts6-test -f docker-compose.test.yml up -d --build
-# UI on http://localhost:3010
+# UI on http://127.0.0.1:3010
 ```
 
 The `-p ts6-test` is not optional — see the isolation section above.
+
+Here the manager runs in a container on the same Docker network as the
+server, so it reaches it by service name on the **internal, unshifted** ports
+— not the ones the table above lists for Windows:
+
+| Field | Value |
+|---|---|
+| Host | `teamspeak` |
+| WebQuery port | `10080` |
+| Music bot voice port | **`9987`** |
+| API key | the admin key from the server's first-start log |
+| Use HTTPS | off |
+
+The shifted ports (9988, 10081, …) are only for things on the Windows side:
+the TeamSpeak client, the browser. A bot given 9988 here sends its voice
+packets to a port nothing listens on and fails with `Connection timeout`.
 
 Both compose files publish the same host ports for TeamSpeak, so run one or
 the other, not both.
 
 ## Verifying a video stream
 
-1. Connect a TeamSpeak client (on Windows, to `localhost`) and join a channel.
+1. Connect a TeamSpeak client (on Windows, to `127.0.0.1:9988`) and join a
+   channel.
 2. Add a music bot in the UI and start it; it joins as a client.
 3. `!stream <url>` in the channel, or `!tv <channel>` with a playlist
    configured under Settings → Streaming.
@@ -245,6 +288,20 @@ under WSL2 and worth investigating before trusting it.
 **The TeamSpeak client cannot connect, but the UI can.** The UI uses TCP
 (WebQuery) and the client uses UDP. This is the mirrored-networking setting
 above.
+
+**The UI or the client times out on `localhost` from Windows.** IPv6 loopback
+is not mirrored. Use `127.0.0.1`.
+
+**The bot never connects: `Connection timeout`, over and over.** In the full
+stack its voice port must be the internal `9987`, not `9988` — see the table
+under "Before deploying".
+
+**The stream starts but viewers stay at "connecting".** The sidecar log shows
+`ICE: checking` and never `connected`. This is `hostAddressLoopback=true`
+missing from `.wslconfig`.
+
+**The stack is gone after closing the WSL terminal.** WSL shut the distro down
+for being idle. See the idle timeouts under networking.
 
 **Backend exits immediately on start.** It refuses to run without
 `JWT_SECRET`, `ENCRYPTION_KEY` and — when `SIDECAR_URL` is set — `SIDECAR_TOKEN`.
