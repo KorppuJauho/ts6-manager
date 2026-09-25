@@ -37,6 +37,7 @@ const FALLBACK_ENCODERS: EncoderCapability[] = [
   { key: 'vp9_vaapi', label: 'VP9 (VAAPI hardware)', mimeType: 'video/VP9', payloadType: 98, hwAccel: 'vaapi', encoder: 'vp9_vaapi', available: false },
   { key: 'h264_software', label: 'H.264 (software)', mimeType: 'video/H264', payloadType: 102, hwAccel: '', encoder: 'libx264', available: false },
   { key: 'h264_vaapi', label: 'H.264 (VAAPI hardware)', mimeType: 'video/H264', payloadType: 102, hwAccel: 'vaapi', encoder: 'h264_vaapi', available: false },
+  { key: 'h264_nvenc', label: 'H.264 (NVIDIA NVENC)', mimeType: 'video/H264', payloadType: 102, hwAccel: 'nvenc', encoder: 'h264_nvenc', available: false },
 ];
 
 /**
@@ -91,12 +92,16 @@ streamSettingsRoutes.get('/options', async (req: Request, res: Response, next: N
     }));
 
     let encoders = FALLBACK_ENCODERS;
+    // Which GPU "hardware" means is the sidecar's deployment to say; a
+    // sidecar that does not report it predates NVENC, so it is VAAPI.
+    let hwBackend = 'vaapi';
     let sidecarReachable = false;
     try {
       const client = new SidecarClient(process.env.SIDECAR_URL || 9800);
       const caps = await client.getCapabilities(settings.hwAccelDevice);
       if (Array.isArray(caps?.encoders) && caps.encoders.length > 0) {
         encoders = caps.encoders;
+        hwBackend = caps.hwBackend || 'vaapi';
         sidecarReachable = true;
       }
     } catch {
@@ -107,7 +112,8 @@ streamSettingsRoutes.get('/options', async (req: Request, res: Response, next: N
     // The UI offers a codec and a hardware toggle, not a flat profile list:
     // those are independent choices, and presenting the cross product invites
     // picking a combination that contradicts the toggle. Group the probed
-    // profiles so the UI can say which codecs have working hardware support.
+    // profiles so the UI can say which codecs have working hardware support —
+    // on this sidecar's backend only, since that is the one the toggle uses.
     const byCodec = new Map<string, { codec: string; label: string; softwareAvailable: boolean; hardwareAvailable: boolean }>();
     for (const enc of encoders) {
       const codec = codecFromProfile(enc.key);
@@ -117,8 +123,9 @@ streamSettingsRoutes.get('/options', async (req: Request, res: Response, next: N
         softwareAvailable: false,
         hardwareAvailable: false,
       };
-      if (enc.hwAccel) entry.hardwareAvailable ||= enc.available;
-      else entry.softwareAvailable ||= enc.available;
+      // Another vendor's profiles are skipped: that GPU is not passed through.
+      if (!enc.hwAccel) entry.softwareAvailable ||= enc.available;
+      else if (enc.hwAccel === hwBackend) entry.hardwareAvailable ||= enc.available;
       byCodec.set(codec, entry);
     }
 
@@ -126,6 +133,7 @@ streamSettingsRoutes.get('/options', async (req: Request, res: Response, next: N
       presets,
       encoders,
       codecs: [...byCodec.values()],
+      hwBackend,
       sidecarReachable,
       iptvSorts: IPTV_SORTS,
     });

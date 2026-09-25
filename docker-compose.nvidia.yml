@@ -1,0 +1,41 @@
+# NVIDIA (NVENC) hardware encoding — an override, layered on either stack:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+#   docker compose -f docker-compose.ghcr.yml -f docker-compose.nvidia.yml up -d
+#
+# Then turn on hardware encoding in Settings -> Streaming, with H.264 as the
+# codec. SIDECAR_HW_BACKEND below is what makes "hardware" mean NVENC; the
+# settings page reads it from the sidecar and has no GPU choice of its own.
+#
+# It is a separate file because the GPU reservation below makes Compose refuse
+# to start on a host without the NVIDIA runtime ("could not select device
+# driver nvidia"), which would break every Intel, AMD and CPU-only install if
+# it lived in the main files.
+#
+# The host needs the NVIDIA driver and the NVIDIA Container Toolkit
+# (nvidia-container-toolkit, then `nvidia-ctk runtime configure --runtime=docker`).
+# The image needs nothing extra: its FFmpeg already has h264_nvenc, and loads
+# the driver's encode and decode libraries, which the toolkit mounts in.
+#
+# Requires Docker Compose 2.24 or later, for !reset.
+services:
+  sidecar:
+    # The VAAPI passthrough is for Intel and AMD. An NVIDIA-only host may have
+    # no /dev/dri at all, and Compose fails on a device it cannot find.
+    devices: !reset []
+    group_add: !reset []
+    environment:
+      - SIDECAR_HW_BACKEND=nvenc
+      # "video" is the capability that mounts libnvidia-encode and libnvcuvid;
+      # without it the GPU is visible but NVENC fails to load.
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            # One GPU. On a multi-GPU host, replace count with
+            # device_ids: ["1"] to pick another; inside the container it is
+            # always GPU 0.
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, video]

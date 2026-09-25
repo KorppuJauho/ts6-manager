@@ -50,6 +50,11 @@ export interface StreamSettingsOptions {
   presets: StreamPresetOption[];
   encoders: EncoderOption[];
   codecs: CodecOption[];
+  /**
+   * The GPU backend hardware encoding uses on this sidecar: "vaapi" (Intel,
+   * AMD) or "nvenc" (NVIDIA). Set by the deployment, not by a setting.
+   */
+  hwBackend?: string;
   /** False when the sidecar could not be probed, so availability is unknown. */
   sidecarReachable: boolean;
   iptvSorts: string[];

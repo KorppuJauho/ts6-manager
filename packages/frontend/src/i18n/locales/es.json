@@ -411,6 +411,7 @@
       "hwAccelEnabled": "Usar codificación por hardware",
       "hwAccelDevice": "Dispositivo de codificación",
       "hwAccelDeviceHint": "El nodo de render de la GPU, p. ej. /dev/dri/renderD128. El contenedor sidecar necesita acceso a este dispositivo — ver docker-compose.yml.",
+      "hwAccelDeviceNvidia": "Este sidecar codifica en la GPU NVIDIA que le asigna docker-compose.nvidia.yml, así que no hay dispositivo que configurar. NVIDIA solo codifica H.264.",
       "sidecarUnreachable": "No se pudo contactar con el sidecar, así que se desconoce la disponibilidad de los codificadores. La lista muestra todos los perfiles conocidos.",
       "playbackTitle": "Reproducción",
       "defaultPreset": "Calidad predeterminada",

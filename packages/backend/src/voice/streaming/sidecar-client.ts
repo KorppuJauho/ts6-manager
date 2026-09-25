@@ -94,8 +94,10 @@ export class SidecarClient {
    * Encoder profiles this sidecar knows, and whether this host can actually
    * run each one. `device` is the render node hardware profiles are probed
    * against — without it they report unavailable, because they would be.
+   * `hwBackend` is the GPU backend hardware encoding uses on this sidecar,
+   * set by its deployment; absent from a sidecar that predates NVENC.
    */
-  async getCapabilities(device?: string): Promise<{ encoders: EncoderCapability[] }> {
+  async getCapabilities(device?: string): Promise<{ encoders: EncoderCapability[]; hwBackend?: string }> {
     const query = device ? `?device=${encodeURIComponent(device)}` : '';
     return this.call('GET', `/capabilities${query}`);
   }

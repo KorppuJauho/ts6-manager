@@ -24,6 +24,25 @@ in production on an Intel-based NAS since 2026-08 (see `docs/fork-changes.md`).
 What a real-Linux run confirms is that the settings-driven encoder path still
 reaches the GPU the way the earlier hardcoded version did.
 
+**NVIDIA (NVENC) is the exception: it does work under WSL2.** The Windows
+NVIDIA driver is shared into WSL (`nvidia-smi` works there), and with the
+NVIDIA Container Toolkit installed in WSL a container can encode with
+`h264_nvenc` — verified on an RTX 5080. Layer the NVIDIA override on the test
+stack:
+
+```bash
+docker compose -p ts6-test \
+  -f docker-compose.test.yml -f docker-compose.nvidia.yml up -d --build
+```
+
+The sidecar log then starts with `[Startup] Hardware backend: nvenc`, and a
+hardware H.264 stream logs `encoder=h264_nvenc`. Windows Task Manager's GPU
+page shows the "Video Encode" and "Video Decode" engines working. If
+`--gpus` fails with "no known GPU vendor found" from CDI, the toolkit is
+missing or unconfigured in WSL (`nvidia-ctk runtime configure --runtime=docker`
+and `nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`). Never install a
+Linux NVIDIA driver inside WSL.
+
 Everything else this project does can be exercised locally: the settings UI
 and its persistence, software VP8/VP9 streaming end to end, the DASH
 video+audio resolution, presets, the idle auto-stop, the
@@ -129,11 +148,16 @@ its container manager) and set it in `.env`:
 TS_SERVER_IMAGE=<the image:tag your server uses>
 ```
 
-Confirm two things against that image's own documentation, since they vary:
-the licence-acceptance environment variable (the compose files use
-`TS3SERVER_LICENSE=accept`, which the official images have used), and the data
-directory if you want state to persist — the compose files deliberately keep
-the server ephemeral so `docker compose down -v` gives a clean slate.
+The compose files accept the licence and switch on the query interfaces
+under both naming schemes: `TSSERVER_*` for TeamSpeak 6 and
+`TS3SERVER_LICENSE` for TeamSpeak 3. A TeamSpeak 6 server without the
+acknowledgement exits at once and restarts forever, and it starts with
+WebQuery off — the only interface the manager speaks — so both are required,
+not optional. An image that uses other names lists its own:
+`docker run --rm <image> tsserver --help`.
+
+The compose files deliberately keep the server ephemeral, so
+`docker compose down -v` gives a clean slate — and a new API key.
 
 ## Getting the WebQuery API key
 
@@ -209,7 +233,8 @@ the other, not both.
 docker compose -p ts6-test -f docker-compose.test.yml logs -f sidecar
 ```
 
-`[FFmpeg] Starting: … encoder=libvpx` is the expected result under WSL2. On a
+`[FFmpeg] Starting: … encoder=libvpx` is the expected result under WSL2
+without the NVIDIA override (`encoder=h264_nvenc` with it, for H.264). On a
 real Linux host with the GPU override, expect `encoder=vp9_vaapi` — anything
 else means the fallback fired, and the line above it says why. Anything
 naming a `_vaapi` encoder means the probe found one, which would be a surprise

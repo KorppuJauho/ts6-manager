@@ -1730,6 +1730,9 @@ function StreamingTab() {
   // sidecar probes by encoding, so this reflects what will actually happen
   // rather than what FFmpeg was built with.
   const hardwareUnavailable = form.hwAccelEnabled && codec !== undefined && !codec.hardwareAvailable;
+  // docker-compose.nvidia.yml hands the sidecar an NVIDIA GPU, which has no
+  // render node to choose: the device field has nothing to set.
+  const nvidia = options?.hwBackend === 'nvenc';
 
   return (
     <div className="space-y-4">
@@ -1751,10 +1754,12 @@ function StreamingTab() {
               className="h-8 text-xs font-mono"
               placeholder="/dev/dri/renderD128"
               value={form.hwAccelDevice}
-              disabled={!form.hwAccelEnabled}
+              disabled={!form.hwAccelEnabled || nvidia}
               onChange={(e) => set('hwAccelDevice', e.target.value)}
             />
-            <p className="text-[10px] text-muted-foreground">{t('settings.streaming.hwAccelDeviceHint')}</p>
+            <p className="text-[10px] text-muted-foreground">
+              {t(nvidia ? 'settings.streaming.hwAccelDeviceNvidia' : 'settings.streaming.hwAccelDeviceHint')}
+            </p>
           </div>
 
           <div className="space-y-1.5">

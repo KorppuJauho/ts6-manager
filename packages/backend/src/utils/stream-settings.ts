@@ -71,11 +71,12 @@ export async function getStreamSettings(prisma: PrismaClient): Promise<StreamSet
 }
 
 /**
- * The hardware backend used when acceleration is on.
+ * The backend half of a hardware profile key.
  *
- * Single-valued because the registry has exactly one usable hardware backend.
- * Adding a second (NVENC, QSV) means this can no longer be inferred and the
- * settings need to carry which one to prefer.
+ * It stands for "the sidecar's GPU", not a particular one: which GPU the
+ * sidecar can reach is fixed by its deployment (SIDECAR_HW_BACKEND, set by
+ * docker-compose.nvidia.yml), and the sidecar maps a hardware key onto its
+ * own backend — h264_vaapi on an NVIDIA sidecar encodes with h264_nvenc.
  */
 const HARDWARE_BACKEND = 'vaapi';
 

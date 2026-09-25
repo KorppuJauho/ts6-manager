@@ -411,6 +411,7 @@
       "hwAccelEnabled": "Use hardware encoding",
       "hwAccelDevice": "Encoding device",
       "hwAccelDeviceHint": "The GPU render node, e.g. /dev/dri/renderD128. The sidecar container needs this device passed through — see docker-compose.yml.",
+      "hwAccelDeviceNvidia": "This sidecar encodes on the NVIDIA GPU that docker-compose.nvidia.yml gives it, so there is no device to set. NVIDIA encodes H.264 only.",
       "sidecarUnreachable": "Could not reach the sidecar, so encoder availability is unknown. The list shows every profile the software knows about.",
       "playbackTitle": "Playback",
       "defaultPreset": "Default quality",

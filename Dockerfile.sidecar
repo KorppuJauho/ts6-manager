@@ -12,8 +12,9 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /sidecar .
 FROM debian:bookworm-slim
 # One VA-API driver per GPU vendor: intel-media-va-driver (iHD) for Intel,
 # mesa-va-drivers (radeonsi) for AMD. libva picks the one matching the render
-# node's kernel driver, so both can be present. NVIDIA has no VA-API encoder
-# and is not covered by either.
+# node's kernel driver, so both can be present. NVIDIA needs neither: FFmpeg's
+# h264_nvenc loads the driver's own libraries, which the NVIDIA Container
+# Toolkit mounts in at run time (docker-compose.nvidia.yml).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg ca-certificates \
       intel-media-va-driver mesa-va-drivers libva-drm2 && \
