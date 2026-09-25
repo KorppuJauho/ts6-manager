@@ -11,9 +11,9 @@ not a bug in this project.**
 WSL2 exposes the GPU through `/dev/dxg` and Mesa's D3D12 driver. The
 `/dev/dri/renderD128` visible inside WSL is a paravirtualised shim, not the
 real `i915` device the Intel media driver needs. `ffmpeg -encoders` will
-therefore not list `vp9_vaapi`, the encoder dropdown in Settings → Streaming
-will show the VAAPI profiles as unavailable, and a stream started with one
-selected falls back to the software encoder and logs why.
+therefore not list `vp9_vaapi`, Settings → Streaming will mark every codec
+"no GPU support", and a stream started with hardware encoding on falls back
+to the software encoder and logs why.
 
 That fallback working *is* worth verifying — it is the path that protects a
 misconfigured production host. But confirming that VAAPI itself encodes needs
