@@ -55,7 +55,13 @@ yt-dlp argument injection, unauthenticated WebSocket, and the unguarded reads.
 | Files | `packages/sidecar/main.go`, `Dockerfile.sidecar`, `docker-compose*.yml` |
 
 Upstream encodes VP8 with libvpx on the CPU, which saturates a core at 1080p30.
-This fork encodes VP9 on the Intel GPU.
+This fork encodes VP9 on the Intel GPU. That ran in production from 2026-08
+with `vp9_vaapi` hardcoded; the settings-driven path described below (encoder
+registry, `/capabilities` probe, `POST /source` body) has since been confirmed
+on the same NAS with both `h264_vaapi` and `vp9_vaapi`, the source decoded on
+the GPU too (`vp9 (native) -> vp9 (vp9_vaapi)`): a 1440p VP9 stream at 13 %
+sidecar CPU against 40 % for the same stream in software. Software VP8, VP9
+and H.264 were run in the same pass.
 
 **AMD** is covered too: the sidecar image carries Mesa's VA-API driver
 (`mesa-va-drivers`, radeonsi) next to Intel's (`intel-media-va-driver`), and
@@ -768,44 +774,17 @@ with the server's reason; 2568 is the error of the one command that drew it.
 
 ## Open follow-ups
 
-1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
-   question is settled: VP9 VAAPI encoding has run in production on a UGREEN
-   NASync DXP4800 Plus since 2026-08, with `devices: /dev/dri:/dev/dri` and
-   `group_add: "105"`, streaming both IPTV and YouTube. The GPU is capable and
-   the passthrough config is known good.
-
-   The refactored path itself — the encoder registry, the `/capabilities`
-   probe and the `POST /source` body — is confirmed on that NAS with
-   `h264_vaapi`, including GPU decode of the source (4K at 18 % sidecar CPU),
-   and again after the AMD driver was added. What remains is VP9 through it:
-   the deployed version hardcoded `vp9_vaapi`, and no stream since the
-   refactor has selected it. Same destination, different plumbing — so a
-   failure there is a code regression against a known-good reference, not a
-   hardware unknown.
-
-   **Upgrading from the pre-settings version silently disables hardware
-   encoding.** `StreamSettings` defaults to `hwAccelEnabled: false` and
-   `vp8_software` — correct for a fresh install on a host with no GPU, wrong
-   for a deployment that was already using the GPU. After deploying, set
-   hardware encoding on, the device to `/dev/dri/renderD128`, and the encoder
-   to VP9 (VAAPI) in Settings → Streaming, or streams quietly fall back to
-   software.
-
-   Verify with the sidecar log on the first stream: `[FFmpeg] Starting: …
-   encoder=vp9_vaapi`. Anything else means the fallback fired, and the line
-   above it says why.
-
-2. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8
+1. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8
    streams gate correctly again.) Note that FFmpeg's VP9 RTP packetizer is not
    known to set the descriptor's P bit, so "P clear means keyframe" needs
    checking against a real capture before it can be relied on; gating on the B
    bit alone would at least align the gate to a frame start.
-3. Confirm whether removing A/V pacing causes audio drift on long streams.
-4. An H.264 parameter-set detector, so a peer joining mid-stream is held until
+2. Confirm whether removing A/V pacing causes audio drift on long streams.
+3. An H.264 parameter-set detector, so a peer joining mid-stream is held until
    an SPS rather than opening on the first packet. The same gap VP9 has; less
    pressing than it looks, because the PLI interceptor asks for a keyframe and
    the parameter sets are repeated at every one.
-5. **Exempting the bot from flood protection.** The server has a permission
+4. **Exempting the bot from flood protection.** The server has a permission
    for it, `b_client_ignore_antiflood` (present on 6.0.0-beta13.1). Granted to
    the bot's identity or a group it is in, fast stream restarts could not trip
    the block at all. Not done by the manager: it is a property of each
