@@ -733,7 +733,9 @@ they are 19 % of the bits at 2.5 Mbit each, a quarter of a second's budget in
 one frame and a burst on the wire. At `-g 300` the same stream comes to
 10.4 Mbit/s. The one-second interval is deliberate — FFmpeg cannot be asked
 for a keyframe, so it is what bounds how long a new viewer waits for a
-picture — so changing it is recorded below as a decision, not taken here.
+picture. **Decided: kept at one second.** With `-minrate` a 4K VP9 stream
+was measured in the client at about 10 Mbit/s, peaking near 13.5, with no
+packet loss; a longer wait for joining viewers is not worth the rest.
 
 ## Open follow-ups
 
@@ -784,11 +786,3 @@ picture — so changing it is recorded below as a decision, not taken here.
    server's permission setup, which the manager cannot assume it may change,
    and an exempt client can also flood the server itself. An operator who
    wants it can grant it in TeamSpeak.
-7. **Keyframe interval against software VP9 bitrate.** `-g 30` (a keyframe
-   each second) costs a detailed 4K VP9 stream about a fifth of its bits and
-   sends each keyframe as a ~2.5 Mbit burst; see "Software VP8 and VP9 now
-   run at constant bitrate" above. A longer interval, or capping keyframe
-   size with libvpx's `-max-intra-rate`, would bring it to target, at the
-   cost of a longer wait for a joining viewer or a visible quality pulse at
-   each keyframe. Worth deciding with the hardware encoders in view too: the
-   same interval applies to them.
