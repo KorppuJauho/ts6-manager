@@ -177,6 +177,7 @@ export class VoiceBot extends EventEmitter {
   private sidecarProc: SidecarProcess | null = null;
   private sidecarHttp: SidecarClient | null = null;
   private _videoStreaming: boolean = false;
+  private _videoStarting: boolean = false;
   private _videoTitle: string | null = null;
   private _activeStreamId: string | null = null;
   private _videoSource: string | null = null;
@@ -996,6 +997,54 @@ export class VoiceBot extends EventEmitter {
     if (this._videoStreaming) {
       throw new Error('Video stream already active');
     }
+    // A start takes seconds before _videoStreaming is set, and a second one
+    // in that window would build its own signaling over the first's.
+    if (this._videoStarting) {
+      throw new Error('Video stream is already starting');
+    }
+
+    this._videoStarting = true;
+    try {
+      await this.setUpVideoStream(source, preset, framerate, bitrate, opts);
+    } catch (err: any) {
+      console.warn(`[VoiceBot ${this.config.id}] Video stream failed to start: ${err?.message ?? err}`);
+      await this.abandonVideoStart();
+      throw err;
+    } finally {
+      this._videoStarting = false;
+    }
+  }
+
+  /**
+   * Undoes a start that failed part-way, so the next one begins clean.
+   *
+   * stopVideoStream() only acts on a stream that got as far as streaming, so
+   * a start that failed earlier — setupstream refused or unanswered — used to
+   * leave its StreamSignaling registered on the client. Each such failure
+   * stacked another listener, and every later join request was then answered
+   * once per leftover.
+   */
+  private async abandonVideoStart(): Promise<void> {
+    if (this._videoStreaming) {
+      // The server has the stream: a full stop also ends it there.
+      await this.stopVideoStream().catch(() => { });
+      return;
+    }
+    this.signaling?.dispose();
+    this.signaling = null;
+    if (this.sidecarProc) {
+      await this.sidecarProc.stop().catch(() => { });
+      this.sidecarProc = null;
+    }
+  }
+
+  private async setUpVideoStream(
+    source: string,
+    preset: string | undefined,
+    framerate: number | undefined,
+    bitrate: string | undefined,
+    opts: { operatorConfigured?: boolean; title?: string },
+  ): Promise<void> {
 
     const sidecarBinary = this.config.sidecarBinaryPath || process.env.SIDECAR_BINARY_PATH || 'sidecar';
     const sidecarPort = this.config.sidecarPort || 9800;

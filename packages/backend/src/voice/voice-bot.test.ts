@@ -59,4 +59,42 @@ describe('VoiceBot.startVideoStream after a refused setupstream', () => {
     await expect(start).rejects.toThrow('refused by the server: invalid parameter');
     expect(bot.videoStreaming).toBe(false);
   });
+
+  it('leaves no listener behind, however many times it fails', async () => {
+    const { bot, client, setupCommands, refuseLatest } = connectedBot();
+    const before = client.listenerCount('command');
+
+    // The incident: three starts in a row that the server did not accept.
+    // Each one used to leave its signaling attached, so the next working
+    // stream answered every join request four times.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const start = bot.startVideoStream('https://video.test/a.mp4');
+      await vi.waitFor(() => expect(setupCommands()).toHaveLength(attempt));
+      refuseLatest();
+      await expect(start).rejects.toThrow('refused');
+    }
+
+    expect(client.listenerCount('command')).toBe(before);
+    expect(client.listenerCount('ts3error')).toBe(1); // the bot's own
+  });
+
+  it('turns away a second start while the first is still waiting', async () => {
+    const { bot, setupCommands, refuseLatest } = connectedBot();
+
+    const first = bot.startVideoStream('https://video.test/a.mp4');
+    await vi.waitFor(() => expect(setupCommands()).toHaveLength(1));
+
+    await expect(bot.startVideoStream('https://video.test/b.mp4'))
+      .rejects.toThrow('Video stream is already starting');
+    expect(setupCommands()).toHaveLength(1);
+
+    refuseLatest();
+    await expect(first).rejects.toThrow('refused');
+
+    // Once the first has settled, a new start goes out again.
+    const retry = bot.startVideoStream('https://video.test/a.mp4');
+    await vi.waitFor(() => expect(setupCommands()).toHaveLength(2));
+    refuseLatest();
+    await expect(retry).rejects.toThrow('refused');
+  });
 });
