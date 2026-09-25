@@ -37,6 +37,19 @@ export interface SignalingMessage {
   stream?: ActiveStream;
 }
 
+export interface SetupStreamParams {
+  name?: string;
+  type?: number;
+  bitrate?: number;
+  accessibility?: number;
+  mode?: number;
+  viewerLimit?: number;
+  audio?: boolean;
+}
+
+const SETUP_STREAM_TIMEOUT_MS = 10000;
+let setupCounter = 0;
+
 export class StreamSignaling extends EventEmitter {
   private client: Ts3Client;
   private activeStreams: Map<string, ActiveStream> = new Map();
@@ -227,24 +240,55 @@ export class StreamSignaling extends EventEmitter {
 
   // --- Outgoing commands ---
 
-  sendSetupStream(params: {
-    name?: string;
-    type?: number;
-    bitrate?: number;
-    accessibility?: number;
-    mode?: number;
-    viewerLimit?: number;
-    audio?: boolean;
-  } = {}): void {
-    this.client.sendCommand(buildCommand('setupstream', {
-      name: params.name || 'Bot Stream',
-      type: String(params.type ?? 3),
-      bitrate: String(params.bitrate ?? 4608),
-      accessibility: String(params.accessibility ?? 1),
-      mode: String(params.mode ?? 1),
-      viewer_limit: String(params.viewerLimit ?? 0),
-      audio: params.audio === false ? '0' : '1',
-    }));
+  /**
+   * Announces a stream and settles with the server's answer: the stream it
+   * started for this client, or the error it replied with.
+   *
+   * The command carries a return_code, which the server echoes on its reply
+   * (verified on 6.0.0-beta13), so a refusal is told apart from errors other
+   * commands draw in the same window. Without it a refused setupstream
+   * surfaced only as the timeout, with the server's reason dropped.
+   */
+  setupStream(params: SetupStreamParams = {}, timeoutMs = SETUP_STREAM_TIMEOUT_MS): Promise<ActiveStream> {
+    const returnCode = `setupstream-${++setupCounter}`;
+    const ownClid = this.client.getClientId();
+
+    return new Promise<ActiveStream>((resolve, reject) => {
+      const settle = () => {
+        clearTimeout(timer);
+        this.removeListener('streamStarted', onStarted);
+        this.client.removeListener('ts3error', onReply);
+      };
+      const onStarted = (stream: ActiveStream) => {
+        if (stream.clid !== ownClid) return;
+        settle();
+        resolve(stream);
+      };
+      // An "ok" reply is not the answer: the stream itself arrives as
+      // notifystreamstarted, so success keeps waiting for that.
+      const onReply = (reply: Record<string, string>) => {
+        if (reply.return_code !== returnCode || reply.id === '0') return;
+        settle();
+        reject(new Error(`setupstream refused by the server: ${reply.msg || 'unknown error'} (error ${reply.id})`));
+      };
+      const timer = setTimeout(() => {
+        settle();
+        reject(new Error(`setupstream timeout: no answer from the server in ${Math.round(timeoutMs / 1000)}s`));
+      }, timeoutMs);
+
+      this.on('streamStarted', onStarted);
+      this.client.on('ts3error', onReply);
+      this.client.sendCommand(buildCommand('setupstream', {
+        name: params.name || 'Bot Stream',
+        type: String(params.type ?? 3),
+        bitrate: String(params.bitrate ?? 4608),
+        accessibility: String(params.accessibility ?? 1),
+        mode: String(params.mode ?? 1),
+        viewer_limit: String(params.viewerLimit ?? 0),
+        audio: params.audio === false ? '0' : '1',
+        return_code: returnCode,
+      }));
+    });
   }
 
   sendJoinResponse(viewerClid: number, streamId: string, accept: boolean = true, offerSdp?: string): void {

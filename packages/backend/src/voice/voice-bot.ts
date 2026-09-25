@@ -4,7 +4,7 @@ import { Ts3Client, type Ts3ClientOptions, generateIdentity, type IdentityData, 
 import { AudioPipeline, FRAME_MS, BYTES_PER_FRAME } from './audio/pipeline.js';
 import { PlayQueue, type QueueItem } from './playlist/queue.js';
 import { fetchIcyMetadata } from './audio/icy-metadata.js';
-import { StreamSignaling, type ActiveStream, type SignalingMessage } from './streaming/stream-signaling.js';
+import { StreamSignaling, type SignalingMessage } from './streaming/stream-signaling.js';
 import { SidecarClient } from './streaming/sidecar-client.js';
 import { SidecarProcess, type SidecarConfig } from './streaming/sidecar-process.js';
 import {
@@ -27,6 +27,17 @@ import {
   effectiveEncoder,
   type StreamSettingsValue,
 } from '../utils/stream-settings.js';
+
+/** "client is flooding": the server's anti-flood has blocked this client. */
+const FLOOD_ERROR_ID = 524;
+/**
+ * How long to send the server nothing after it reports flooding. At the
+ * server defaults a client is blocked at 150 points and sheds 5 a second, so
+ * 30 s of silence clears the worst case. Every command sent meanwhile — a
+ * retry, even a chat reply saying why — is refused and adds points, which is
+ * how a few quick retries kept a bot unable to stream for minutes.
+ */
+export const FLOOD_COOLDOWN_MS = 30_000;
 
 /** Resolve a YouTube/yt-dlp-compatible URL to a direct stream URL */
 /** Sites whose URLs are page addresses yt-dlp must turn into media URLs. */
@@ -177,6 +188,17 @@ export class VoiceBot extends EventEmitter {
   private sidecarProc: SidecarProcess | null = null;
   private sidecarHttp: SidecarClient | null = null;
   private _videoStreaming: boolean = false;
+  // The start and stop in flight, if any. Both take seconds, and commands
+  // arrive in between: each waits for the other instead of racing it.
+  private _videoStart: Promise<void> | null = null;
+  private _videoStop: Promise<void> | null = null;
+  /** Until when the server's flood protection is presumed to block us. */
+  private _floodedUntil = 0;
+  /**
+   * Notification registrations last as long as the connection, so they are
+   * sent once per connection rather than with every stream start.
+   */
+  private _streamNotificationsRegistered = false;
   private _videoTitle: string | null = null;
   private _activeStreamId: string | null = null;
   private _videoSource: string | null = null;
@@ -206,6 +228,7 @@ export class VoiceBot extends EventEmitter {
     });
 
     this.client.on('disconnected', () => {
+      this._streamNotificationsRegistered = false;
       this.stopIcyPolling();
       this.stopPlayback();
       this._status = 'stopped';
@@ -218,6 +241,14 @@ export class VoiceBot extends EventEmitter {
       const id = parseInt(params.id || '0');
       const msg = params.msg || 'unknown error';
       this._lastError = `TS3 error ${id}: ${msg}`;
+      if (id === FLOOD_ERROR_ID) {
+        if (this.floodCooldownMs === 0) {
+          console.warn(`[VoiceBot ${this.config.id}] Server flood protection is blocking the bot; holding stream commands for ${FLOOD_COOLDOWN_MS / 1000}s`);
+        }
+        // Each refusal restarts the wait: the block lasts until the server
+        // has heard nothing for long enough, not from the first refusal.
+        this._floodedUntil = Date.now() + FLOOD_COOLDOWN_MS;
+      }
       // Fatal errors that should not trigger reconnect
       // 2568 = invalid password, 3329 = banned, 1796 = max clients reached
       if (id === 2568 || id === 3329 || id === 1796) {
@@ -394,6 +425,8 @@ export class VoiceBot extends EventEmitter {
     this.emit('statusChange', this._status);
 
     this.identity = this.config.identity ?? generateIdentity(8);
+    // A new connection starts with no registrations, whatever the old one had.
+    this._streamNotificationsRegistered = false;
 
     const opts: Ts3ClientOptions = {
       host: this.config.serverHost,
@@ -940,8 +973,19 @@ export class VoiceBot extends EventEmitter {
 
   // ─── Video Streaming ────────────────────────────────────────
 
+  /** Streaming, and not on its way out: a stream being stopped is not one to change. */
   get videoStreaming(): boolean {
-    return this._videoStreaming;
+    return this._videoStreaming && !this._videoStop;
+  }
+
+  /** A start is waiting on the server or the source; a stop now waits for it. */
+  get videoStarting(): boolean {
+    return this._videoStart !== null;
+  }
+
+  /** Time left before the server should accept commands again; 0 if not flooded. */
+  get floodCooldownMs(): number {
+    return Math.max(0, this._floodedUntil - Date.now());
   }
 
   get videoStreamStatus(): VideoStreamStatus {
@@ -990,12 +1034,76 @@ export class VoiceBot extends EventEmitter {
     bitrate?: string,
     opts: { operatorConfigured?: boolean; title?: string } = {},
   ): Promise<void> {
+    // A stop still tearing down would otherwise run its last steps — the
+    // signaling disposal, the nickname reset — over the stream started here.
+    if (this._videoStop) await this._videoStop;
+
     if (this._status !== 'connected' && this._status !== 'playing' && this._status !== 'paused') {
       throw new Error('Bot is not connected');
     }
     if (this._videoStreaming) {
       throw new Error('Video stream already active');
     }
+    // Refused here, before a single command goes out: trying anyway is what
+    // keeps the block from ever lifting.
+    const floodMs = this.floodCooldownMs;
+    if (floodMs > 0) {
+      throw new Error(`The TeamSpeak server's flood protection is blocking the bot; try again in ${Math.ceil(floodMs / 1000)}s`);
+    }
+    // A start takes seconds before _videoStreaming is set, and a second one
+    // in that window would build its own signaling over the first's.
+    if (this._videoStart) {
+      throw new Error('Video stream is already starting');
+    }
+
+    const start = (async () => {
+      try {
+        await this.setUpVideoStream(source, preset, framerate, bitrate, opts);
+      } catch (err: any) {
+        console.warn(`[VoiceBot ${this.config.id}] Video stream failed to start: ${err?.message ?? err}`);
+        await this.abandonVideoStart();
+        throw err;
+      }
+    })();
+    this._videoStart = start;
+    try {
+      await start;
+    } finally {
+      this._videoStart = null;
+    }
+  }
+
+  /**
+   * Undoes a start that failed part-way, so the next one begins clean.
+   *
+   * stopVideoStream() only acts on a stream that got as far as streaming, so
+   * a start that failed earlier — setupstream refused or unanswered — used to
+   * leave its StreamSignaling registered on the client. Each such failure
+   * stacked another listener, and every later join request was then answered
+   * once per leftover.
+   */
+  private async abandonVideoStart(): Promise<void> {
+    if (this._videoStreaming) {
+      // The server has the stream: a full stop also ends it there. Not
+      // stopVideoStream(), which would wait for this very start to finish.
+      await this.endVideoStream().catch(() => { });
+      return;
+    }
+    this.signaling?.dispose();
+    this.signaling = null;
+    if (this.sidecarProc) {
+      await this.sidecarProc.stop().catch(() => { });
+      this.sidecarProc = null;
+    }
+  }
+
+  private async setUpVideoStream(
+    source: string,
+    preset: string | undefined,
+    framerate: number | undefined,
+    bitrate: string | undefined,
+    opts: { operatorConfigured?: boolean; title?: string },
+  ): Promise<void> {
 
     const sidecarBinary = this.config.sidecarBinaryPath || process.env.SIDECAR_BINARY_PATH || 'sidecar';
     const sidecarPort = this.config.sidecarPort || 9800;
@@ -1083,23 +1191,15 @@ export class VoiceBot extends EventEmitter {
     // Setup stream signaling on the TS3 client
     this.signaling = new StreamSignaling(this.client);
     this.setupSignalingListeners();
-    this.signaling.registerStreamNotifications();
+    // Three of the five commands a start used to send, repeated every time,
+    // were these registrations — spent flood points for nothing after the
+    // first.
+    if (!this._streamNotificationsRegistered) {
+      this.signaling.registerStreamNotifications();
+      this._streamNotificationsRegistered = true;
+    }
 
-    // Wait for server to confirm stream
-    const streamPromise = new Promise<ActiveStream>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('setupstream timeout')), 10000);
-      const handler = (stream: ActiveStream) => {
-        if (stream.clid === this.client.getClientId()) {
-          clearTimeout(timeout);
-          this.signaling!.removeListener('streamStarted', handler);
-          resolve(stream);
-        }
-      };
-      this.signaling!.on('streamStarted', handler);
-    });
-
-    // Send setupstream command
-    this.signaling.sendSetupStream({
+    const stream = await this.signaling.setupStream({
       name: `${this.config.nickname} Stream`,
       type: 3,
       bitrate: 4608,
@@ -1112,8 +1212,6 @@ export class VoiceBot extends EventEmitter {
       viewerLimit: 0,
       audio: true,
     });
-
-    const stream = await streamPromise;
     this._activeStreamId = stream.id;
     this._videoStreaming = true;
     this._videoSource = source;
@@ -1174,8 +1272,23 @@ export class VoiceBot extends EventEmitter {
 
   /** Stop video streaming */
   async stopVideoStream(): Promise<void> {
-    if (!this._videoStreaming) return;
+    // A stop given while a start is still waiting is meant for the stream
+    // that start produces; returning early would leave it running.
+    if (this._videoStart) await this._videoStart.catch(() => { });
+    return this.endVideoStream();
+  }
 
+  /** One teardown at a time: a second stop joins the one in flight. */
+  private endVideoStream(): Promise<void> {
+    if (this._videoStop) return this._videoStop;
+    if (!this._videoStreaming) return Promise.resolve();
+    this._videoStop = this.tearDownVideoStream().finally(() => {
+      this._videoStop = null;
+    });
+    return this._videoStop;
+  }
+
+  private async tearDownVideoStream(): Promise<void> {
     // Remove all viewers from TS6 stream first
     if (this.signaling && this._activeStreamId) {
       for (const [clid] of this._viewers) {
@@ -1260,18 +1373,26 @@ export class VoiceBot extends EventEmitter {
 
   /** Change video source while streaming */
   async setVideoSource(source: string): Promise<void> {
-    if (!this._videoStreaming || !this.sidecarHttp) {
+    if (!this.videoStreaming || !this.sidecarHttp) {
       throw new Error('No active video stream');
     }
+    // Resolving takes seconds, and the stream can be stopped meanwhile. Going
+    // on regardless restarted FFmpeg for a stream the server had already
+    // ended, and put the streaming nickname back after the stop reset it.
+    const streamId = this._activeStreamId;
+    const stillCurrent = () => this.videoStreaming && this._activeStreamId === streamId;
+    const sidecar = this.sidecarHttp;
+
     this._videoSource = source;
     const currentPreset = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     // A source swapped mid-stream is a fresh URL from the caller, so it is
     // only trusted if this stream was started from the operator's playlist.
     const resolvedSource = await resolveVideoUrl(source, currentPreset.height, this._videoOperatorConfigured);
+    if (!stillCurrent()) throw new Error('The video stream was stopped');
 
     // Reuses the encoder resolved at stream start: changing it here would
     // renegotiate the codec under peers that are already connected.
-    await this.sidecarHttp.setSource(
+    await sidecar.setSource(
       resolvedSource,
       currentPreset.width,
       currentPreset.height,
@@ -1284,7 +1405,14 @@ export class VoiceBot extends EventEmitter {
     // are already connected is a bigger change than this path should make.
     // A source whose resolution differs is therefore encoded at the preset
     // chosen for the previous one.
-    this.updateStreamingNickname(await this.resolveStreamTitle(source));
+    if (!stillCurrent()) {
+      // The stop ran while the sidecar was being given the new source.
+      await sidecar.stopSource().catch(() => { });
+      throw new Error('The video stream was stopped');
+    }
+    const title = await this.resolveStreamTitle(source);
+    if (!stillCurrent()) throw new Error('The video stream was stopped');
+    this.updateStreamingNickname(title);
 
     console.log(`[VoiceBot ${this.config.id}] Video source changed: ${source}`);
     this.emit('videoSourceChanged', source);

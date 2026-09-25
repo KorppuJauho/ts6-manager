@@ -80,6 +80,7 @@ export interface BotMessages {
   streamSourceChanged: (url: string) => string;
   streamStarted: (preset: string) => string;
   streamFailed: (reason: string) => string;
+  floodCleared: string;
   streamNone: string;
   streamStopped: string;
   viewersNone: string;

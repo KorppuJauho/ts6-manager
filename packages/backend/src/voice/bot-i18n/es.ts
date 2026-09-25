@@ -63,6 +63,7 @@ export const es: BotMessages = {
   streamSourceChanged: (url) => `Fuente del stream cambiada a: ${url}`,
   streamStarted: (preset) => `Transmisión de vídeo iniciada (${preset}).`,
   streamFailed: (reason) => `No se pudo iniciar la transmisión: ${reason}`,
+  floodCleared: `Los comandos llegaron más rápido de lo que permite el servidor de TeamSpeak, así que su protección antiflood bloqueó al bot un momento e ignoró lo pedido mientras tanto. Ya se ha levantado: inténtalo de nuevo, un poco más despacio.`,
   streamNone: 'No hay ninguna transmisión de vídeo activa.',
   streamStopped: 'Transmisión de vídeo detenida.',
   viewersNone: 'No hay espectadores.',

@@ -606,6 +606,77 @@ private.
 What remains unverified is the other half: nothing here has run a container
 from one of these images.
 
+### A failed stream start cleaned up nothing
+
+Seen on the local test rig: a `!stream` given a second after `!stopstream`
+got no answer to its `setupstream`, nor did the two retries after it, and
+three minutes later a stream started with every join request handled four
+times.
+
+The four was a leak. Each start attaches a fresh `StreamSignaling` to the
+client, and only `stopVideoStream()` detached it — which returns at once when
+no stream got as far as running. A start that failed at `setupstream` left its
+listener attached for good, so three failures meant three extra answers to
+every later join request. `startVideoStream()` now undoes whatever a failed
+start set up: the signaling, a locally spawned sidecar, or — once the server
+has announced the stream — the stream itself, through a full stop. A second
+start while one is still waiting for the server is refused rather than
+building its signaling over the first's.
+
+Why the server did not answer was invisible, because the answer was being
+dropped. The client protocol's replies are all `error` lines, and the stream
+code listened only for `notify*` commands, so a refused `setupstream` looked
+exactly like no reply at all. `setupstream` now carries a `return_code`,
+which the TS6 server echoes (checked against 6.0.0-beta13.1: `error id=0
+msg=ok return_code=…` after the `notifystreamstarted`, and the code comes back
+on errors too). A refusal fails the start at once with the server's own
+message, in the log and in the bot's chat reply; silence still ends in the
+ten-second timeout, which now says so in the log as well.
+
+**Commands that overlap a start or a stop.** Both take seconds — a stop waits
+a second for its `stopstream` to be acknowledged — and commands arrive in
+between. A `!stream` 0.7 s after `!stopstream` found the bot still marked as
+streaming and was taken as a source change: it resolved the new URL,
+restarted FFmpeg for a stream the server had already ended, and put the
+streaming nickname back after the stop had reset it, where it stayed. The
+reverse was answered "no active stream" while the start went on to run
+unstopped. Now a stream being stopped no longer counts as streaming, and a
+start waits for the stop to finish; a stop given during a start waits for it
+and stops what it produces; two stops share one teardown; and a source change
+checks the stream is still the one it began on before touching the sidecar or
+the nickname.
+
+**The cause: the server's flood protection.** With the reply logged, the next
+fast restart named it — `setupstream refused by the server: client is
+flooding (error 524)`. At the server defaults (`virtualserver_antiflood_*`:
+block at 150 points, 5 shed a second) a start, a stop and a start inside
+three seconds, with the bot's chat replies, is enough. Every command a blocked
+client sends is refused and adds points, so each retry — and each chat reply
+explaining the failure — pushed the end of the block back, which is how it
+lasted minutes. Two changes:
+
+- A start sent five commands, three of them `servernotifyregister` repeating
+  registrations that last for the whole connection. They are now sent once
+  per connection, and again after a reconnect.
+- An error 524 from any command starts a 30 s hold, restarted by each further
+  524. During it the bot sets every chat command aside and sends nothing —
+  no action, no reply, no now-playing line — and a reply a command would make
+  after tripping the block part-way is dropped too. When the hold has passed
+  it says once that commands came too fast and were ignored, however many
+  were set aside. The first version held only `!stream` and `!tv` and still
+  answered `!stopstream`, which looked like the bot ignoring one command
+  while answering the next — and every such answer was refused and prolonged
+  the block.
+
+Measured on the test server with a throwaway client: 9 `clientupdate`s were
+accepted before the first 524, so a command costs roughly 15–17 of the 150
+points, and a client that keeps sending while blocked stays blocked — probing
+every half second held it past 60 s, and 35 s of silence after that was not
+enough. A bot's whole start-watch-stop cycle is about that budget, which is
+why the block could also trip at an unhurried pace. It stays rare in normal
+use; the hold makes sure the bot does not make it worse, and the message
+tells whoever was typing why nothing happened.
+
 ## Open follow-ups
 
 1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
@@ -642,3 +713,16 @@ from one of these images.
    an SPS rather than opening on the first packet. The same gap VP9 has; less
    pressing than it looks, because the PLI interceptor asks for a keyframe and
    the parameter sets are repeated at every one.
+5. **Error 2568 disconnects the bot.** `Ts3Client` and `VoiceBot` treat it as
+   fatal, commented as "invalid password", but 2568 is *insufficient client
+   permissions* — the answer to any single command the bot is not permitted,
+   a `setupstream` included. Found while writing the tests for the section
+   above; the invalid-password code needs confirming against a server before
+   the list is corrected.
+6. **Exempting the bot from flood protection.** The server has a permission
+   for it, `b_client_ignore_antiflood` (present on 6.0.0-beta13.1). Granted to
+   the bot's identity or a group it is in, fast stream restarts could not trip
+   the block at all. Not done by the manager: it is a property of each
+   server's permission setup, which the manager cannot assume it may change,
+   and an exempt client can also flood the server itself. An operator who
+   wants it can grant it in TeamSpeak.

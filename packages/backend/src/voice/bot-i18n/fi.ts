@@ -63,6 +63,7 @@ export const fi: BotMessages = {
   streamSourceChanged: (url) => `Lähde vaihdettu: ${url}`,
   streamStarted: (preset) => `Videolähetys käynnistetty (${preset}).`,
   streamFailed: (reason) => `Lähetystä ei voitu käynnistää: ${reason}`,
+  floodCleared: `Komentoja tuli nopeammin kuin TeamSpeak-palvelin sallii, joten sen tulvasuojaus esti botin hetkeksi ja sillä välin annetut komennot jäivät huomiotta. Esto on nyt poistunut: yritä uudelleen, hieman hitaammin.`,
   streamNone: 'Videolähetystä ei ole käynnissä.',
   streamStopped: 'Videolähetys pysäytetty.',
   viewersNone: 'Ei katsojia.',
