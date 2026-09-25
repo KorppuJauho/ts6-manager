@@ -7,12 +7,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const harness = vi.hoisted(() => ({
   sidecarCalls: [] as string[],
   holdValidation: null as Promise<void> | null,
+  refuseValidation: false,
+  /** Probes, sidecar calls and setupstreams, in the order they happened. */
+  timeline: [] as string[],
 }));
 
 vi.mock('./streaming/sidecar-client.js', () => ({
   SidecarClient: class {
     async waitHealthy() { }
-    async setSource() { harness.sidecarCalls.push('setSource'); }
+    async setSource() { harness.sidecarCalls.push('setSource'); harness.timeline.push('setSource'); }
     async stopSource() { harness.sidecarCalls.push('stopSource'); }
     async closePeer() { }
   },
@@ -20,10 +23,12 @@ vi.mock('./streaming/sidecar-client.js', () => ({
 vi.mock('../utils/url-validator.js', () => ({
   validateUrl: async () => {
     if (harness.holdValidation) await harness.holdValidation;
-    return { valid: true };
+    return harness.refuseValidation ? { valid: false, error: 'private address' } : { valid: true };
   },
 }));
-vi.mock('./streaming/probe.js', () => ({ probeVideoHeight: async () => 1080 }));
+vi.mock('./streaming/probe.js', () => ({
+  probeVideoHeight: async () => { harness.timeline.push('probe'); return 1080; },
+}));
 
 const { VoiceBot, FLOOD_COOLDOWN_MS } = await import('./voice-bot.js');
 
@@ -44,7 +49,10 @@ function connectedBot() {
   (bot as any)._status = 'connected';
   const client = (bot as any).client;
   const sent: string[] = [];
-  vi.spyOn(client, 'sendCommand').mockImplementation((cmd: any) => { sent.push(cmd); });
+  vi.spyOn(client, 'sendCommand').mockImplementation((cmd: any) => {
+    sent.push(cmd);
+    if (cmd.startsWith('setupstream ')) harness.timeline.push('setupstream');
+  });
   vi.spyOn(client, 'getClientId').mockReturnValue(OWN_CLID);
 
   const setupCommands = () => sent.filter((c) => c.startsWith('setupstream '));
@@ -76,6 +84,8 @@ function connectedBot() {
 beforeEach(() => {
   harness.sidecarCalls.length = 0;
   harness.holdValidation = null;
+  harness.refuseValidation = false;
+  harness.timeline.length = 0;
   process.env.SIDECAR_URL = 'http://sidecar.test:9800';
   process.env.SIDECAR_TOKEN = 'test-token';
   vi.spyOn(console, 'log').mockImplementation(() => { });
@@ -272,5 +282,70 @@ describe('VoiceBot and the server’s flood protection', () => {
 
     await expect(bot.startVideoStream(SOURCE)).rejects.toThrow('flood protection');
     expect(setupCommands()).toHaveLength(1);
+  });
+});
+
+describe('VoiceBot stream start order', () => {
+  it('gives the sidecar its source before announcing the stream', async () => {
+    const { bot, setupCommands, acceptLatest } = connectedBot();
+
+    const start = bot.startVideoStream(SOURCE);
+    await vi.waitFor(() => expect(setupCommands()).toHaveLength(1));
+
+    // A viewer can ask to join as soon as setupstream is answered, and the
+    // sidecar builds that viewer's peer from the source it last received.
+    // Announced first, the first stream after a codec change negotiated the
+    // old codec and showed black.
+    expect(harness.sidecarCalls).toEqual(['setSource']);
+
+    acceptLatest();
+    await start;
+    expect(bot.videoStreaming).toBe(true);
+  });
+
+  it('stops the encoder when the server refuses the stream', async () => {
+    const { bot, setupCommands, refuseLatest } = connectedBot();
+
+    const start = bot.startVideoStream(SOURCE);
+    await vi.waitFor(() => expect(setupCommands()).toHaveLength(1));
+    refuseLatest();
+
+    await expect(start).rejects.toThrow('refused by the server');
+    expect(harness.sidecarCalls).toEqual(['setSource', 'stopSource']);
+  });
+
+  it('announces nothing when the source cannot be used', async () => {
+    const { bot, setupCommands } = connectedBot();
+    harness.refuseValidation = true;
+
+    await expect(bot.startVideoStream(SOURCE)).rejects.toThrow('Video source blocked');
+
+    expect(setupCommands()).toHaveLength(0);
+    expect(harness.sidecarCalls).toEqual([]);
+  });
+
+  // A single-connection IPTV service is why a named preset skips the probe:
+  // the probe opens its own connection before FFmpeg does. The new order
+  // must not add one — the source is still opened once, by FFmpeg.
+  it('with a fixed preset, opens the source once and never probes it', async () => {
+    const { bot, setupCommands, acceptLatest } = connectedBot();
+
+    const start = bot.startVideoStream(SOURCE, '1080p');
+    await vi.waitFor(() => expect(setupCommands()).toHaveLength(1));
+    acceptLatest();
+    await start;
+
+    expect(harness.timeline).toEqual(['setSource', 'setupstream']);
+  });
+
+  it('with Auto, probes first, then sets the source, then announces', async () => {
+    const { bot, setupCommands, acceptLatest } = connectedBot();
+
+    const start = bot.startVideoStream(SOURCE, 'auto');
+    await vi.waitFor(() => expect(setupCommands()).toHaveLength(1));
+    acceptLatest();
+    await start;
+
+    expect(harness.timeline).toEqual(['probe', 'setSource', 'setupstream']);
   });
 });

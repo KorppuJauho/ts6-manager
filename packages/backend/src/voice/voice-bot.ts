@@ -4,7 +4,7 @@ import { Ts3Client, type Ts3ClientOptions, generateIdentity, type IdentityData, 
 import { AudioPipeline, FRAME_MS, BYTES_PER_FRAME } from './audio/pipeline.js';
 import { PlayQueue, type QueueItem } from './playlist/queue.js';
 import { fetchIcyMetadata } from './audio/icy-metadata.js';
-import { StreamSignaling, type SignalingMessage } from './streaming/stream-signaling.js';
+import { StreamSignaling, type ActiveStream, type SignalingMessage } from './streaming/stream-signaling.js';
 import { SidecarClient } from './streaming/sidecar-client.js';
 import { SidecarProcess, type SidecarConfig } from './streaming/sidecar-process.js';
 import {
@@ -1199,23 +1199,14 @@ export class VoiceBot extends EventEmitter {
       this._streamNotificationsRegistered = true;
     }
 
-    const stream = await this.signaling.setupStream({
-      name: `${this.config.nickname} Stream`,
-      type: 3,
-      bitrate: 4608,
-      // Public. This was a setting, and it made no visible difference: the
-      // bot accepts every join request itself, and what viewers saw as
-      // "waiting to be let in" was the sidecar's ICE gathering, not access
-      // control. 0 is what the setting's default sent.
-      accessibility: 0,
-      mode: 1,
-      viewerLimit: 0,
-      audio: true,
-    });
-    this._activeStreamId = stream.id;
-    this._videoStreaming = true;
-    this._videoSource = source;
-    this._videoStartedAt = Date.now();
+    // The source is set on the sidecar before the stream is announced, not
+    // after. A viewer's client asks to join the moment setupstream is
+    // answered, and the sidecar builds that viewer's peer — its SDP codec and,
+    // for H.264, the level from the frame size — from the profile of the last
+    // source it was given. Announcing first meant the first stream after a
+    // codec change, or after a sidecar restart, negotiated the old codec and
+    // carried the new one: a black picture with no decoder, fixed only by
+    // starting the stream again.
 
     // Resolve YouTube/streaming URLs via yt-dlp, then start ffmpeg.
     // The display title resolves alongside: it may need its own yt-dlp call,
@@ -1261,6 +1252,31 @@ export class VoiceBot extends EventEmitter {
       this._videoEncoder,
       this._videoHwDevice,
     );
+
+    let stream: ActiveStream;
+    try {
+      stream = await this.signaling.setupStream({
+        name: `${this.config.nickname} Stream`,
+        type: 3,
+        bitrate: 4608,
+        // Public. This was a setting, and it made no visible difference: the
+        // bot accepts every join request itself, and what viewers saw as
+        // "waiting to be let in" was the sidecar's ICE gathering, not access
+        // control. 0 is what the setting's default sent.
+        accessibility: 0,
+        mode: 1,
+        viewerLimit: 0,
+        audio: true,
+      });
+    } catch (err) {
+      // The encoder is already running for a stream the server turned down.
+      await this.sidecarHttp.stopSource().catch(() => { });
+      throw err;
+    }
+    this._activeStreamId = stream.id;
+    this._videoStreaming = true;
+    this._videoSource = source;
+    this._videoStartedAt = Date.now();
 
     this.updateStreamingNickname(title);
 
