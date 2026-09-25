@@ -677,6 +677,36 @@ why the block could also trip at an unhurried pace. It stays rare in normal
 use; the hold makes sure the bot does not make it worse, and the message
 tells whoever was typing why nothing happened.
 
+### The first stream after a codec change was black
+
+Seen in production and on the test rig alike: after changing the codec in
+Settings → Streaming, or after the sidecar restarted, the first stream
+showed black — the client received packets at full rate, but reported
+`0x0 0fps` and no decoder. Stopping and starting again always worked.
+
+The start announced the stream (`setupstream`) before it gave the sidecar
+its source. A viewer's client asks to join the moment the stream is
+announced, and the sidecar builds that viewer's peer — the codec in its SDP
+and, for H.264, the level derived from the frame size — from the profile of
+the *last* source it was given. The new source arrived a second or so later,
+so the first stream negotiated the previous codec (or, after a restart, the
+default one) and carried the new one. The second stream worked because by
+then the previous profile was the right one. This is the "three places must
+agree" failure from the VP9 section, reached through ordering rather than
+code.
+
+The start now resolves and probes the source, hands it to the sidecar, and
+only then announces the stream, so no peer can exist before the profile it
+needs. A source that fails to resolve no longer leaves an announced stream
+behind, and a stream the server refuses stops the encoder it started.
+
+The reorder opens no extra connection to the source, which matters for an
+IPTV service that allows only one. Viewers receive from the sidecar, never
+from the source; with a named preset FFmpeg's is still the only connection
+(the frame size comes from the preset, so nothing is probed), and with Auto
+the probe still opens and closes its own before FFmpeg opens its — only the
+announcement moved, to after both.
+
 ## Open follow-ups
 
 1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
