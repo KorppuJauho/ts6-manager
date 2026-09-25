@@ -1,6 +1,6 @@
 // TS3 Protocol Library (ported from DreamSpeak/TSLib)
 
-export { Ts3Client } from './client.js';
+export { Ts3Client, CONNECTION_REFUSED_ERRORS } from './client.js';
 export type { Ts3ClientOptions } from './client.js';
 export { buildCommand, parseCommand, tsEscape, tsUnescape } from './commands.js';
 export type { ParsedCommand } from './commands.js';
