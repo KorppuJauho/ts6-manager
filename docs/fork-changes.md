@@ -258,6 +258,8 @@ enforced instead.
 | Radio stations ordered by id | `fix(bot): list radio stations…` | `!radio <id>` means ids are what users type; alphabetical order renumbered them on every insert |
 | `python3` + `build-essential` in base images | `build(docker): install a native-module toolchain…` | node-gyp builds `@discordjs/opus`, `cpu-features`, `ssh2` at install time |
 | `docker-compose.coolify.yml` removed | `chore(compose): remove the Coolify compose file…` | It ran upstream's Docker Hub images with no sidecar and no `SIDECAR_TOKEN`, and pinned one install's Coolify network ID; nobody deploys this fork on Coolify to keep it working |
+| `docker-compose.hub.yml` and `docker-compose.dev.yml` removed | `chore: remove upstream's Docker Hub compose files…` | Both ran clusterzx's Docker Hub images (`clusterzx/ts6-manager:backend`, `:backend-dev`), so a deployment using either ran upstream's code with none of this fork in it. `docker-compose.yml` builds this fork and `docker-compose.ghcr.yml` runs its CI images |
+| Translated READMEs removed | same commit | `README.{fr,de,es,it}.md` described `coom/ts6-manager` and none of this fork, and linked the removed Docker Hub compose file. The web UI keeps its five languages; only the READMEs went |
 
 ### Settings, and the dependency fixes
 
@@ -591,10 +593,10 @@ pushes them to `ghcr.io/korppujauho/ts6-manager-{backend,frontend,sidecar}`,
 tagged by branch, by commit SHA, and `latest` on the default branch.
 `docker-compose.ghcr.yml` runs them.
 
-Upstream has no equivalent, and `docker-compose.hub.yml` — which does exist
-upstream — points at `clusterzx/ts6-manager:*`, so a deployment using it runs
-**upstream's** code, not this fork's. That file is left alone; the new one
-is separate rather than a rewrite of it.
+Upstream has no equivalent. Its `docker-compose.hub.yml` pointed at
+`clusterzx/ts6-manager:*`, so a deployment using it ran **upstream's** code,
+not this fork's; it was kept at first and has since been removed (see
+"Smaller changes").
 
 The motive is that building on the deployment host has failed twice in ways CI
 could not reproduce: a `cpu-features` toolchain error, and the umask problem
