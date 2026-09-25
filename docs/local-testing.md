@@ -148,11 +148,16 @@ its container manager) and set it in `.env`:
 TS_SERVER_IMAGE=<the image:tag your server uses>
 ```
 
-Confirm two things against that image's own documentation, since they vary:
-the licence-acceptance environment variable (the compose files use
-`TS3SERVER_LICENSE=accept`, which the official images have used), and the data
-directory if you want state to persist — the compose files deliberately keep
-the server ephemeral so `docker compose down -v` gives a clean slate.
+The compose files accept the licence and switch on the query interfaces
+under both naming schemes: `TSSERVER_*` for TeamSpeak 6 and
+`TS3SERVER_LICENSE` for TeamSpeak 3. A TeamSpeak 6 server without the
+acknowledgement exits at once and restarts forever, and it starts with
+WebQuery off — the only interface the manager speaks — so both are required,
+not optional. An image that uses other names lists its own:
+`docker run --rm <image> tsserver --help`.
+
+The compose files deliberately keep the server ephemeral, so
+`docker compose down -v` gives a clean slate — and a new API key.
 
 ## Getting the WebQuery API key
 

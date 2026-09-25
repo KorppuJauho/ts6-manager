@@ -24,10 +24,17 @@ services:
     container_name: ts6-test-server
     restart: unless-stopped
     environment:
-      # Most TeamSpeak server images refuse to start without an explicit
-      # licence acknowledgement. Check your image's docs for the exact name;
-      # this is the variable the official images have used.
+      # TeamSpeak 6 reads TSSERVER_*; TS3SERVER_LICENSE is the TeamSpeak 3
+      # image's name and stays for anyone testing against one. Without the
+      # TSSERVER_ acknowledgement a TS6 server exits at once and restarts
+      # forever.
       - TS3SERVER_LICENSE=accept
+      - TSSERVER_LICENSE_ACCEPTED=accept
+      # Both query interfaces are off by default on TS6. HTTP is WebQuery,
+      # which is everything the manager speaks; SSH backs only the
+      # server-access recovery feature.
+      - TSSERVER_QUERY_HTTP_ENABLED=1
+      - TSSERVER_QUERY_SSH_ENABLED=1
     ports:
       # Voice. UDP — this is the one that needs mirrored networking on WSL2
       # for a Windows TeamSpeak client to reach it over localhost.
