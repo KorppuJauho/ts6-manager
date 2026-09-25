@@ -707,6 +707,34 @@ from the source; with a named preset FFmpeg's is still the only connection
 the probe still opens and closes its own before FFmpeg opens its — only the
 announcement moved, to after both.
 
+### Software VP8 and VP9 now run at constant bitrate
+
+A VP9 software stream at 4K was reported by the client at 25 Mbit/s with
+3 % packet loss, against a 9.5 Mbit/s preset. libvpx treats `-maxrate` as a
+hint: it stays in variable-bitrate mode unless `-minrate` equals the target
+too. x264, VAAPI and NVENC hold `-maxrate` on their own, so only the two
+libvpx profiles were affected. `EncoderProfile.rateArgs` now adds `-minrate`
+for them.
+
+Measured with the sidecar image's FFmpeg and the exact stream flags:
+
+| Source | Target | Before | With `-minrate` |
+|---|---|---|---|
+| 1080p, detailed (noise) | VP8 5500k | 6.2 Mbit/s | 5.5 |
+| 1080p, detailed (noise) | VP9 5500k | 10.4 | 7.3 |
+| 1080p, plain | VP9 5500k | 3.8 (budget unspent) | 5.5 |
+| 4K YouTube video, 8 s | VP9 9500k | 13.4 | 12.8 |
+
+That last row is the limit of this fix. On detailed 4K video libvpx at
+`-cpu-used 8` still runs about a third over, and not because it cannot go
+lower — pinned at its coarsest quantizer the same clip needs 0.5 Mbit/s. The
+larger share is keyframes: `-g 30` puts one every second, and on that clip
+they are 19 % of the bits at 2.5 Mbit each, a quarter of a second's budget in
+one frame and a burst on the wire. At `-g 300` the same stream comes to
+10.4 Mbit/s. The one-second interval is deliberate — FFmpeg cannot be asked
+for a keyframe, so it is what bounds how long a new viewer waits for a
+picture — so changing it is recorded below as a decision, not taken here.
+
 ## Open follow-ups
 
 1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
@@ -756,3 +784,11 @@ announcement moved, to after both.
    server's permission setup, which the manager cannot assume it may change,
    and an exempt client can also flood the server itself. An operator who
    wants it can grant it in TeamSpeak.
+7. **Keyframe interval against software VP9 bitrate.** `-g 30` (a keyframe
+   each second) costs a detailed 4K VP9 stream about a fifth of its bits and
+   sends each keyframe as a ~2.5 Mbit burst; see "Software VP8 and VP9 now
+   run at constant bitrate" above. A longer interval, or capping keyframe
+   size with libvpx's `-max-intra-rate`, would bring it to target, at the
+   cost of a longer wait for a joining viewer or a visible quality pulse at
+   each keyframe. Worth deciding with the hardware encoders in view too: the
+   same interval applies to them.
