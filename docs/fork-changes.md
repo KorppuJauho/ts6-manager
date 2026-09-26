@@ -813,6 +813,11 @@ Command triggers bound to a channel still need one extra session per
 channel, because TeamSpeak only delivers channel chat to a query client
 sitting in that channel.
 
+Closing a session now sends ServerQuery `quit` first. Without it, TeamSpeak
+6 left the socket in CLOSE_WAIT and kept listing the query client. On the
+test server, the listener of a disabled flow was still there minutes after
+the backend had closed its end.
+
 ### Resetting the SSH host-key pin
 
 coom 91a483f pins the server's SSH host key on first use, and nothing ever
@@ -821,6 +826,7 @@ edited to point elsewhere, was refused for good. Now the pin is cleared when
 a connection's host or SSH port changes. Settings → Connections → Edit also
 has **Forget SSH host key** for the same-address case. Either action, like
 any SSH credential change, reopens that server's sessions straight away.
+Saving the form with the SSH fields unchanged does not.
 A key that changes on its own is still refused, as a fatal error with no
 retry loop, and the log names the fix.
 
