@@ -16,6 +16,8 @@ export declare interface EventBridge {
 
 export class EventBridge extends EventEmitter {
   private connections: Map<string, SshQueryClient> = new Map();
+  /** Connects still loading their server config, keyed like the maps they will land in. */
+  private pending: Map<string, Promise<void>> = new Map();
 
   constructor(private prisma: PrismaClient) {
     super();
@@ -28,7 +30,24 @@ export class EventBridge extends EventEmitter {
   async connectServer(configId: number, sid: number): Promise<void> {
     const key = this.makeKey(configId, sid);
     if (this.connections.has(key)) return;
+    return this.dedupe(key, () => this.openServerConnection(configId, sid, key));
+  }
 
+  /**
+   * Runs `open` once per key. A session is only claimed in its map after the
+   * server config has loaded, so without this two callers arriving in that
+   * window — the engine and a file-browser request, say — each open a session,
+   * and TeamSpeak counts both against the same IP's flood allowance.
+   */
+  private dedupe(key: string, open: () => Promise<void>): Promise<void> {
+    const inFlight = this.pending.get(key);
+    if (inFlight) return inFlight;
+    const attempt = open().finally(() => this.pending.delete(key));
+    this.pending.set(key, attempt);
+    return attempt;
+  }
+
+  private async openServerConnection(configId: number, sid: number, key: string): Promise<void> {
     const serverConfig = await this.prisma.tsServerConfig.findUnique({
       where: { id: configId },
     });
@@ -146,7 +165,10 @@ export class EventBridge extends EventEmitter {
   async connectCommandListener(configId: number, sid: number, channelId: number): Promise<void> {
     const key = this.makeCmdKey(configId, sid, channelId);
     if (this.commandListeners.has(key)) return;
+    return this.dedupe(key, () => this.openCommandListener(configId, sid, channelId, key));
+  }
 
+  private async openCommandListener(configId: number, sid: number, channelId: number, key: string): Promise<void> {
     const serverConfig = await this.prisma.tsServerConfig.findUnique({ where: { id: configId } });
     if (!serverConfig?.sshUsername || !serverConfig.sshPassword || !serverConfig.sshPort) return;
 
