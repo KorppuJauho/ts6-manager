@@ -23,12 +23,20 @@ export function sshPinOutdated(
   return hostChanged || portChanged;
 }
 
-/** Fields whose change must reach the open ServerQuery SSH sessions. */
-const SSH_SESSION_FIELDS = ['host', 'sshPort', 'sshUsername', 'sshPassword', 'sshHostKeyFp'];
-
-/** True when the data written by an update affects the server's SSH sessions. */
-export function touchesSshSession(written: Record<string, unknown>): boolean {
-  return SSH_SESSION_FIELDS.some((field) => field in written);
+/**
+ * True when an update changes what the server's SSH sessions connect with.
+ * The edit form sends every field back, so presence alone is not a change:
+ * saving a new name must not bounce the sessions every flow depends on.
+ */
+export function sshSessionChanged(
+  current: { host: string; sshPort: number; sshUsername: string | null },
+  written: Record<string, unknown>,
+): boolean {
+  if (sshPinOutdated(current, written)) return true;
+  if ('sshUsername' in written && written.sshUsername !== current.sshUsername) return true;
+  // Stored encrypted, so it cannot be compared; the form only sends it when typed.
+  if ('sshPassword' in written) return true;
+  return 'sshHostKeyFp' in written;
 }
 
 /** Reopens a server's SSH sessions so changed settings apply without a restart (non-blocking). */
@@ -142,6 +150,7 @@ serverRoutes.put('/:configId', requireRole('admin'), async (req: Request, res: R
 
     const current = await prisma.tsServerConfig.findUnique({ where: { id } });
     if (!current) throw new AppError(404, 'Server config not found');
+    const sessionChanged = sshSessionChanged(current, data);
     if (sshPinOutdated(current, data)) data.sshHostKeyFp = null;
 
     const server = await prisma.tsServerConfig.update({ where: { id }, data });
@@ -149,7 +158,7 @@ serverRoutes.put('/:configId', requireRole('admin'), async (req: Request, res: R
     // Refresh connection pool
     const pool: ConnectionPool = req.app.locals.connectionPool;
     await pool.refreshClient(id);
-    if (touchesSshSession(data)) restartSshSessions(req, id);
+    if (sessionChanged) restartSshSessions(req, id);
 
     res.json({ id: server.id, name: server.name });
   } catch (err) { next(err); }

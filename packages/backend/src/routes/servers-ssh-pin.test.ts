@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sshPinOutdated, touchesSshSession } from './servers.routes.js';
+import { sshPinOutdated, sshSessionChanged } from './servers.routes.js';
 
 const CURRENT = { host: 'ts.example.net', sshPort: 10022 };
 
@@ -23,15 +23,23 @@ describe('sshPinOutdated', () => {
   });
 });
 
-describe('touchesSshSession', () => {
+describe('sshSessionChanged', () => {
+  const SERVER = { ...CURRENT, sshUsername: 'serveradmin' };
+
   it('ignores updates that only touch WebQuery settings', () => {
-    expect(touchesSshSession({ name: 'x', webqueryPort: 10080, apiKey: 'enc', useHttps: true })).toBe(false);
+    expect(sshSessionChanged(SERVER, { name: 'x', webqueryPort: 10080, apiKey: 'enc', useHttps: true })).toBe(false);
+  });
+
+  it('ignores a save that resubmits the unchanged SSH fields', () => {
+    // What the edit dialog sends when only the name was changed.
+    expect(sshSessionChanged(SERVER, { name: 'x', host: 'ts.example.net', sshPort: 10022, sshUsername: 'serveradmin' })).toBe(false);
   });
 
   it('restarts sessions when SSH credentials, endpoint or pin change', () => {
-    expect(touchesSshSession({ sshPassword: 'enc' })).toBe(true);
-    expect(touchesSshSession({ sshUsername: 'serveradmin' })).toBe(true);
-    expect(touchesSshSession({ host: 'new.example.net' })).toBe(true);
-    expect(touchesSshSession({ sshHostKeyFp: null })).toBe(true);
+    expect(sshSessionChanged(SERVER, { sshPassword: 'enc' })).toBe(true);
+    expect(sshSessionChanged(SERVER, { sshUsername: 'admin2' })).toBe(true);
+    expect(sshSessionChanged(SERVER, { host: 'new.example.net' })).toBe(true);
+    expect(sshSessionChanged(SERVER, { sshPort: 10023 })).toBe(true);
+    expect(sshSessionChanged(SERVER, { sshHostKeyFp: null })).toBe(true);
   });
 });
