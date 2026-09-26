@@ -761,6 +761,69 @@ manager retried, ten times over. 1796 never appeared.
 3329, and the bot reads the same set. A refused connection fails at once
 with the server's reason; 2568 is the error of the one command that drew it.
 
+## Fixes to coom's changes (fork only)
+
+This fork builds on [coom/ts6-manager](https://github.com/coom/ts6-manager),
+not on upstream directly. The entries here fix problems that coom's own
+changes introduced. Upstream clusterzx does not have them, and they are not
+suggestions for other forks.
+
+### One ServerQuery session per server, shared
+
+Flows with event or command triggers stopped firing after coom's changes.
+Webhook and cron triggers kept working. The cause was the number of SSH
+ServerQuery sessions the backend opened to the same server:
+
+- the flow engine's own session;
+- one more from the connection journal (coom 7814d4a), which built its own
+  `EventBridge`;
+- one more from the Discord bridge's presence events (coom 75b961c),
+  deliberately separate because the engine closed sessions its flows no
+  longer used.
+
+They all log in as the same user from the same IP, and TeamSpeak's
+anti-flood counts them against one allowance. On the TS6 test server,
+running just the engine and the journal produced 14 `524 client is
+flooding` errors. Event registrations failed, and the keepalive `whoami`s
+failed, which forced a disconnect. The server then refused the reconnect
+("Connection lost before handshake"). The engine's session was dead within
+about 90 seconds. With the journal's session removed, the same run had no
+errors.
+
+`EventBridge` now tracks who holds each server:sid session. The engine, the
+journal and the Discord bridge each `acquire` it under their own name, and
+it closes only when the last holder calls `release`. The file browser still
+opens a session on demand without holding it. Each consumer listens on the
+shared bridge and filters out events that are not its own: other servers,
+other virtual servers, and the engine's per-channel command listeners.
+
+Four gaps in `SshQueryClient` had turned a temporary flood into a session
+that stayed dead until restart:
+
+- A 524 reply to a keepalive counted as a failed keepalive; now only an
+  unanswered one does.
+- A failed connect never tried again, because only a session that had been
+  up reconnected. Now every non-fatal failure backs off (1 s, doubling to
+  30 s) and retries.
+- Event registration gave up on a 524. It now waits and retries (3 s, 6 s,
+  12 s), and logs the event types that still failed.
+- Concurrent connects could open duplicate sessions.
+
+Command triggers bound to a channel still need one extra session per
+channel, because TeamSpeak only delivers channel chat to a query client
+sitting in that channel.
+
+### Resetting the SSH host-key pin
+
+coom 91a483f pins the server's SSH host key on first use, and nothing ever
+cleared the pin. A server reinstalled at the same address, or a connection
+edited to point elsewhere, was refused for good. Now the pin is cleared when
+a connection's host or SSH port changes. Settings → Connections → Edit also
+has **Forget SSH host key** for the same-address case. Either action, like
+any SSH credential change, reopens that server's sessions straight away.
+A key that changes on its own is still refused, as a fatal error with no
+retry loop, and the log names the fix.
+
 ## Open follow-ups
 
 1. **Confirm VP9 hardware encoding on the refactored path.** The hardware
