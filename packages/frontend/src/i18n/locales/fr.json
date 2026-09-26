@@ -176,7 +176,12 @@
       "toastUpdateFailed": "Échec de la mise à jour",
       "toastTestSuccess": "Connexion réussie",
       "toastTestFailed": "Échec de la connexion",
-      "unchanged": "(inchangé)"
+      "unchanged": "(inchangé)",
+      "sshHostKeyPinned": "Clé d'hôte SSH épinglée. Si ce serveur TeamSpeak a été réinstallé et que sa clé a changé, oubliez-la pour que la prochaine connexion fasse confiance à la nouvelle.",
+      "sshHostKeyNotPinned": "Aucune clé d'hôte SSH épinglée pour l'instant. La première connexion SSH l'épingle.",
+      "forgetSshHostKey": "Oublier la clé d'hôte SSH",
+      "toastHostKeyForgotten": "Clé d'hôte SSH oubliée. La prochaine connexion épinglera la clé actuelle du serveur.",
+      "toastHostKeyForgetFailed": "Impossible d'oublier la clé d'hôte SSH"
     },
     "users": {
       "subtitle": "Gérer les utilisateurs et les rôles de l'application",

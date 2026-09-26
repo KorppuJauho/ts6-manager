@@ -34,7 +34,12 @@
         "toastCreateFailed": "Failed to create",
         "toastUpdateFailed": "Failed to update",
         "toastTestSuccess": "Connection successful",
-        "toastTestFailed": "Connection failed"
+        "toastTestFailed": "Connection failed",
+        "sshHostKeyPinned": "SSH host key pinned. If this TeamSpeak server was reinstalled and its key changed, forget it so the next connection trusts the new one.",
+        "sshHostKeyNotPinned": "No SSH host key pinned yet. The first SSH connection pins it.",
+        "forgetSshHostKey": "Forget SSH host key",
+        "toastHostKeyForgotten": "SSH host key forgotten. The next connection pins the server's current key.",
+        "toastHostKeyForgetFailed": "Could not forget the SSH host key"
       },
       "users": {
         "subtitle": "Manage webapp users and roles",
@@ -242,7 +247,12 @@
         "toastCreateFailed": "Échec de la création",
         "toastUpdateFailed": "Échec de la mise à jour",
         "toastTestSuccess": "Connexion réussie",
-        "toastTestFailed": "Échec de la connexion"
+        "toastTestFailed": "Échec de la connexion",
+        "sshHostKeyPinned": "Clé d'hôte SSH épinglée. Si ce serveur TeamSpeak a été réinstallé et que sa clé a changé, oubliez-la pour que la prochaine connexion fasse confiance à la nouvelle.",
+        "sshHostKeyNotPinned": "Aucune clé d'hôte SSH épinglée pour l'instant. La première connexion SSH l'épingle.",
+        "forgetSshHostKey": "Oublier la clé d'hôte SSH",
+        "toastHostKeyForgotten": "Clé d'hôte SSH oubliée. La prochaine connexion épinglera la clé actuelle du serveur.",
+        "toastHostKeyForgetFailed": "Impossible d'oublier la clé d'hôte SSH"
       },
       "users": {
         "subtitle": "Gérer les utilisateurs et les rôles de l'application",
@@ -450,7 +460,12 @@
         "toastCreateFailed": "Erstellen fehlgeschlagen",
         "toastUpdateFailed": "Aktualisieren fehlgeschlagen",
         "toastTestSuccess": "Verbindung erfolgreich",
-        "toastTestFailed": "Verbindung fehlgeschlagen"
+        "toastTestFailed": "Verbindung fehlgeschlagen",
+        "sshHostKeyPinned": "SSH-Hostschlüssel gespeichert. Wurde dieser TeamSpeak-Server neu installiert und hat sich sein Schlüssel geändert, vergiss ihn, damit die nächste Verbindung dem neuen vertraut.",
+        "sshHostKeyNotPinned": "Noch kein SSH-Hostschlüssel gespeichert. Die erste SSH-Verbindung speichert ihn.",
+        "forgetSshHostKey": "SSH-Hostschlüssel vergessen",
+        "toastHostKeyForgotten": "SSH-Hostschlüssel vergessen. Die nächste Verbindung speichert den aktuellen Schlüssel des Servers.",
+        "toastHostKeyForgetFailed": "SSH-Hostschlüssel konnte nicht vergessen werden"
       },
       "users": {
         "subtitle": "Webapp-Benutzer und -Rollen verwalten",
@@ -658,7 +673,12 @@
         "toastCreateFailed": "Error al crear",
         "toastUpdateFailed": "Error al actualizar",
         "toastTestSuccess": "Conexión exitosa",
-        "toastTestFailed": "Error de conexión"
+        "toastTestFailed": "Error de conexión",
+        "sshHostKeyPinned": "Clave de host SSH fijada. Si este servidor TeamSpeak se reinstaló y su clave cambió, olvídala para que la próxima conexión confíe en la nueva.",
+        "sshHostKeyNotPinned": "Todavía no hay ninguna clave de host SSH fijada. La primera conexión SSH la fija.",
+        "forgetSshHostKey": "Olvidar la clave de host SSH",
+        "toastHostKeyForgotten": "Clave de host SSH olvidada. La próxima conexión fijará la clave actual del servidor.",
+        "toastHostKeyForgetFailed": "No se pudo olvidar la clave de host SSH"
       },
       "users": {
         "subtitle": "Gestionar usuarios y roles de la aplicación",
@@ -866,7 +886,12 @@
         "toastCreateFailed": "Creazione non riuscita",
         "toastUpdateFailed": "Aggiornamento non riuscito",
         "toastTestSuccess": "Connessione riuscita",
-        "toastTestFailed": "Connessione non riuscita"
+        "toastTestFailed": "Connessione non riuscita",
+        "sshHostKeyPinned": "Chiave host SSH fissata. Se questo server TeamSpeak è stato reinstallato e la sua chiave è cambiata, dimenticala perché la prossima connessione si fidi di quella nuova.",
+        "sshHostKeyNotPinned": "Nessuna chiave host SSH ancora fissata. La prima connessione SSH la fissa.",
+        "forgetSshHostKey": "Dimentica la chiave host SSH",
+        "toastHostKeyForgotten": "Chiave host SSH dimenticata. La prossima connessione fisserà la chiave attuale del server.",
+        "toastHostKeyForgetFailed": "Impossibile dimenticare la chiave host SSH"
       },
       "users": {
         "subtitle": "Gestisci utenti e ruoli dell'app web",

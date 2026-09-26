@@ -176,7 +176,12 @@
       "toastUpdateFailed": "Aggiornamento non riuscito",
       "toastTestSuccess": "Connessione riuscita",
       "toastTestFailed": "Connessione non riuscita",
-      "unchanged": "(invariato)"
+      "unchanged": "(invariato)",
+      "sshHostKeyPinned": "Chiave host SSH fissata. Se questo server TeamSpeak è stato reinstallato e la sua chiave è cambiata, dimenticala perché la prossima connessione si fidi di quella nuova.",
+      "sshHostKeyNotPinned": "Nessuna chiave host SSH ancora fissata. La prima connessione SSH la fissa.",
+      "forgetSshHostKey": "Dimentica la chiave host SSH",
+      "toastHostKeyForgotten": "Chiave host SSH dimenticata. La prossima connessione fisserà la chiave attuale del server.",
+      "toastHostKeyForgetFailed": "Impossibile dimenticare la chiave host SSH"
     },
     "users": {
       "subtitle": "Gestisci utenti e ruoli dell'app web",

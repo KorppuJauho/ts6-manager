@@ -37,6 +37,8 @@ export interface ServerConfig {
   useHttps: boolean;
   sshPort: number;
   hasSshCredentials: boolean;
+  /** Whether an SSH host key is pinned (list endpoint only). */
+  hasSshHostKey?: boolean;
   enabled: boolean;
   createdAt: string;
 }

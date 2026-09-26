@@ -172,3 +172,35 @@ describe('EventBridge holders', () => {
     expect(bridge.getConnectedKeys()).toEqual([]);
   });
 });
+
+describe('EventBridge after a fatal failure', () => {
+  it('replaces a session that failed fatally on the next connect', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.acquire(1, 1, 'engine');
+    harness.clients[0].hasFatalError = true; // e.g. its host key stopped matching
+    harness.clients[0].isConnected = false;
+
+    await bridge.executeCommand(1, 1, 'whoami');
+
+    expect(harness.clients).toHaveLength(2);
+    expect(harness.clients[0].destroyed).toBe(true);
+    expect(bridge.isConnected(1, 1)).toBe(true);
+  });
+
+  it('restartServer reopens held sessions and command listeners of that server only', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.acquire(1, 1, 'engine');
+    await bridge.connectCommandListener(1, 1, 5);
+    await bridge.executeCommand(1, 2, 'whoami'); // on demand, nobody holds it
+    await bridge.acquire(2, 1, 'journal');
+    const [held, listener, unheld, otherServer] = harness.clients;
+
+    await bridge.restartServer(1);
+
+    expect([held.destroyed, listener.destroyed, unheld.destroyed, otherServer.destroyed]).toEqual([true, true, true, false]);
+    expect(harness.clients).toHaveLength(6);
+    expect(bridge.getConnectedKeys().sort()).toEqual(['1:1', '2:1']);
+    expect(bridge.getCommandListenerChannelIds(1, 1)).toEqual([5]);
+    expect(bridge.getKeysHeldBy('engine')).toEqual(['1:1']);
+  });
+});

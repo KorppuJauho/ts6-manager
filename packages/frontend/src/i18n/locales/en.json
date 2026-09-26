@@ -176,7 +176,12 @@
       "toastUpdateFailed": "Failed to update",
       "toastTestSuccess": "Connection successful",
       "toastTestFailed": "Connection failed",
-      "unchanged": "(unchanged)"
+      "unchanged": "(unchanged)",
+      "sshHostKeyPinned": "SSH host key pinned. If this TeamSpeak server was reinstalled and its key changed, forget it so the next connection trusts the new one.",
+      "sshHostKeyNotPinned": "No SSH host key pinned yet. The first SSH connection pins it.",
+      "forgetSshHostKey": "Forget SSH host key",
+      "toastHostKeyForgotten": "SSH host key forgotten. The next connection pins the server's current key.",
+      "toastHostKeyForgetFailed": "Could not forget the SSH host key"
     },
     "users": {
       "subtitle": "Manage webapp users and roles",

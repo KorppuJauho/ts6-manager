@@ -37,7 +37,14 @@ export class EventBridge extends EventEmitter {
 
   async connectServer(configId: number, sid: number): Promise<void> {
     const key = this.makeKey(configId, sid);
-    if (this.connections.has(key)) return;
+    const existing = this.connections.get(key);
+    if (existing && !existing.hasFatalError) return;
+    // A session that failed fatally (bad credentials, changed host key) does
+    // not retry by itself; a new connect replaces it once the cause is fixed.
+    if (existing) {
+      existing.destroy();
+      this.connections.delete(key);
+    }
     return this.dedupe(key, () => this.openServerConnection(configId, sid, key));
   }
 
@@ -180,6 +187,41 @@ export class EventBridge extends EventEmitter {
     return client.executeCommand(command);
   }
 
+  /**
+   * Closes every session to a server and reopens the ones still needed:
+   * held base sessions and all command listeners. Called after its SSH
+   * settings change or its pinned host key is forgotten, so the change takes
+   * effect without restarting the backend. Sessions nobody holds (a file
+   * browser's on-demand one) reopen on their next use.
+   */
+  async restartServer(configId: number): Promise<void> {
+    const prefix = `${configId}:`;
+    const baseSids = new Set<number>();
+    for (const [key, client] of this.connections) {
+      if (!key.startsWith(prefix)) continue;
+      client.destroy();
+      this.connections.delete(key);
+    }
+    for (const [key, held] of this.holders) {
+      if (key.startsWith(prefix) && held.size > 0) baseSids.add(Number(key.split(':')[1]));
+    }
+    const listeners: Array<[number, number]> = [];
+    for (const [key, client] of this.commandListeners) {
+      if (!key.startsWith(prefix)) continue;
+      client.destroy();
+      this.commandListeners.delete(key);
+      const [, sid, , channelId] = key.split(':');
+      listeners.push([Number(sid), Number(channelId)]);
+    }
+
+    await Promise.all([
+      ...Array.from(baseSids, (sid) => this.connectServer(configId, sid)),
+      ...listeners.map(([sid, channelId]) => this.connectCommandListener(configId, sid, channelId)),
+    ].map((p) => p.catch((err: any) => {
+      console.error(`[EventBridge] Reconnect after settings change failed for server ${configId}: ${err.message}`);
+    })));
+  }
+
   getConnectedKeys(): string[] {
     return Array.from(this.connections.keys());
   }
@@ -201,7 +243,12 @@ export class EventBridge extends EventEmitter {
 
   async connectCommandListener(configId: number, sid: number, channelId: number): Promise<void> {
     const key = this.makeCmdKey(configId, sid, channelId);
-    if (this.commandListeners.has(key)) return;
+    const existing = this.commandListeners.get(key);
+    if (existing && !existing.hasFatalError) return;
+    if (existing) {
+      existing.destroy();
+      this.commandListeners.delete(key);
+    }
     return this.dedupe(key, () => this.openCommandListener(configId, sid, channelId, key));
   }
 
