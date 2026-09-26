@@ -156,7 +156,7 @@ async function main() {
   voiceBotManager.setMusicCommandHandler(musicCommandHandler);
 
   // Discord bridge: slash commands, TS notifications, stats (non-blocking)
-  const discordBridge = new DiscordBridge(prisma, connectionPool, voiceBotManager);
+  const discordBridge = new DiscordBridge(prisma, connectionPool, voiceBotManager, botEngine.getEventBridge());
   app.locals.discordBridge = discordBridge;
   discordBridge.start().catch((err) => {
     console.error(`[Discord] Failed to start: ${err.message}`);
