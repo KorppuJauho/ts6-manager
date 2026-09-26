@@ -231,3 +231,25 @@ describe('reconnecting', () => {
     expect(harness.connections).toHaveLength(1);
   });
 });
+
+describe('destroy', () => {
+  it('says quit so the server drops the query client', async () => {
+    const client = makeClient();
+    await client.connect();
+
+    client.destroy();
+
+    expect(harness.written.at(-1)).toBe('quit');
+    expect(client.isConnected).toBe(false);
+  });
+
+  it('writes nothing to a session that never connected', async () => {
+    harness.refuse = 'drop';
+    const client = makeClient();
+    await client.connect().catch(() => { });
+
+    client.destroy();
+
+    expect(harness.written).not.toContain('quit');
+  });
+});

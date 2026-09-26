@@ -370,9 +370,17 @@ export class SshQueryClient extends EventEmitter {
       this.reconnectTimer = null;
     }
     this.rejectAllPending('Client destroyed');
-    if (this.shell) {
-      this.shell.close();
-      this.shell = null;
+    const shell = this.shell;
+    this.shell = null;
+    if (shell) {
+      // Just ending the SSH session leaves TeamSpeak 6 with the socket in
+      // CLOSE_WAIT and the query client still listed, apparently for good.
+      // "quit" is written ahead of the close on the same stream, so the
+      // server ends the session itself.
+      if (this.connected) {
+        try { shell.write('quit\n'); } catch { }
+      }
+      try { shell.close(); } catch { }
     }
     if (this.ssh) {
       this.ssh.end();
