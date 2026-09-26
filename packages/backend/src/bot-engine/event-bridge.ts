@@ -18,6 +18,14 @@ export class EventBridge extends EventEmitter {
   private connections: Map<string, SshQueryClient> = new Map();
   /** Connects still loading their server config, keyed like the maps they will land in. */
   private pending: Map<string, Promise<void>> = new Map();
+  /**
+   * Who needs each base session. The flow engine, the connection journal and
+   * the Discord bridge share one session per server:sid, because TeamSpeak
+   * counts every session from our IP against one flood allowance — a second
+   * session with the same login is what broke event delivery. A session
+   * closes only when its last holder lets go.
+   */
+  private holders: Map<string, Set<string>> = new Map();
 
   constructor(private prisma: PrismaClient) {
     super();
@@ -106,6 +114,32 @@ export class EventBridge extends EventEmitter {
         this.connections.delete(key);
       }
     }
+  }
+
+  /** Opens (or joins) the session for configId:sid and keeps it open for `holder`. */
+  async acquire(configId: number, sid: number, holder: string): Promise<void> {
+    const key = this.makeKey(configId, sid);
+    let held = this.holders.get(key);
+    if (!held) this.holders.set(key, held = new Set());
+    held.add(holder);
+    await this.connectServer(configId, sid);
+  }
+
+  /** Drops `holder`'s claim; the session closes once nobody holds it. */
+  async release(configId: number, sid: number, holder: string): Promise<void> {
+    const key = this.makeKey(configId, sid);
+    const held = this.holders.get(key);
+    held?.delete(holder);
+    if (held && held.size > 0) return;
+    this.holders.delete(key);
+    await this.disconnectServer(configId, sid);
+  }
+
+  /** The configId:sid keys `holder` currently holds. */
+  getKeysHeldBy(holder: string): string[] {
+    return Array.from(this.holders.entries())
+      .filter(([, held]) => held.has(holder))
+      .map(([key]) => key);
   }
 
   async disconnectServer(configId: number, sid: number): Promise<void> {
@@ -229,13 +263,12 @@ export class EventBridge extends EventEmitter {
   }
 
   destroy(): void {
-  // existing "base" SSH connections
     for (const client of this.connections.values()) {
       client.destroy();
     }
     this.connections.clear();
+    this.holders.clear();
 
-    // NEW: command listener SSH connections
     for (const client of this.commandListeners.values()) {
       client.destroy();
     }

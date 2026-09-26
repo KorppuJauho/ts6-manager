@@ -128,3 +128,47 @@ describe('EventBridge connects', () => {
     expect(bridge.isConnected(1, 1)).toBe(true);
   });
 });
+
+describe('EventBridge holders', () => {
+  it('keeps a session open while another holder still needs it', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.acquire(1, 1, 'engine');
+    await bridge.acquire(1, 1, 'journal');
+    expect(harness.clients).toHaveLength(1);
+
+    await bridge.release(1, 1, 'engine');
+    expect(harness.clients[0].destroyed).toBe(false);
+    expect(bridge.isConnected(1, 1)).toBe(true);
+
+    await bridge.release(1, 1, 'journal');
+    expect(harness.clients[0].destroyed).toBe(true);
+    expect(bridge.getConnectedKeys()).toEqual([]);
+  });
+
+  it('ignores a repeated release from the same holder', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.acquire(1, 1, 'engine');
+    await bridge.acquire(1, 1, 'journal');
+    await bridge.release(1, 1, 'engine');
+    await bridge.release(1, 1, 'engine');
+    expect(bridge.isConnected(1, 1)).toBe(true);
+  });
+
+  it('reports only the keys a holder holds', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.acquire(1, 1, 'engine');
+    await bridge.acquire(1, 2, 'journal');
+    expect(bridge.getKeysHeldBy('engine')).toEqual(['1:1']);
+    expect(bridge.getKeysHeldBy('journal')).toEqual(['1:2']);
+  });
+
+  it('closes an unheld on-demand session when the last holder releases', async () => {
+    // A file-browser request opens a session without holding it, as before.
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.executeCommand(1, 1, 'ftgetfilelist cid=1');
+    await bridge.acquire(1, 1, 'engine');
+    expect(harness.clients).toHaveLength(1);
+    await bridge.release(1, 1, 'engine');
+    expect(bridge.getConnectedKeys()).toEqual([]);
+  });
+});
