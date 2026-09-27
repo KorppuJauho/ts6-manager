@@ -45,7 +45,8 @@ vi.mock('ssh2', async () => {
       cb(null, ch);
       queueMicrotask(() => ch.emit('data', Buffer.from('TS3\nWelcome to the TeamSpeak ServerQuery interface.\n')));
     }
-    end() { this.emit('close'); }
+    // Asynchronous like ssh2's: the server's last replies arrive before the close.
+    end() { queueMicrotask(() => this.emit('close')); }
   }
   return { Client };
 });
@@ -245,6 +246,20 @@ describe('destroy', () => {
 
     expect(harness.written.at(-1)).toBe('quit');
     expect(client.isConnected).toBe(false);
+  });
+
+  it('stays dead when the server answers the quit', async () => {
+    const client = makeClient();
+    await client.connect();
+    const ready = vi.fn();
+    client.on('ready', ready);
+
+    client.destroy(); // the fake server answers "quit" with error id=0
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(ready).not.toHaveBeenCalled();
+    expect(client.isConnected).toBe(false);
+    expect(harness.written.filter((c) => c === 'whoami')).toHaveLength(0);
   });
 
   it('writes nothing to a session that never connected', async () => {

@@ -123,6 +123,11 @@ export class SshQueryClient extends EventEmitter {
           this.bannerReceived = false;
 
           channel.on('data', (data: Buffer) => {
+            // The server still answers the "quit" destroy() sends. Handled
+            // here, that reply read as a finished banner: the destroyed
+            // client announced itself ready, registered events on no shell,
+            // and started a keepalive.
+            if (this.destroyed || this.shell !== channel) return;
             this.onShellData(data);
             // Check if banner has been received after processing data
             if (!this.connected && this.bannerReceived) {
