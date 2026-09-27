@@ -9,7 +9,7 @@ const harness = vi.hoisted(() => ({
   written: [] as string[],
   writtenAt: [] as number[],
   reply: (_cmd: string): string | null => 'error id=0 msg=ok',
-  refuse: null as null | 'drop' | 'auth' | 'hostkey',
+  refuse: null as null | 'down' | 'drop' | 'auth' | 'hostkey',
 }));
 
 vi.mock('ssh2', async () => {
@@ -29,6 +29,7 @@ vi.mock('ssh2', async () => {
     constructor() { super(); harness.connections.push(this); }
     connect(opts: any) {
       queueMicrotask(() => {
+        if (harness.refuse === 'down') { this.emit('error', new Error('connect ECONNREFUSED 172.18.0.2:10022')); return; }
         if (harness.refuse === 'drop') { this.emit('error', new Error('Connection lost before handshake')); return; }
         if (harness.refuse === 'auth') { this.emit('error', new Error('All configured authentication methods failed')); return; }
         if (harness.refuse === 'hostkey') {
@@ -51,7 +52,7 @@ vi.mock('ssh2', async () => {
   return { Client };
 });
 
-const { SshQueryClient, FLOOD_RETRY_DELAYS_MS, sshHostKeyFingerprint } = await import('./ssh-query-client.js');
+const { SshQueryClient, FLOOD_RETRY_DELAYS_MS, BAN_WAIT_MS, sshHostKeyFingerprint } = await import('./ssh-query-client.js');
 const { QueryPacer, SSH_COMMANDS_PER_WINDOW, FLOOD_WINDOW_MS } = await import('./query-pacer.js');
 
 const OK = 'error id=0 msg=ok';
@@ -178,9 +179,9 @@ describe('registerEvents', () => {
 
 describe('reconnecting', () => {
   it('keeps trying after a failed attempt instead of giving up', async () => {
-    harness.refuse = 'drop';
+    harness.refuse = 'down';
     const client = makeClient();
-    await expect(client.connect()).rejects.toThrow(/before handshake/);
+    await expect(client.connect()).rejects.toThrow(/ECONNREFUSED/);
 
     await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000);
     expect(harness.connections).toHaveLength(4);
@@ -191,8 +192,38 @@ describe('reconnecting', () => {
     client.destroy();
   });
 
-  it('backs off to at most 30 seconds between attempts', async () => {
+  it('waits out a flood ban instead of knocking every 30 seconds', async () => {
+    // A connection dropped before the handshake is what the ban looks like,
+    // and on TS6 another attempt during it kept the ban going.
     harness.refuse = 'drop';
+    const client = makeClient();
+    await expect(client.connect()).rejects.toThrow(/before handshake/);
+
+    await vi.advanceTimersByTimeAsync(BAN_WAIT_MS - 1);
+    expect(harness.connections).toHaveLength(1);
+
+    harness.refuse = null;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(harness.connections).toHaveLength(2);
+    expect(client.isConnected).toBe(true);
+    client.destroy();
+  });
+
+  it('goes back to the short backoff once the refusal is something else', async () => {
+    harness.refuse = 'drop';
+    const client = makeClient();
+    await client.connect().catch(() => { });
+    harness.refuse = 'down';
+    await vi.advanceTimersByTimeAsync(BAN_WAIT_MS);
+    expect(harness.connections).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(2_000); // attempt 2 waits 2 s, not another ban period
+    expect(harness.connections).toHaveLength(3);
+    client.destroy();
+  });
+
+  it('backs off to at most 30 seconds between attempts', async () => {
+    harness.refuse = 'down';
     const client = makeClient();
     await client.connect().catch(() => { });
     await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000 + 8_000 + 16_000);

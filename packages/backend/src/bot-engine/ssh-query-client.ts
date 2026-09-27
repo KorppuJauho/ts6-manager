@@ -33,6 +33,20 @@ const FLOOD_ERROR = 'TS error 524';
  */
 export const FLOOD_RETRY_DELAYS_MS = [3000, 6000, 12000];
 
+/**
+ * Wait after the server drops a connection before the SSH handshake: what a
+ * query flood ban looks like from our side. The ban lasts
+ * serverinstance_serverquery_ban_time (600 s by default), and on the TS6
+ * test server another attempt during it kept it going, so backing off to
+ * 30 s left the manager banned for good. One attempt past the ban instead.
+ */
+export const BAN_WAIT_MS = 610_000;
+
+/** A connection closed by the server before any SSH exchange. */
+function refusedBeforeHandshake(err: Error): boolean {
+  return /before handshake|ECONNRESET/.test(err.message);
+}
+
 interface QueuedCommand {
   command: string;
   resolve: (result: string) => void;
@@ -69,6 +83,8 @@ export class SshQueryClient extends EventEmitter {
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private fatalError: boolean = false;
   private hostKeyRejected: boolean = false;
+  /** Set when the last attempt was dropped before the handshake; see BAN_WAIT_MS. */
+  private refusedByServer: boolean = false;
   private readonly nickSuffix = crypto.randomBytes(3).toString('hex'); // z.B. "a1b2c3"
   private reconnecting: boolean = false;
 
@@ -161,6 +177,7 @@ export class SshQueryClient extends EventEmitter {
       });
 
       this.ssh.on('error', (err: Error) => {
+        if (!this.connected && refusedBeforeHandshake(err)) this.refusedByServer = true;
         const isAuthError = err.message.includes('authentication') || err.message.includes('Auth');
         if (isAuthError) {
           this.fatalError = true;
@@ -584,12 +601,20 @@ export class SshQueryClient extends EventEmitter {
       this.reconnectTimer = null;
     }
 
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000);
+    let delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000);
+    if (this.refusedByServer) {
+      delay = BAN_WAIT_MS;
+      console.warn(
+        `[SshQueryClient] ${this.options.host}:${this.options.port} refused the connection before the SSH handshake — ` +
+        `usually a ServerQuery flood ban (600 s by default). Waiting it out.`,
+      );
+    }
     console.log(`[SshQueryClient] Reconnecting to ${this.options.host}:${this.options.port} in ${delay}ms (attempt ${this.reconnectAttempt + 1})`);
 
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectAttempt++;
       this.reconnecting = false;
+      this.refusedByServer = false;
       try {
         await this.connect();
       } catch (err: any) {
