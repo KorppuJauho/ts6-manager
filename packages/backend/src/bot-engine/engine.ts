@@ -414,11 +414,7 @@ export class BotEngine {
   }
 
   async disableFlow(flowId: number): Promise<void> {
-    this.animationManager.stopFlow(flowId);
-    this.teardownCronJobs(flowId);
-    this.webhookEntries = this.webhookEntries.filter(w => w.flowId !== flowId);
-    this.flows.delete(flowId);
-    this.executionCounts.delete(flowId);
+    this.unloadFlow(flowId);
 
     // Check if any remaining flows use the same SSH connections
     await this.cleanupUnusedSshConnections();
@@ -429,13 +425,26 @@ export class BotEngine {
   async reloadFlow(flowId: number): Promise<void> {
     const flow = this.flows.get(flowId);
     if (flow) {
-      // Flow was active — disable then re-enable
-      await this.disableFlow(flowId);
+      // Swap the flow in place, and only then let go of sessions it no longer
+      // needs. Disabling first closed its command listener and enabling opened
+      // a new one: a login and five commands on every Save, against a server
+      // limit of ten commands per three seconds.
+      this.unloadFlow(flowId);
       const dbFlow = await this.prisma.botFlow.findUnique({ where: { id: flowId } });
       if (dbFlow?.enabled) {
         await this.enableFlow(flowId);
       }
+      await this.cleanupUnusedSshConnections();
     }
+  }
+
+  /** Stops a flow's triggers and forgets it, leaving its SSH sessions to the caller. */
+  private unloadFlow(flowId: number): void {
+    this.animationManager.stopFlow(flowId);
+    this.teardownCronJobs(flowId);
+    this.webhookEntries = this.webhookEntries.filter(w => w.flowId !== flowId);
+    this.flows.delete(flowId);
+    this.executionCounts.delete(flowId);
   }
 
   handleWebhookRequest(req: Request, res: Response): void {
