@@ -6,6 +6,9 @@ const harness = vi.hoisted(() => ({
   clients: [] as any[],
   holdConnect: null as Promise<void> | null,
   failConnect: null as { fatal: boolean } | null,
+  /** What successive registerEvents calls report as failed; empty once used up. */
+  registerResults: [] as string[][],
+  registerCalls: 0,
 }));
 
 vi.mock('./ssh-query-client.js', async () => {
@@ -28,8 +31,8 @@ vi.mock('./ssh-query-client.js', async () => {
       this.isConnected = true;
       this.emit('ready');
     }
-    async registerEvents() { return []; }
-    async registerCommandListener() { }
+    async registerEvents() { harness.registerCalls++; return harness.registerResults.shift() ?? []; }
+    async registerCommandListener() { return []; }
     async executeCommand(cmd: string) { this.commands.push(cmd); return `ok ${cmd}`; }
     destroy() { this.destroyed = true; this.isConnected = false; }
   }
@@ -37,7 +40,7 @@ vi.mock('./ssh-query-client.js', async () => {
 });
 vi.mock('../utils/crypto.js', () => ({ decrypt: (s: string) => s }));
 
-const { EventBridge } = await import('./event-bridge.js');
+const { EventBridge, REGISTER_RETRY_MS } = await import('./event-bridge.js');
 
 const SERVER = { id: 1, host: 'ts.test', sshPort: 10022, sshUsername: 'serveradmin', sshPassword: 'pw', sshHostKeyFp: null };
 
@@ -60,6 +63,8 @@ beforeEach(() => {
   harness.clients = [];
   harness.holdConnect = null;
   harness.failConnect = null;
+  harness.registerResults = [];
+  harness.registerCalls = 0;
 });
 
 describe('EventBridge connects', () => {
@@ -202,5 +207,54 @@ describe('EventBridge after a fatal failure', () => {
     expect(bridge.getConnectedKeys().sort()).toEqual(['1:1', '2:1']);
     expect(bridge.getCommandListenerChannelIds(1, 1)).toEqual([5]);
     expect(bridge.getKeysHeldBy('engine')).toEqual(['1:1']);
+  });
+});
+
+describe('EventBridge registration retries', () => {
+  it('registers again later instead of leaving the session deaf', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => { });
+    try {
+      harness.registerResults = [['server', 'textserver'], ['textserver']];
+      const bridge = new EventBridge(stubPrisma());
+      const connected = vi.fn();
+      bridge.on('sshConnected', connected);
+
+      await bridge.connectServer(1, 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.registerCalls).toBe(1);
+      expect(connected).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(REGISTER_RETRY_MS);
+      expect(harness.registerCalls).toBe(2);
+      await vi.advanceTimersByTimeAsync(REGISTER_RETRY_MS);
+      expect(harness.registerCalls).toBe(3);
+      expect(connected).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(REGISTER_RETRY_MS * 3);
+      expect(harness.registerCalls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('stops retrying once the session is closed', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => { });
+    try {
+      harness.registerResults = [['server'], ['server'], ['server']];
+      const bridge = new EventBridge(stubPrisma());
+      await bridge.acquire(1, 1, 'engine');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.registerCalls).toBe(1);
+
+      await bridge.release(1, 1, 'engine');
+      await vi.advanceTimersByTimeAsync(REGISTER_RETRY_MS * 3);
+      expect(harness.registerCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
   });
 });

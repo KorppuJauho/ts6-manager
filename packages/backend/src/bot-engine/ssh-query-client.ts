@@ -299,7 +299,8 @@ export class SshQueryClient extends EventEmitter {
     return failed;
   }
 
-  async registerCommandListener(sid: number, channelId: number): Promise<void> {
+  /** Joins the channel and registers its chat; resolves with the steps that failed. */
+  async registerCommandListener(sid: number, channelId: number): Promise<string[]> {
     console.log(`[SshQueryClient] Registering command listener for sid=${sid}, channelId=${channelId} on ${this.options.host}`);
 
     await this.executeWithFloodRetry(`use sid=${sid}`);
@@ -315,9 +316,11 @@ export class SshQueryClient extends EventEmitter {
       }
     }
 
+    const failed: string[] = [];
+
     // Move query client into the channel (required for channel chat notifications)
     try {
-      const who = await this.executeCommand('whoami');
+      const who = await this.executeWithFloodRetry('whoami');
       const first = (who.split('\n')[0] || '').trim();
       const me = parseQueryResponse(first)[0] || {};
       const clid =
@@ -331,12 +334,17 @@ export class SshQueryClient extends EventEmitter {
         })();
 
       if (clid) {
-        await this.executeCommand(`clientmove clid=${clid} cid=${channelId}`);
+        await this.executeWithFloodRetry(`clientmove clid=${clid} cid=${channelId}`);
       } else {
         console.warn('[SshQueryClient] whoami did not return clid; cannot clientmove');
+        failed.push('clientmove');
       }
     } catch (err: any) {
-      console.warn(`[SshQueryClient] Failed to move query client to channel ${channelId}: ${err.message}`);
+      // 770: already in that channel, which is where it needs to be.
+      if (!String(err.message || '').includes('TS error 770')) {
+        console.warn(`[SshQueryClient] Failed to move query client to channel ${channelId}: ${err.message}`);
+        failed.push('clientmove');
+      }
     }
 
     // Register ONLY textchannel for this channel
@@ -345,10 +353,12 @@ export class SshQueryClient extends EventEmitter {
     } catch (err: any) {
       if (!err.message?.includes('516')) {
         console.warn(`[SshQueryClient] Failed to register textchannel for channel ${channelId}: ${err.message}`);
+        failed.push('textchannel');
       }
     }
 
-    console.log(`[SshQueryClient] Command listener ready for sid=${sid}, channelId=${channelId}`);
+    if (failed.length === 0) console.log(`[SshQueryClient] Command listener ready for sid=${sid}, channelId=${channelId}`);
+    return failed;
   }
 
   get isConnected(): boolean {

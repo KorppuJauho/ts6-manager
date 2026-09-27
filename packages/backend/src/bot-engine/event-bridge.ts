@@ -4,6 +4,13 @@ import { SshQueryClient } from './ssh-query-client.js';
 import { decrypt } from '../utils/crypto.js';
 import { QueryPacer } from './query-pacer.js';
 
+/**
+ * Wait before registering again after a registration still failed. A flood
+ * ban lasts 600 s by default, so a session caught in one comes back within
+ * a minute of it lifting, without adding much to the flood meanwhile.
+ */
+export const REGISTER_RETRY_MS = 60_000;
+
 export declare interface EventBridge {
   on(event: 'tsEvent', listener: (configId: number, sid: number, eventName: string, data: Record<string, string>) => void): this;
   on(event: 'sshConnected', listener: (configId: number, sid: number) => void): this;
@@ -29,6 +36,33 @@ export class EventBridge extends EventEmitter {
   private holders: Map<string, Set<string>> = new Map();
   /** One per server: its flood limit counts every session from our IP together. */
   private pacers: Map<number, QueryPacer> = new Map();
+
+  /**
+   * Runs `register` until nothing is left unregistered, `REGISTER_RETRY_MS`
+   * apart. A session whose registration failed — typically during a flood
+   * ban — used to stay connected but deaf until the backend restarted.
+   * Stops as soon as `current` says this session was replaced or closed; a
+   * reconnect registers afresh.
+   */
+  private async registerUntilDone(
+    key: string,
+    current: () => boolean,
+    register: () => Promise<string[]>,
+  ): Promise<boolean> {
+    for (;;) {
+      let failed: string[];
+      try {
+        failed = await register();
+      } catch (err: any) {
+        failed = [err.message];
+      }
+      if (failed.length === 0) return true;
+      if (!current()) return false;
+      console.error(`[EventBridge] ${key}: not registered (${failed.join(', ')}); flows that need it will not fire. Retrying in ${REGISTER_RETRY_MS / 1000} s`);
+      await new Promise((r) => setTimeout(r, REGISTER_RETRY_MS));
+      if (!current()) return false;
+    }
+  }
 
   private pacerFor(configId: number): QueryPacer {
     let pacer = this.pacers.get(configId);
@@ -96,18 +130,16 @@ export class EventBridge extends EventEmitter {
       pacer: this.pacerFor(configId),
     });
 
+    let session = 0;
     client.on('ready', async () => {
       console.log(`[EventBridge] SSH connected to ${serverConfig.host}:${serverConfig.sshPort} for sid=${sid}`);
-      try {
-        const failed = await client.registerEvents(sid);
-        if (failed.length > 0) {
-          console.error(`[EventBridge] ${key}: ${failed.length} event type(s) not registered (${failed.join(', ')}); flows triggered by them will not fire`);
-        }
+      const mine = ++session;
+      const current = () => mine === session && this.connections.get(key) === client && client.isConnected;
+      if (await this.registerUntilDone(key, current, () => client.registerEvents(sid))) {
         this.emit('sshConnected', configId, sid);
-      } catch (err: any) {
-        console.error(`[EventBridge] Failed to register events for ${key}: ${err.message}`);
       }
     });
+    client.on('close', () => { session++; });
 
     client.on('event', (eventName: string, data: Record<string, string>) => {
       this.emit('tsEvent', configId, sid, eventName, data);
@@ -276,14 +308,14 @@ export class EventBridge extends EventEmitter {
       pacer: this.pacerFor(configId),
     });
 
+    let session = 0;
     client.on('ready', async () => {
       console.log(`[EventBridge] CMD listener SSH connected for ${key}`);
-      try {
-        await client.registerCommandListener(sid, channelId);
-      } catch (err: any) {
-        console.error(`[EventBridge] CMD listener register failed for ${key}: ${err.message}`);
-      }
+      const mine = ++session;
+      const current = () => mine === session && this.commandListeners.get(key) === client && client.isConnected;
+      await this.registerUntilDone(key, current, () => client.registerCommandListener(sid, channelId));
     });
+    client.on('close', () => { session++; });
 
     client.on('event', (eventName: string, data: Record<string, string>) => {
       // Marker so engine can keep backward compatibility:

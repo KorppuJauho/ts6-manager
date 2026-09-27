@@ -309,3 +309,34 @@ describe('pacing', () => {
     client.destroy();
   });
 });
+
+describe('registerCommandListener', () => {
+  it('counts a query client already in the channel as joined', async () => {
+    const client = makeClient();
+    await client.connect();
+    harness.reply = (cmd) => {
+      if (cmd === 'whoami') return 'client_id=9 client_channel_id=5\nerror id=0 msg=ok';
+      if (cmd.startsWith('clientmove')) return 'error id=770 msg=already\\smember\\sof\\schannel';
+      return OK;
+    };
+
+    await expect(client.registerCommandListener(1, 5)).resolves.toEqual([]);
+    client.destroy();
+  });
+
+  it('reports a channel chat registration that stays flooded', async () => {
+    const client = makeClient();
+    await client.connect();
+    harness.reply = (cmd) => {
+      if (cmd === 'whoami') return 'client_id=9 client_channel_id=1\nerror id=0 msg=ok';
+      if (cmd.startsWith('servernotifyregister')) return FLOOD;
+      return OK;
+    };
+
+    const result = client.registerCommandListener(1, 5);
+    await vi.advanceTimersByTimeAsync(FLOOD_RETRY_DELAYS_MS.reduce((a, b) => a + b, 0));
+
+    await expect(result).resolves.toEqual(['textchannel']);
+    client.destroy();
+  });
+});

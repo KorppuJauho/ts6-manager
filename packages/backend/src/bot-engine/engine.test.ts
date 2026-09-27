@@ -13,7 +13,7 @@ vi.mock('./ssh-query-client.js', async () => {
     constructor() { super(); harness.clients.push(this); }
     async connect() { this.isConnected = true; this.emit('ready'); }
     async registerEvents() { return []; }
-    async registerCommandListener() { }
+    async registerCommandListener() { return []; }
     async executeCommand() { return ''; }
     destroy() { this.destroyed = true; this.isConnected = false; }
   }
