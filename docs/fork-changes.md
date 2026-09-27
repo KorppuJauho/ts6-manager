@@ -818,6 +818,37 @@ Closing a session now sends ServerQuery `quit` first. Without it, TeamSpeak
 test server, the listener of a disabled flow was still there minutes after
 the backend had closed its end.
 
+**TeamSpeak 6's query flood limit is tight, and it bans.** A stock server
+reports:
+
+| Setting | Value |
+|---|---|
+| `serverinstance_serverquery_flood_commands` | 10 per `flood_time` of 3 s |
+| `serverinstance_serverquery_ban_time` | 600 s |
+| `serverinstance_serverquery_max_connections_per_ip` | 5 |
+
+The limit is counted per IP, across every SSH session and the manager's
+WebQuery calls together. Live testing hit it three ways, and each has a fix:
+
+- **A burst of registrations.** Reopening the main session and a command
+  listener together (as "Forget SSH host key" does) meant about a dozen
+  registration commands in a second, on top of the UI's WebQuery calls.
+  A `QueryPacer` per server now gives all its SSH sessions 5 commands per
+  3 s between them, and a command's timeout starts only when it is written.
+- **Every Save in the flow editor.** Saving disabled and re-enabled the
+  flow, which closed and reopened its command listener: a new login and
+  five commands each time. `reloadFlow` now swaps the flow in place and
+  keeps its sessions.
+- **Retrying during the ban.** The ban shows up as connections dropped
+  before the SSH handshake, and every attempt during it restarted the
+  600 s. Retrying every 30 s kept the manager banned for good. After such a
+  drop, the next attempt now waits 610 s. With the backend's IP silent for
+  10.5 minutes, the next start connected on the first try.
+
+A registration that still fails is retried every 60 s until it succeeds.
+Before, a session whose registration fell inside a ban stayed connected but
+deaf until the backend restarted.
+
 ### Resetting the SSH host-key pin
 
 coom 91a483f pins the server's SSH host key on first use, and nothing ever
