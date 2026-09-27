@@ -2,6 +2,14 @@ import { EventEmitter } from 'events';
 import type { PrismaClient } from '../../generated/prisma/index.js';
 import { SshQueryClient } from './ssh-query-client.js';
 import { decrypt } from '../utils/crypto.js';
+import { QueryPacer } from './query-pacer.js';
+
+/**
+ * Wait before registering again after a registration still failed. A flood
+ * ban lasts 600 s by default, so a session caught in one comes back within
+ * a minute of it lifting, without adding much to the flood meanwhile.
+ */
+export const REGISTER_RETRY_MS = 60_000;
 
 export declare interface EventBridge {
   on(event: 'tsEvent', listener: (configId: number, sid: number, eventName: string, data: Record<string, string>) => void): this;
@@ -16,6 +24,51 @@ export declare interface EventBridge {
 
 export class EventBridge extends EventEmitter {
   private connections: Map<string, SshQueryClient> = new Map();
+  /** Connects still loading their server config, keyed like the maps they will land in. */
+  private pending: Map<string, Promise<void>> = new Map();
+  /**
+   * Who needs each base session. The flow engine, the connection journal and
+   * the Discord bridge share one session per server:sid, because TeamSpeak
+   * counts every session from our IP against one flood allowance — a second
+   * session with the same login is what broke event delivery. A session
+   * closes only when its last holder lets go.
+   */
+  private holders: Map<string, Set<string>> = new Map();
+  /** One per server: its flood limit counts every session from our IP together. */
+  private pacers: Map<number, QueryPacer> = new Map();
+
+  /**
+   * Runs `register` until nothing is left unregistered, `REGISTER_RETRY_MS`
+   * apart. A session whose registration failed — typically during a flood
+   * ban — used to stay connected but deaf until the backend restarted.
+   * Stops as soon as `current` says this session was replaced or closed; a
+   * reconnect registers afresh.
+   */
+  private async registerUntilDone(
+    key: string,
+    current: () => boolean,
+    register: () => Promise<string[]>,
+  ): Promise<boolean> {
+    for (;;) {
+      let failed: string[];
+      try {
+        failed = await register();
+      } catch (err: any) {
+        failed = [err.message];
+      }
+      if (failed.length === 0) return true;
+      if (!current()) return false;
+      console.error(`[EventBridge] ${key}: not registered (${failed.join(', ')}); flows that need it will not fire. Retrying in ${REGISTER_RETRY_MS / 1000} s`);
+      await new Promise((r) => setTimeout(r, REGISTER_RETRY_MS));
+      if (!current()) return false;
+    }
+  }
+
+  private pacerFor(configId: number): QueryPacer {
+    let pacer = this.pacers.get(configId);
+    if (!pacer) this.pacers.set(configId, pacer = new QueryPacer());
+    return pacer;
+  }
 
   constructor(private prisma: PrismaClient) {
     super();
@@ -27,8 +80,32 @@ export class EventBridge extends EventEmitter {
 
   async connectServer(configId: number, sid: number): Promise<void> {
     const key = this.makeKey(configId, sid);
-    if (this.connections.has(key)) return;
+    const existing = this.connections.get(key);
+    if (existing && !existing.hasFatalError) return;
+    // A session that failed fatally (bad credentials, changed host key) does
+    // not retry by itself; a new connect replaces it once the cause is fixed.
+    if (existing) {
+      existing.destroy();
+      this.connections.delete(key);
+    }
+    return this.dedupe(key, () => this.openServerConnection(configId, sid, key));
+  }
 
+  /**
+   * Runs `open` once per key. A session is only claimed in its map after the
+   * server config has loaded, so without this two callers arriving in that
+   * window — the engine and a file-browser request, say — each open a session,
+   * and TeamSpeak counts both against the same IP's flood allowance.
+   */
+  private dedupe(key: string, open: () => Promise<void>): Promise<void> {
+    const inFlight = this.pending.get(key);
+    if (inFlight) return inFlight;
+    const attempt = open().finally(() => this.pending.delete(key));
+    this.pending.set(key, attempt);
+    return attempt;
+  }
+
+  private async openServerConnection(configId: number, sid: number, key: string): Promise<void> {
     const serverConfig = await this.prisma.tsServerConfig.findUnique({
       where: { id: configId },
     });
@@ -50,17 +127,19 @@ export class EventBridge extends EventEmitter {
       password: decrypt(serverConfig.sshPassword),
       hostKeyFingerprint: serverConfig.sshHostKeyFp,
       onHostKeyPinned: (fp) => this.persistHostKey(configId, fp),
+      pacer: this.pacerFor(configId),
     });
 
+    let session = 0;
     client.on('ready', async () => {
       console.log(`[EventBridge] SSH connected to ${serverConfig.host}:${serverConfig.sshPort} for sid=${sid}`);
-      try {
-        await client.registerEvents(sid);
+      const mine = ++session;
+      const current = () => mine === session && this.connections.get(key) === client && client.isConnected;
+      if (await this.registerUntilDone(key, current, () => client.registerEvents(sid))) {
         this.emit('sshConnected', configId, sid);
-      } catch (err: any) {
-        console.error(`[EventBridge] Failed to register events for ${key}: ${err.message}`);
       }
     });
+    client.on('close', () => { session++; });
 
     client.on('event', (eventName: string, data: Record<string, string>) => {
       this.emit('tsEvent', configId, sid, eventName, data);
@@ -87,6 +166,32 @@ export class EventBridge extends EventEmitter {
         this.connections.delete(key);
       }
     }
+  }
+
+  /** Opens (or joins) the session for configId:sid and keeps it open for `holder`. */
+  async acquire(configId: number, sid: number, holder: string): Promise<void> {
+    const key = this.makeKey(configId, sid);
+    let held = this.holders.get(key);
+    if (!held) this.holders.set(key, held = new Set());
+    held.add(holder);
+    await this.connectServer(configId, sid);
+  }
+
+  /** Drops `holder`'s claim; the session closes once nobody holds it. */
+  async release(configId: number, sid: number, holder: string): Promise<void> {
+    const key = this.makeKey(configId, sid);
+    const held = this.holders.get(key);
+    held?.delete(holder);
+    if (held && held.size > 0) return;
+    this.holders.delete(key);
+    await this.disconnectServer(configId, sid);
+  }
+
+  /** The configId:sid keys `holder` currently holds. */
+  getKeysHeldBy(holder: string): string[] {
+    return Array.from(this.holders.entries())
+      .filter(([, held]) => held.has(holder))
+      .map(([key]) => key);
   }
 
   async disconnectServer(configId: number, sid: number): Promise<void> {
@@ -124,6 +229,41 @@ export class EventBridge extends EventEmitter {
     return client.executeCommand(command);
   }
 
+  /**
+   * Closes every session to a server and reopens the ones still needed:
+   * held base sessions and all command listeners. Called after its SSH
+   * settings change or its pinned host key is forgotten, so the change takes
+   * effect without restarting the backend. Sessions nobody holds (a file
+   * browser's on-demand one) reopen on their next use.
+   */
+  async restartServer(configId: number): Promise<void> {
+    const prefix = `${configId}:`;
+    const baseSids = new Set<number>();
+    for (const [key, client] of this.connections) {
+      if (!key.startsWith(prefix)) continue;
+      client.destroy();
+      this.connections.delete(key);
+    }
+    for (const [key, held] of this.holders) {
+      if (key.startsWith(prefix) && held.size > 0) baseSids.add(Number(key.split(':')[1]));
+    }
+    const listeners: Array<[number, number]> = [];
+    for (const [key, client] of this.commandListeners) {
+      if (!key.startsWith(prefix)) continue;
+      client.destroy();
+      this.commandListeners.delete(key);
+      const [, sid, , channelId] = key.split(':');
+      listeners.push([Number(sid), Number(channelId)]);
+    }
+
+    await Promise.all([
+      ...Array.from(baseSids, (sid) => this.connectServer(configId, sid)),
+      ...listeners.map(([sid, channelId]) => this.connectCommandListener(configId, sid, channelId)),
+    ].map((p) => p.catch((err: any) => {
+      console.error(`[EventBridge] Reconnect after settings change failed for server ${configId}: ${err.message}`);
+    })));
+  }
+
   getConnectedKeys(): string[] {
     return Array.from(this.connections.keys());
   }
@@ -145,8 +285,16 @@ export class EventBridge extends EventEmitter {
 
   async connectCommandListener(configId: number, sid: number, channelId: number): Promise<void> {
     const key = this.makeCmdKey(configId, sid, channelId);
-    if (this.commandListeners.has(key)) return;
+    const existing = this.commandListeners.get(key);
+    if (existing && !existing.hasFatalError) return;
+    if (existing) {
+      existing.destroy();
+      this.commandListeners.delete(key);
+    }
+    return this.dedupe(key, () => this.openCommandListener(configId, sid, channelId, key));
+  }
 
+  private async openCommandListener(configId: number, sid: number, channelId: number, key: string): Promise<void> {
     const serverConfig = await this.prisma.tsServerConfig.findUnique({ where: { id: configId } });
     if (!serverConfig?.sshUsername || !serverConfig.sshPassword || !serverConfig.sshPort) return;
 
@@ -157,16 +305,17 @@ export class EventBridge extends EventEmitter {
       password: decrypt(serverConfig.sshPassword),
       hostKeyFingerprint: serverConfig.sshHostKeyFp,
       onHostKeyPinned: (fp) => this.persistHostKey(configId, fp),
+      pacer: this.pacerFor(configId),
     });
 
+    let session = 0;
     client.on('ready', async () => {
       console.log(`[EventBridge] CMD listener SSH connected for ${key}`);
-      try {
-        await client.registerCommandListener(sid, channelId);
-      } catch (err: any) {
-        console.error(`[EventBridge] CMD listener register failed for ${key}: ${err.message}`);
-      }
+      const mine = ++session;
+      const current = () => mine === session && this.commandListeners.get(key) === client && client.isConnected;
+      await this.registerUntilDone(key, current, () => client.registerCommandListener(sid, channelId));
     });
+    client.on('close', () => { session++; });
 
     client.on('event', (eventName: string, data: Record<string, string>) => {
       // Marker so engine can keep backward compatibility:
@@ -207,13 +356,12 @@ export class EventBridge extends EventEmitter {
   }
 
   destroy(): void {
-  // existing "base" SSH connections
     for (const client of this.connections.values()) {
       client.destroy();
     }
     this.connections.clear();
+    this.holders.clear();
 
-    // NEW: command listener SSH connections
     for (const client of this.commandListeners.values()) {
       client.destroy();
     }

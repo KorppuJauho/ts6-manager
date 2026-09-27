@@ -156,7 +156,7 @@ async function main() {
   voiceBotManager.setMusicCommandHandler(musicCommandHandler);
 
   // Discord bridge: slash commands, TS notifications, stats (non-blocking)
-  const discordBridge = new DiscordBridge(prisma, connectionPool, voiceBotManager);
+  const discordBridge = new DiscordBridge(prisma, connectionPool, voiceBotManager, botEngine.getEventBridge());
   app.locals.discordBridge = discordBridge;
   discordBridge.start().catch((err) => {
     console.error(`[Discord] Failed to start: ${err.message}`);
@@ -167,7 +167,7 @@ async function main() {
   discordBridge.setMessageHandler((msg) => botEngine.handleDiscordMessage(msg));
 
   // Connection journal: web + TS connection logging (non-blocking)
-  const connectionJournal = new ConnectionJournal(prisma, connectionPool, voiceBotManager);
+  const connectionJournal = new ConnectionJournal(prisma, connectionPool, voiceBotManager, botEngine.getEventBridge());
   app.locals.connectionJournal = connectionJournal;
   connectionJournal.start().catch((err) => {
     console.error(`[Journal] Failed to start: ${err.message}`);

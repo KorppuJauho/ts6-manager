@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { parseQueryResponse } from '@ts6/common';
 import { TS_EVENT_TYPES } from '@ts6/common';
 import crypto, { createHash, timingSafeEqual } from 'crypto';
+import type { QueryPacer } from './query-pacer.js';
 
 export interface SshQueryClientOptions {
   host: string;
@@ -13,6 +14,8 @@ export interface SshQueryClientOptions {
   hostKeyFingerprint?: string | null;
   /** Called with the fingerprint observed on a first connect, so it can be persisted. */
   onHostKeyPinned?: (fingerprint: string) => void;
+  /** Shared by every session to the same server, to keep them under its flood limit together. */
+  pacer?: QueryPacer;
 }
 
 /** OpenSSH-style fingerprint: "SHA256:<base64 of the key digest, unpadded>". */
@@ -21,11 +24,37 @@ export function sshHostKeyFingerprint(key: Buffer): string {
   return `SHA256:${digest}`;
 }
 
+/** TeamSpeak's "client is flooding" error: the server is refusing commands from our IP for now. */
+const FLOOD_ERROR = 'TS error 524';
+/**
+ * Waits before retrying a command the server refused as flooding. TS6 sheds
+ * a few flood points per second, so a few seconds usually clear it; the
+ * steps grow in case something else from our IP is still spending them.
+ */
+export const FLOOD_RETRY_DELAYS_MS = [3000, 6000, 12000];
+
+/**
+ * Wait after the server drops a connection before the SSH handshake: what a
+ * query flood ban looks like from our side. The ban lasts
+ * serverinstance_serverquery_ban_time (600 s by default), and on the TS6
+ * test server another attempt during it kept it going, so backing off to
+ * 30 s left the manager banned for good. One attempt past the ban instead.
+ */
+export const BAN_WAIT_MS = 610_000;
+
+/** A connection closed by the server before any SSH exchange. */
+function refusedBeforeHandshake(err: Error): boolean {
+  return /before handshake|ECONNRESET/.test(err.message);
+}
+
 interface QueuedCommand {
   command: string;
   resolve: (result: string) => void;
   reject: (err: Error) => void;
-  timeout: ReturnType<typeof setTimeout>;
+  timeoutMs: number;
+  /** Started when the command is written, so waiting on the pacer does not count against it. */
+  timeout: ReturnType<typeof setTimeout> | null;
+  written: boolean;
   responseLines: string[];
 }
 
@@ -53,6 +82,9 @@ export class SshQueryClient extends EventEmitter {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private fatalError: boolean = false;
+  private hostKeyRejected: boolean = false;
+  /** Set when the last attempt was dropped before the handshake; see BAN_WAIT_MS. */
+  private refusedByServer: boolean = false;
   private readonly nickSuffix = crypto.randomBytes(3).toString('hex'); // z.B. "a1b2c3"
   private reconnecting: boolean = false;
 
@@ -60,9 +92,24 @@ export class SshQueryClient extends EventEmitter {
     super();
   }
 
+  /**
+   * Opens the session. A failed attempt schedules the next one itself, with
+   * backoff, unless the failure is fatal (bad credentials, a changed host
+   * key). Before, only a session that had been up reconnected, so one failed
+   * attempt — such as the server refusing us for flooding — left it dead
+   * until the backend restarted.
+   */
   async connect(): Promise<void> {
     if (this.destroyed) return;
+    try {
+      await this.openSession();
+    } catch (err) {
+      if (!this.destroyed && !this.fatalError) this.scheduleReconnect();
+      throw err;
+    }
+  }
 
+  private openSession(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       this.ssh = new SSH2Client();
       let settled = false;
@@ -92,6 +139,11 @@ export class SshQueryClient extends EventEmitter {
           this.bannerReceived = false;
 
           channel.on('data', (data: Buffer) => {
+            // The server still answers the "quit" destroy() sends. Handled
+            // here, that reply read as a finished banner: the destroyed
+            // client announced itself ready, registered events on no shell,
+            // and started a keepalive.
+            if (this.destroyed || this.shell !== channel) return;
             this.onShellData(data);
             // Check if banner has been received after processing data
             if (!this.connected && this.bannerReceived) {
@@ -105,6 +157,10 @@ export class SshQueryClient extends EventEmitter {
           });
 
           channel.on('close', () => {
+            // A channel we already let go of (forceDisconnect, a reconnect)
+            // must not mark the current session closed or announce it twice.
+            if (this.shell !== channel) return;
+            this.shell = null;
             this.connected = false;
             this.bannerReceived = false;
             this.rejectAllPending('SSH channel closed');
@@ -121,6 +177,7 @@ export class SshQueryClient extends EventEmitter {
       });
 
       this.ssh.on('error', (err: Error) => {
+        if (!this.connected && refusedBeforeHandshake(err)) this.refusedByServer = true;
         const isAuthError = err.message.includes('authentication') || err.message.includes('Auth');
         if (isAuthError) {
           this.fatalError = true;
@@ -167,9 +224,14 @@ export class SshQueryClient extends EventEmitter {
           const b = Buffer.from(pinned, 'utf8');
           const ok = a.length === b.length && timingSafeEqual(a, b);
           if (!ok) {
+            // Fatal: retrying cannot help, and a changed key must not be
+            // trusted without an admin deciding to.
+            this.fatalError = true;
+            this.hostKeyRejected = true;
             console.error(
               `[SshQueryClient] HOST KEY MISMATCH for ${this.options.host}:${this.options.port} — ` +
-              `expected ${pinned}, got ${seen}. Refusing to connect.`,
+              `expected ${pinned}, got ${seen}. Refusing to connect. If the server was reinstalled, ` +
+              `use "Forget SSH host key" on the server connection in Settings.`,
             );
           }
           return ok;
@@ -187,22 +249,13 @@ export class SshQueryClient extends EventEmitter {
     }
 
     return new Promise<string>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        if (this.currentCommand === entry) {
-          this.currentCommand = null;
-          this.processQueue();
-        } else {
-          const idx = this.commandQueue.indexOf(entry);
-          if (idx !== -1) this.commandQueue.splice(idx, 1);
-        }
-        reject(new Error(`Command timed out after ${timeoutMs}ms: ${command}`));
-      }, timeoutMs);
-
       const entry: QueuedCommand = {
         command,
         resolve,
         reject,
-        timeout,
+        timeoutMs,
+        timeout: null,
+        written: false,
         responseLines: [],
       };
 
@@ -213,38 +266,62 @@ export class SshQueryClient extends EventEmitter {
     });
   }
 
-  async registerEvents(sid: number): Promise<void> {
+  /**
+   * Runs a command, waiting out "client is flooding" refusals. Registration
+   * happens right after connecting, when the server may still be counting
+   * our earlier commands; giving up on a flood error left a connected
+   * session that never delivered the refused event type.
+   */
+  async executeWithFloodRetry(command: string): Promise<string> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.executeCommand(command);
+      } catch (err: any) {
+        const flooded = String(err?.message ?? '').startsWith(FLOOD_ERROR);
+        if (!flooded || attempt >= FLOOD_RETRY_DELAYS_MS.length || this.destroyed) throw err;
+        const delay = FLOOD_RETRY_DELAYS_MS[attempt];
+        console.warn(`[SshQueryClient] Server reports flooding on "${command.split(' ')[0]}", retrying in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+
+  /** Registers every event type; resolves with the types that could not be registered. */
+  async registerEvents(sid: number): Promise<string[]> {
     console.log(`[SshQueryClient] Registering events for sid=${sid} on ${this.options.host}`);
-    await this.executeCommand(`use sid=${sid}`);
+    await this.executeWithFloodRetry(`use sid=${sid}`);
 
     // Set nickname so the bot is identifiable, and mark as query client type
     try {
-      await this.executeCommand(`clientupdate client_nickname=TS6-WebUI-Bot-${sid}-${this.nickSuffix}`);
+      await this.executeWithFloodRetry(`clientupdate client_nickname=TS6-WebUI-Bot-${sid}-${this.nickSuffix}`);
     } catch { }
 
+    const failed: string[] = [];
     for (const eventType of TS_EVENT_TYPES) {
       const cmd = eventType === 'channel'
         ? `servernotifyregister event=${eventType} id=0`
         : `servernotifyregister event=${eventType}`;
       try {
-        await this.executeCommand(cmd);
+        await this.executeWithFloodRetry(cmd);
       } catch (err: any) {
         // error id=516 = already registered, ignore
         if (!err.message?.includes('516')) {
           console.warn(`[SshQueryClient] Failed to register event ${eventType}: ${err.message}`);
+          failed.push(eventType);
         }
       }
     }
 
-    console.log(`[SshQueryClient] Events registered for sid=${sid}`);
+    if (failed.length === 0) console.log(`[SshQueryClient] Events registered for sid=${sid}`);
+    return failed;
   }
 
-  async registerCommandListener(sid: number, channelId: number): Promise<void> {
+  /** Joins the channel and registers its chat; resolves with the steps that failed. */
+  async registerCommandListener(sid: number, channelId: number): Promise<string[]> {
     console.log(`[SshQueryClient] Registering command listener for sid=${sid}, channelId=${channelId} on ${this.options.host}`);
 
-    await this.executeCommand(`use sid=${sid}`);
+    await this.executeWithFloodRetry(`use sid=${sid}`);
 
-   
     try {
       await this.executeCommand(`clientupdate client_nickname=TS6-WebUI-Cmd-${channelId}-${this.nickSuffix}`);
     } catch (err: any) {
@@ -256,9 +333,11 @@ export class SshQueryClient extends EventEmitter {
       }
     }
 
+    const failed: string[] = [];
+
     // Move query client into the channel (required for channel chat notifications)
     try {
-      const who = await this.executeCommand('whoami');
+      const who = await this.executeWithFloodRetry('whoami');
       const first = (who.split('\n')[0] || '').trim();
       const me = parseQueryResponse(first)[0] || {};
       const clid =
@@ -272,24 +351,31 @@ export class SshQueryClient extends EventEmitter {
         })();
 
       if (clid) {
-        await this.executeCommand(`clientmove clid=${clid} cid=${channelId}`);
+        await this.executeWithFloodRetry(`clientmove clid=${clid} cid=${channelId}`);
       } else {
         console.warn('[SshQueryClient] whoami did not return clid; cannot clientmove');
+        failed.push('clientmove');
       }
     } catch (err: any) {
-      console.warn(`[SshQueryClient] Failed to move query client to channel ${channelId}: ${err.message}`);
+      // 770: already in that channel, which is where it needs to be.
+      if (!String(err.message || '').includes('TS error 770')) {
+        console.warn(`[SshQueryClient] Failed to move query client to channel ${channelId}: ${err.message}`);
+        failed.push('clientmove');
+      }
     }
 
     // Register ONLY textchannel for this channel
     try {
-      await this.executeCommand(`servernotifyregister event=textchannel id=${channelId}`);
+      await this.executeWithFloodRetry(`servernotifyregister event=textchannel id=${channelId}`);
     } catch (err: any) {
       if (!err.message?.includes('516')) {
         console.warn(`[SshQueryClient] Failed to register textchannel for channel ${channelId}: ${err.message}`);
+        failed.push('textchannel');
       }
     }
 
-    console.log(`[SshQueryClient] Command listener ready for sid=${sid}, channelId=${channelId}`);
+    if (failed.length === 0) console.log(`[SshQueryClient] Command listener ready for sid=${sid}, channelId=${channelId}`);
+    return failed;
   }
 
   get isConnected(): boolean {
@@ -300,6 +386,11 @@ export class SshQueryClient extends EventEmitter {
     return this.fatalError;
   }
 
+  /** True once the server presented a host key other than the pinned one. */
+  get hostKeyMismatch(): boolean {
+    return this.hostKeyRejected;
+  }
+
   destroy(): void {
     this.destroyed = true;
     this.stopKeepalive();
@@ -308,9 +399,17 @@ export class SshQueryClient extends EventEmitter {
       this.reconnectTimer = null;
     }
     this.rejectAllPending('Client destroyed');
-    if (this.shell) {
-      this.shell.close();
-      this.shell = null;
+    const shell = this.shell;
+    this.shell = null;
+    if (shell) {
+      // Just ending the SSH session leaves TeamSpeak 6 with the socket in
+      // CLOSE_WAIT and the query client still listed, apparently for good.
+      // "quit" is written ahead of the close on the same stream, so the
+      // server ends the session itself.
+      if (this.connected) {
+        try { shell.write('quit\n'); } catch { }
+      }
+      try { shell.close(); } catch { }
     }
     if (this.ssh) {
       this.ssh.end();
@@ -324,9 +423,10 @@ export class SshQueryClient extends EventEmitter {
     this.bannerReceived = false;
     this.stopKeepalive();
     this.rejectAllPending('Keepalive timeout');
-    if (this.shell) {
-      try { this.shell.close(); } catch {}
-      this.shell = null;
+    const shell = this.shell;
+    this.shell = null;
+    if (shell) {
+      try { shell.close(); } catch {}
     }
     if (this.ssh) {
       try { this.ssh.end(); } catch {}
@@ -412,10 +512,10 @@ export class SshQueryClient extends EventEmitter {
   }
 
   private handleErrorLine(line: string): void {
-    if (!this.currentCommand) return;
+    if (!this.currentCommand?.written) return;
 
     const cmd = this.currentCommand;
-    clearTimeout(cmd.timeout);
+    if (cmd.timeout) clearTimeout(cmd.timeout);
     this.currentCommand = null;
 
     // Parse "error id=N msg=..."
@@ -436,9 +536,26 @@ export class SshQueryClient extends EventEmitter {
     if (this.currentCommand || this.commandQueue.length === 0) return;
     if (!this.shell || !this.connected) return;
 
-    this.currentCommand = this.commandQueue.shift()!;
-    this.currentCommand.responseLines = [];
-    this.shell.write(this.currentCommand.command + '\n');
+    // Claimed before the pacer wait, so nothing else writes in between.
+    const cmd = this.commandQueue.shift()!;
+    this.currentCommand = cmd;
+    const send = () => {
+      if (this.currentCommand !== cmd || !this.shell || !this.connected) return;
+      cmd.responseLines = [];
+      cmd.written = true;
+      cmd.timeout = setTimeout(() => this.onCommandTimeout(cmd), cmd.timeoutMs);
+      this.shell.write(cmd.command + '\n');
+    };
+    if (this.options.pacer) this.options.pacer.take().then(send);
+    else send();
+  }
+
+  private onCommandTimeout(cmd: QueuedCommand): void {
+    if (this.currentCommand === cmd) {
+      this.currentCommand = null;
+      this.processQueue();
+    }
+    cmd.reject(new Error(`Command timed out after ${cmd.timeoutMs}ms: ${cmd.command}`));
   }
 
   private startKeepalive(): void {
@@ -449,6 +566,14 @@ export class SshQueryClient extends EventEmitter {
         this.executeCommand('whoami', 5000)
           .then(() => { consecutiveFailures = 0; })
           .catch((err) => {
+            // Any TeamSpeak reply, even an error such as 524 "client is
+            // flooding", proves the session is alive. Counting those as
+            // failures turned a flood into a forced disconnect, and the
+            // reconnect then spent more of the same flood allowance.
+            if (String(err?.message ?? '').startsWith('TS error ')) {
+              consecutiveFailures = 0;
+              return;
+            }
             consecutiveFailures++;
             console.warn(`[SshQueryClient] Keepalive failed for ${this.options.host}:${this.options.port} (${consecutiveFailures}/3): ${err.message}`);
             if (consecutiveFailures >= 3) {
@@ -476,29 +601,36 @@ export class SshQueryClient extends EventEmitter {
       this.reconnectTimer = null;
     }
 
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000);
+    let delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000);
+    if (this.refusedByServer) {
+      delay = BAN_WAIT_MS;
+      console.warn(
+        `[SshQueryClient] ${this.options.host}:${this.options.port} refused the connection before the SSH handshake — ` +
+        `usually a ServerQuery flood ban (600 s by default). Waiting it out.`,
+      );
+    }
     console.log(`[SshQueryClient] Reconnecting to ${this.options.host}:${this.options.port} in ${delay}ms (attempt ${this.reconnectAttempt + 1})`);
 
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectAttempt++;
       this.reconnecting = false;
+      this.refusedByServer = false;
       try {
         await this.connect();
       } catch (err: any) {
+        // connect() has already scheduled the next attempt, unless the error was fatal.
         console.error(`[SshQueryClient] Reconnect failed: ${err.message}`);
-        // connect() failure will trigger another reconnect via the error/close handlers
       }
     }, delay);
   }
 
   private rejectAllPending(reason: string): void {
     if (this.currentCommand) {
-      clearTimeout(this.currentCommand.timeout);
+      if (this.currentCommand.timeout) clearTimeout(this.currentCommand.timeout);
       this.currentCommand.reject(new Error(reason));
       this.currentCommand = null;
     }
     for (const cmd of this.commandQueue) {
-      clearTimeout(cmd.timeout);
       cmd.reject(new Error(reason));
     }
     this.commandQueue = [];

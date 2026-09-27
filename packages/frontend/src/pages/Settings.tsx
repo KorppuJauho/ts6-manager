@@ -355,6 +355,7 @@ function ConnectionsTab() {
   const updateServer = useMutation({ mutationFn: ({ id, data }: any) => serversApi.update(id, data), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
   const deleteServer = useMutation({ mutationFn: (id: number) => serversApi.delete(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
   const testServer = useMutation({ mutationFn: (id: number) => serversApi.test(id) });
+  const forgetHostKey = useMutation({ mutationFn: (id: number) => serversApi.forgetSshHostKey(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
 
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -362,6 +363,7 @@ function ConnectionsTab() {
   const [form, setForm] = useState({ name: '', host: '', webqueryPort: '10080', apiKey: '', useHttps: false, sshPort: '10022', sshUsername: '', sshPassword: '' });
 
   const serverList = useMemo(() => (Array.isArray(servers) ? servers : []), [servers]);
+  const editServer = serverList.find((s: any) => s.id === editId);
 
   if (isLoading) return <PageLoader />;
 
@@ -466,6 +468,23 @@ function ConnectionsTab() {
               <div><Label className="text-xs">{t('settings.connections.sshUser')}</Label><Input value={form.sshUsername} onChange={(e) => setForm({ ...form, sshUsername: e.target.value })} placeholder={editId ? t('settings.connections.unchanged') : 'serveradmin'} /></div>
               <div><Label className="text-xs">{t('settings.connections.sshPassword')}</Label><Input type="password" value={form.sshPassword} onChange={(e) => setForm({ ...form, sshPassword: e.target.value })} placeholder={editId ? t('settings.connections.unchanged') : ''} /></div>
             </div>
+            {editId && (
+              <div className="flex items-center justify-between gap-3 rounded-md border p-2">
+                <p className="text-xs text-muted-foreground">
+                  {editServer?.hasSshHostKey ? t('settings.connections.sshHostKeyPinned') : t('settings.connections.sshHostKeyNotPinned')}
+                </p>
+                <Button
+                  variant="outline" size="sm" className="h-7 text-xs shrink-0"
+                  disabled={!editServer?.hasSshHostKey || forgetHostKey.isPending}
+                  onClick={() => forgetHostKey.mutate(editId, {
+                    onSuccess: () => toast.success(t('settings.connections.toastHostKeyForgotten')),
+                    onError: () => toast.error(t('settings.connections.toastHostKeyForgetFailed')),
+                  })}
+                >
+                  <KeyRound className="h-3 w-3 mr-1" /> {t('settings.connections.forgetSshHostKey')}
+                </Button>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowAdd(false); setEditId(null); resetForm(); }}>{t('settings.connections.cancel')}</Button>

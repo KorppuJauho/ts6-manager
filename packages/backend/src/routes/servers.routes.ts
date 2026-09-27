@@ -4,8 +4,48 @@ import { AppError } from '../middleware/error-handler.js';
 import { WebQueryClient } from '../ts-client/webquery-client.js';
 import type { ConnectionPool } from '../ts-client/connection-pool.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
+import type { BotEngine } from '../bot-engine/engine.js';
 
 export const serverRoutes: Router = Router();
+
+/**
+ * True when an update points SSH at a different host or port. The pinned
+ * host key belongs to the old endpoint, so keeping it would refuse the new
+ * one forever. Clearing it is no weaker than the first connect: pointing the
+ * manager at a server is already an admin decision to trust it.
+ */
+export function sshPinOutdated(
+  current: { host: string; sshPort: number },
+  update: { host?: unknown; sshPort?: unknown },
+): boolean {
+  const hostChanged = update.host !== undefined && String(update.host).trim() !== current.host.trim();
+  const portChanged = update.sshPort !== undefined && Number(update.sshPort) !== current.sshPort;
+  return hostChanged || portChanged;
+}
+
+/**
+ * True when an update changes what the server's SSH sessions connect with.
+ * The edit form sends every field back, so presence alone is not a change:
+ * saving a new name must not bounce the sessions every flow depends on.
+ */
+export function sshSessionChanged(
+  current: { host: string; sshPort: number; sshUsername: string | null },
+  written: Record<string, unknown>,
+): boolean {
+  if (sshPinOutdated(current, written)) return true;
+  if ('sshUsername' in written && written.sshUsername !== current.sshUsername) return true;
+  // Stored encrypted, so it cannot be compared; the form only sends it when typed.
+  if ('sshPassword' in written) return true;
+  return 'sshHostKeyFp' in written;
+}
+
+/** Reopens a server's SSH sessions so changed settings apply without a restart (non-blocking). */
+function restartSshSessions(req: Request, configId: number): void {
+  const engine: BotEngine | undefined = req.app.locals.botEngine;
+  engine?.getEventBridge().restartServer(configId).catch((err: any) => {
+    console.error(`[Servers] SSH session restart failed for server ${configId}: ${err.message}`);
+  });
+}
 
 // List all configured TS server connections
 serverRoutes.get('/', async (req: Request, res: Response, next) => {
@@ -16,7 +56,7 @@ serverRoutes.get('/', async (req: Request, res: Response, next) => {
       select: {
         id: true, name: true, host: true, webqueryPort: true,
         useHttps: true, sshPort: true, enabled: true,
-        createdAt: true, sshUsername: true,
+        createdAt: true, sshUsername: true, sshHostKeyFp: true,
       },
       orderBy: { id: 'asc' },
     });
@@ -24,7 +64,9 @@ serverRoutes.get('/', async (req: Request, res: Response, next) => {
     res.json(servers.map((s: any) => ({
       ...s,
       hasSshCredentials: !!s.sshUsername,
+      hasSshHostKey: !!s.sshHostKeyFp,
       sshUsername: undefined,
+      sshHostKeyFp: undefined,
     })));
   } catch (err) { next(err); }
 });
@@ -106,13 +148,35 @@ serverRoutes.put('/:configId', requireRole('admin'), async (req: Request, res: R
       }
     }
 
+    const current = await prisma.tsServerConfig.findUnique({ where: { id } });
+    if (!current) throw new AppError(404, 'Server config not found');
+    const sessionChanged = sshSessionChanged(current, data);
+    if (sshPinOutdated(current, data)) data.sshHostKeyFp = null;
+
     const server = await prisma.tsServerConfig.update({ where: { id }, data });
 
     // Refresh connection pool
     const pool: ConnectionPool = req.app.locals.connectionPool;
     await pool.refreshClient(id);
+    if (sessionChanged) restartSshSessions(req, id);
 
     res.json({ id: server.id, name: server.name });
+  } catch (err) { next(err); }
+});
+
+// Forget the pinned SSH host key: for a server reinstalled at the same
+// address, whose new key the pin would otherwise refuse forever. The next
+// connect pins the key the server presents then, as on first use.
+serverRoutes.post('/:configId/ssh-host-key/reset', requireRole('admin'), async (req: Request, res: Response, next) => {
+  try {
+    const prisma = req.app.locals.prisma;
+    const id = parseInt(String(req.params.configId));
+    const current = await prisma.tsServerConfig.findUnique({ where: { id } });
+    if (!current) throw new AppError(404, 'Server config not found');
+
+    await prisma.tsServerConfig.update({ where: { id }, data: { sshHostKeyFp: null } });
+    restartSshSessions(req, id);
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

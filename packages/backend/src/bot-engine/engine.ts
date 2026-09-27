@@ -240,6 +240,8 @@ interface WebhookEntry {
 }
 
 const MAX_CONCURRENT_PER_FLOW = 20;
+/** The engine's name on the SSH sessions it shares with the journal and Discord bridge. */
+const SSH_HOLDER = 'engine';
 
 export class BotEngine {
   private flows: Map<number, LoadedFlow> = new Map();
@@ -250,6 +252,7 @@ export class BotEngine {
   private webhookEntries: WebhookEntry[] = [];
   private executionCounts: Map<number, number> = new Map();
   private running: boolean = false;
+  private readonly onTsEventBound = this.onTsEvent.bind(this);
 
   constructor(
     private prisma: PrismaClient,
@@ -296,7 +299,7 @@ export class BotEngine {
     if (this.running) return;
 
     // Always register event listener (even if no flows yet — flows can be enabled later)
-    this.eventBridge.on('tsEvent', this.onTsEvent.bind(this));
+    this.eventBridge.on('tsEvent', this.onTsEventBound);
 
     await this.loadFlows();
 
@@ -333,7 +336,8 @@ export class BotEngine {
     this.animationManager.stopAll();
     this.teardownCronJobs();
     this.webhookEntries = [];
-    this.eventBridge.removeAllListeners('tsEvent');
+    // Only our own listener: the journal and Discord bridge listen on this bridge too.
+    this.eventBridge.off('tsEvent', this.onTsEventBound);
     this.flows.clear();
     this.executionCounts.clear();
   }
@@ -380,14 +384,16 @@ export class BotEngine {
 
       if (hasEventTrigger) {
         console.log(`[BotEngine] Flow needs SSH — connecting to server ${dbFlow.serverConfigId}, sid=${dbFlow.virtualServerId}...`);
-        if (!this.eventBridge.isConnected(dbFlow.serverConfigId, dbFlow.virtualServerId)) {
-          // Non-blocking: SSH connects in background, events will flow once connected
-          this.eventBridge.connectServer(dbFlow.serverConfigId, dbFlow.virtualServerId).catch(err => {
-            console.error(`[BotEngine] SSH connection failed for ${dbFlow.serverConfigId}:${dbFlow.virtualServerId}: ${err.message}`);
-          });
-        } else {
+        if (this.eventBridge.isConnected(dbFlow.serverConfigId, dbFlow.virtualServerId)) {
           console.log(`[BotEngine] SSH already connected for ${dbFlow.serverConfigId}:${dbFlow.virtualServerId}`);
         }
+        // Acquire even when connected: another holder may have opened the
+        // session, and the engine must hold it too or that holder's release
+        // would close it under our flows.
+        // Non-blocking: SSH connects in background, events will flow once connected
+        this.eventBridge.acquire(dbFlow.serverConfigId, dbFlow.virtualServerId, SSH_HOLDER).catch(err => {
+          console.error(`[BotEngine] SSH connection failed for ${dbFlow.serverConfigId}:${dbFlow.virtualServerId}: ${err.message}`);
+        });
         // NEW: start/stop per-channel command listeners for this pair
         this.syncCommandListenersForPair(dbFlow.serverConfigId, dbFlow.virtualServerId);
       }
@@ -408,11 +414,7 @@ export class BotEngine {
   }
 
   async disableFlow(flowId: number): Promise<void> {
-    this.animationManager.stopFlow(flowId);
-    this.teardownCronJobs(flowId);
-    this.webhookEntries = this.webhookEntries.filter(w => w.flowId !== flowId);
-    this.flows.delete(flowId);
-    this.executionCounts.delete(flowId);
+    this.unloadFlow(flowId);
 
     // Check if any remaining flows use the same SSH connections
     await this.cleanupUnusedSshConnections();
@@ -423,13 +425,26 @@ export class BotEngine {
   async reloadFlow(flowId: number): Promise<void> {
     const flow = this.flows.get(flowId);
     if (flow) {
-      // Flow was active — disable then re-enable
-      await this.disableFlow(flowId);
+      // Swap the flow in place, and only then let go of sessions it no longer
+      // needs. Disabling first closed its command listener and enabling opened
+      // a new one: a login and five commands on every Save, against a server
+      // limit of ten commands per three seconds.
+      this.unloadFlow(flowId);
       const dbFlow = await this.prisma.botFlow.findUnique({ where: { id: flowId } });
       if (dbFlow?.enabled) {
         await this.enableFlow(flowId);
       }
+      await this.cleanupUnusedSshConnections();
     }
+  }
+
+  /** Stops a flow's triggers and forgets it, leaving its SSH sessions to the caller. */
+  private unloadFlow(flowId: number): void {
+    this.animationManager.stopFlow(flowId);
+    this.teardownCronJobs(flowId);
+    this.webhookEntries = this.webhookEntries.filter(w => w.flowId !== flowId);
+    this.flows.delete(flowId);
+    this.executionCounts.delete(flowId);
   }
 
   handleWebhookRequest(req: Request, res: Response): void {
@@ -532,7 +547,7 @@ export class BotEngine {
     for (const pair of serverPairs) {
       const [configId, sid] = pair.split(':').map(Number);
       // Non-blocking: don't await SSH connections during startup
-      this.eventBridge.connectServer(configId, sid).catch(err => {
+      this.eventBridge.acquire(configId, sid, SSH_HOLDER).catch(err => {
         console.error(`[BotEngine] SSH connection failed for ${pair}: ${err.message}`);
       });
       this.syncCommandListenersForPair(configId, sid);
@@ -545,11 +560,11 @@ export class BotEngine {
       neededPairs.add(`${flow.serverConfigId}:${flow.virtualServerId}`);
     }
 
-    // 1) cleanup unused ssh connections
-    for (const key of this.eventBridge.getConnectedKeys()) {
+    // 1) let go of sessions no flow needs; they stay open if another holder still uses them
+    for (const key of this.eventBridge.getKeysHeldBy(SSH_HOLDER)) {
       if (!neededPairs.has(key)) {
         const [configId, sid] = key.split(':').map(Number);
-        await this.eventBridge.disconnectServer(configId, sid);
+        await this.eventBridge.release(configId, sid, SSH_HOLDER);
       }
     }
 

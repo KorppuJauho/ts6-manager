@@ -774,6 +774,106 @@ manager retried, ten times over. 1796 never appeared.
 3329, and the bot reads the same set. A refused connection fails at once
 with the server's reason; 2568 is the error of the one command that drew it.
 
+## Fixes to coom's changes (fork only)
+
+This fork builds on [coom/ts6-manager](https://github.com/coom/ts6-manager),
+not on upstream directly. The entries here fix problems that coom's own
+changes introduced. Upstream clusterzx does not have them, and they are not
+suggestions for other forks.
+
+### One ServerQuery session per server, shared
+
+Flows with event or command triggers stopped firing after coom's changes.
+Webhook and cron triggers kept working. The cause was the number of SSH
+ServerQuery sessions the backend opened to the same server:
+
+- the flow engine's own session;
+- one more from the connection journal (coom 7814d4a), which built its own
+  `EventBridge`;
+- one more from the Discord bridge's presence events (coom 75b961c),
+  deliberately separate because the engine closed sessions its flows no
+  longer used.
+
+They all log in as the same user from the same IP, and TeamSpeak's
+anti-flood counts them against one allowance. On the TS6 test server,
+running just the engine and the journal produced 14 `524 client is
+flooding` errors. Event registrations failed, and the keepalive `whoami`s
+failed, which forced a disconnect. The server then refused the reconnect
+("Connection lost before handshake"). The engine's session was dead within
+about 90 seconds. With the journal's session removed, the same run had no
+errors.
+
+`EventBridge` now tracks who holds each server:sid session. The engine, the
+journal and the Discord bridge each `acquire` it under their own name, and
+it closes only when the last holder calls `release`. The file browser still
+opens a session on demand without holding it. Each consumer listens on the
+shared bridge and filters out events that are not its own: other servers,
+other virtual servers, and the engine's per-channel command listeners.
+
+Four gaps in `SshQueryClient` had turned a temporary flood into a session
+that stayed dead until restart:
+
+- A 524 reply to a keepalive counted as a failed keepalive; now only an
+  unanswered one does.
+- A failed connect never tried again, because only a session that had been
+  up reconnected. Now every non-fatal failure backs off (1 s, doubling to
+  30 s) and retries.
+- Event registration gave up on a 524. It now waits and retries (3 s, 6 s,
+  12 s), and logs the event types that still failed.
+- Concurrent connects could open duplicate sessions.
+
+Command triggers bound to a channel still need one extra session per
+channel, because TeamSpeak only delivers channel chat to a query client
+sitting in that channel.
+
+Closing a session now sends ServerQuery `quit` first. Without it, TeamSpeak
+6 left the socket in CLOSE_WAIT and kept listing the query client. On the
+test server, the listener of a disabled flow was still there minutes after
+the backend had closed its end.
+
+**TeamSpeak 6's query flood limit is tight, and it bans.** A stock server
+reports:
+
+| Setting | Value |
+|---|---|
+| `serverinstance_serverquery_flood_commands` | 10 per `flood_time` of 3 s |
+| `serverinstance_serverquery_ban_time` | 600 s |
+| `serverinstance_serverquery_max_connections_per_ip` | 5 |
+
+The limit is counted per IP, across every SSH session and the manager's
+WebQuery calls together. Live testing hit it three ways, and each has a fix:
+
+- **A burst of registrations.** Reopening the main session and a command
+  listener together (as "Forget SSH host key" does) meant about a dozen
+  registration commands in a second, on top of the UI's WebQuery calls.
+  A `QueryPacer` per server now gives all its SSH sessions 5 commands per
+  3 s between them, and a command's timeout starts only when it is written.
+- **Every Save in the flow editor.** Saving disabled and re-enabled the
+  flow, which closed and reopened its command listener: a new login and
+  five commands each time. `reloadFlow` now swaps the flow in place and
+  keeps its sessions.
+- **Retrying during the ban.** The ban shows up as connections dropped
+  before the SSH handshake, and every attempt during it restarted the
+  600 s. Retrying every 30 s kept the manager banned for good. After such a
+  drop, the next attempt now waits 610 s. With the backend's IP silent for
+  10.5 minutes, the next start connected on the first try.
+
+A registration that still fails is retried every 60 s until it succeeds.
+Before, a session whose registration fell inside a ban stayed connected but
+deaf until the backend restarted.
+
+### Resetting the SSH host-key pin
+
+coom 91a483f pins the server's SSH host key on first use, and nothing ever
+cleared the pin. A server reinstalled at the same address, or a connection
+edited to point elsewhere, was refused for good. Now the pin is cleared when
+a connection's host or SSH port changes. Settings → Connections → Edit also
+has **Forget SSH host key** for the same-address case. Either action, like
+any SSH credential change, reopens that server's sessions straight away.
+Saving the form with the SSH fields unchanged does not.
+A key that changes on its own is still refused, as a fatal error with no
+retry loop, and the log names the fix.
+
 ## Open follow-ups
 
 1. VP9 keyframe detector, to restore the per-peer stream gate for VP9. (VP8

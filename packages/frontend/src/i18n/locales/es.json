@@ -176,7 +176,12 @@
       "toastUpdateFailed": "Error al actualizar",
       "toastTestSuccess": "Conexión exitosa",
       "toastTestFailed": "Error de conexión",
-      "unchanged": "(sin cambios)"
+      "unchanged": "(sin cambios)",
+      "sshHostKeyPinned": "Clave de host SSH fijada. Si este servidor TeamSpeak se reinstaló y su clave cambió, olvídala para que la próxima conexión confíe en la nueva.",
+      "sshHostKeyNotPinned": "Todavía no hay ninguna clave de host SSH fijada. La primera conexión SSH la fija.",
+      "forgetSshHostKey": "Olvidar la clave de host SSH",
+      "toastHostKeyForgotten": "Clave de host SSH olvidada. La próxima conexión fijará la clave actual del servidor.",
+      "toastHostKeyForgetFailed": "No se pudo olvidar la clave de host SSH"
     },
     "users": {
       "subtitle": "Gestionar usuarios y roles de la aplicación",

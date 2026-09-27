@@ -1,22 +1,35 @@
 import type { PrismaClient } from '../generated/prisma/index.js';
 import type { ConnectionPool } from './ts-client/connection-pool.js';
 import type { VoiceBotManager } from './voice/voice-bot-manager.js';
-import { EventBridge } from './bot-engine/event-bridge.js';
+import type { EventBridge } from './bot-engine/event-bridge.js';
 import { lookupCountry } from './utils/geo.js';
 
 const RETENTION_KEY = 'journal.retentionDays';
 const DEFAULT_RETENTION_DAYS = 90;
 const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** The journal's name on the SSH sessions it shares with the flow engine. */
+const SSH_HOLDER = 'journal';
+/** sid=1 is the default virtual server; the journal tracks the main one. */
+const JOURNAL_SID = 1;
 
 /** Records web and TeamSpeak connection events and purges old rows. */
 export class ConnectionJournal {
-  private eventBridge: EventBridge | null = null;
   private purgeTimer: ReturnType<typeof setInterval> | null = null;
+  /** Server config ids whose session the journal holds. */
+  private watched: number[] = [];
+  private readonly onTsEventBound = this.onTsEvent.bind(this);
 
+  /**
+   * `eventBridge` is the flow engine's. The journal used to open its own,
+   * which put a second ServerQuery session with the same login on each
+   * server; TeamSpeak counts both against one flood allowance, and the
+   * engine's event registrations and keepalives started failing with 524.
+   */
   constructor(
     private prisma: PrismaClient,
     private pool: ConnectionPool,
     private voiceBotManager: VoiceBotManager,
+    private eventBridge: EventBridge,
   ) {}
 
   async start(): Promise<void> {
@@ -30,17 +43,10 @@ export class ConnectionJournal {
     const withSsh = servers.filter((s: any) => s.sshUsername && s.sshPassword);
     if (withSsh.length === 0) return;
 
-    this.eventBridge = new EventBridge(this.prisma);
-    this.eventBridge.on('tsEvent', (configId, sid, eventName, data) => {
-      if (eventName !== 'notifycliententerview') return;
-      this.onClientEnter(configId, sid, data).catch((err) => {
-        console.error(`[Journal] enter-view handling failed: ${err.message}`);
-      });
-    });
-
+    this.eventBridge.on('tsEvent', this.onTsEventBound);
     for (const server of withSsh) {
-      // sid=1 is the default virtual server; the journal tracks the main one.
-      this.eventBridge.connectServer(server.id, 1).catch((err) => {
+      this.watched.push(server.id);
+      this.eventBridge.acquire(server.id, JOURNAL_SID, SSH_HOLDER).catch((err) => {
         console.error(`[Journal] SSH connect failed for server ${server.id}: ${err.message}`);
       });
     }
@@ -49,9 +55,11 @@ export class ConnectionJournal {
 
   async stop(): Promise<void> {
     if (this.purgeTimer) { clearInterval(this.purgeTimer); this.purgeTimer = null; }
-    if (this.eventBridge) {
-      this.eventBridge.removeAllListeners();
-      this.eventBridge = null;
+    this.eventBridge.off('tsEvent', this.onTsEventBound);
+    const watched = this.watched;
+    this.watched = [];
+    for (const configId of watched) {
+      await this.eventBridge.release(configId, JOURNAL_SID, SSH_HOLDER).catch(() => { /* already gone */ });
     }
   }
 
@@ -61,6 +69,17 @@ export class ConnectionJournal {
     this.prisma.connectionLog.create({
       data: { source: 'web', login, ip, country: geo.country, success, isBot: false },
     }).catch((err: any) => console.error(`[Journal] web log failed: ${err.message}`));
+  }
+
+  private onTsEvent(configId: number, sid: number, eventName: string, data: Record<string, string>): void {
+    if (eventName !== 'notifycliententerview') return;
+    // The bridge is shared: skip other virtual servers, servers the journal
+    // does not watch, and the flow engine's per-channel command listeners,
+    // or one join would be recorded more than once.
+    if (sid !== JOURNAL_SID || !this.watched.includes(configId) || data.__cmd_listener_channel_id) return;
+    this.onClientEnter(configId, sid, data).catch((err) => {
+      console.error(`[Journal] enter-view handling failed: ${err.message}`);
+    });
   }
 
   private async onClientEnter(configId: number, sid: number, data: Record<string, string>): Promise<void> {

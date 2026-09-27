@@ -176,7 +176,12 @@
       "toastUpdateFailed": "Aktualisieren fehlgeschlagen",
       "toastTestSuccess": "Verbindung erfolgreich",
       "toastTestFailed": "Verbindung fehlgeschlagen",
-      "unchanged": "(unverändert)"
+      "unchanged": "(unverändert)",
+      "sshHostKeyPinned": "SSH-Hostschlüssel gespeichert. Wurde dieser TeamSpeak-Server neu installiert und hat sich sein Schlüssel geändert, vergiss ihn, damit die nächste Verbindung dem neuen vertraut.",
+      "sshHostKeyNotPinned": "Noch kein SSH-Hostschlüssel gespeichert. Die erste SSH-Verbindung speichert ihn.",
+      "forgetSshHostKey": "SSH-Hostschlüssel vergessen",
+      "toastHostKeyForgotten": "SSH-Hostschlüssel vergessen. Die nächste Verbindung speichert den aktuellen Schlüssel des Servers.",
+      "toastHostKeyForgetFailed": "SSH-Hostschlüssel konnte nicht vergessen werden"
     },
     "users": {
       "subtitle": "Webapp-Benutzer und -Rollen verwalten",

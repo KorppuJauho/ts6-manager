@@ -1,0 +1,260 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Stands in for the SSH session: records every session opened, connects
+// instantly unless a test holds it, and never touches the network.
+const harness = vi.hoisted(() => ({
+  clients: [] as any[],
+  holdConnect: null as Promise<void> | null,
+  failConnect: null as { fatal: boolean } | null,
+  /** What successive registerEvents calls report as failed; empty once used up. */
+  registerResults: [] as string[][],
+  registerCalls: 0,
+}));
+
+vi.mock('./ssh-query-client.js', async () => {
+  const { EventEmitter } = await import('events');
+  class FakeSshQueryClient extends EventEmitter {
+    isConnected = false;
+    hasFatalError = false;
+    destroyed = false;
+    commands: string[] = [];
+    constructor(public options: any) {
+      super();
+      harness.clients.push(this);
+    }
+    async connect() {
+      if (harness.holdConnect) await harness.holdConnect;
+      if (harness.failConnect) {
+        this.hasFatalError = harness.failConnect.fatal;
+        throw new Error('connect failed');
+      }
+      this.isConnected = true;
+      this.emit('ready');
+    }
+    async registerEvents() { harness.registerCalls++; return harness.registerResults.shift() ?? []; }
+    async registerCommandListener() { return []; }
+    async executeCommand(cmd: string) { this.commands.push(cmd); return `ok ${cmd}`; }
+    destroy() { this.destroyed = true; this.isConnected = false; }
+  }
+  return { SshQueryClient: FakeSshQueryClient };
+});
+vi.mock('../utils/crypto.js', () => ({ decrypt: (s: string) => s }));
+
+const { EventBridge, REGISTER_RETRY_MS } = await import('./event-bridge.js');
+
+const SERVER = { id: 1, host: 'ts.test', sshPort: 10022, sshUsername: 'serveradmin', sshPassword: 'pw', sshHostKeyFp: null };
+
+function deferred() {
+  let release!: () => void;
+  const promise = new Promise<void>((r) => { release = r; });
+  return { promise, release };
+}
+
+function stubPrisma(config: any = SERVER, hold?: Promise<void>) {
+  return {
+    tsServerConfig: {
+      findUnique: vi.fn(async () => { if (hold) await hold; return config; }),
+      update: vi.fn(async () => ({})),
+    },
+  } as any;
+}
+
+beforeEach(() => {
+  harness.clients = [];
+  harness.holdConnect = null;
+  harness.failConnect = null;
+  harness.registerResults = [];
+  harness.registerCalls = 0;
+});
+
+describe('EventBridge connects', () => {
+  it('opens one session when connects overlap while the config loads', async () => {
+    const configLoad = deferred();
+    const bridge = new EventBridge(stubPrisma(SERVER, configLoad.promise));
+
+    const a = bridge.connectServer(1, 1);
+    const b = bridge.connectServer(1, 1);
+    configLoad.release();
+    await Promise.all([a, b]);
+
+    expect(harness.clients).toHaveLength(1);
+    expect(bridge.isConnected(1, 1)).toBe(true);
+  });
+
+  it('opens one session when a command arrives while the connect is in flight', async () => {
+    const hold = deferred();
+    harness.holdConnect = hold.promise;
+    const bridge = new EventBridge(stubPrisma());
+
+    const connecting = bridge.connectServer(1, 1);
+    const command = bridge.executeCommand(1, 1, 'ftgetfilelist cid=1');
+    hold.release();
+    await connecting;
+
+    await expect(command).resolves.toBe('ok ftgetfilelist cid=1');
+    expect(harness.clients).toHaveLength(1);
+  });
+
+  it('keeps sessions for different virtual servers apart', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await Promise.all([bridge.connectServer(1, 1), bridge.connectServer(1, 2)]);
+    expect(harness.clients).toHaveLength(2);
+  });
+
+  it('opens one command listener when listener connects overlap', async () => {
+    const configLoad = deferred();
+    const bridge = new EventBridge(stubPrisma(SERVER, configLoad.promise));
+
+    const a = bridge.connectCommandListener(1, 1, 5);
+    const b = bridge.connectCommandListener(1, 1, 5);
+    configLoad.release();
+    await Promise.all([a, b]);
+
+    expect(harness.clients).toHaveLength(1);
+    expect(bridge.getCommandListenerChannelIds(1, 1)).toEqual([5]);
+  });
+
+  it('opens nothing for a server without SSH credentials', async () => {
+    const bridge = new EventBridge(stubPrisma({ ...SERVER, sshUsername: null }));
+    await bridge.connectServer(1, 1);
+    expect(harness.clients).toHaveLength(0);
+    await expect(bridge.executeCommand(1, 1, 'whoami')).rejects.toThrow(/SSH not connected/);
+  });
+
+  it('lets a later connect retry after a fatal failure', async () => {
+    harness.failConnect = { fatal: true };
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.connectServer(1, 1);
+    expect(bridge.getConnectedKeys()).toEqual([]);
+
+    harness.failConnect = null;
+    await bridge.connectServer(1, 1);
+    expect(harness.clients).toHaveLength(2);
+    expect(bridge.isConnected(1, 1)).toBe(true);
+  });
+});
+
+describe('EventBridge holders', () => {
+  it('keeps a session open while another holder still needs it', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.acquire(1, 1, 'engine');
+    await bridge.acquire(1, 1, 'journal');
+    expect(harness.clients).toHaveLength(1);
+
+    await bridge.release(1, 1, 'engine');
+    expect(harness.clients[0].destroyed).toBe(false);
+    expect(bridge.isConnected(1, 1)).toBe(true);
+
+    await bridge.release(1, 1, 'journal');
+    expect(harness.clients[0].destroyed).toBe(true);
+    expect(bridge.getConnectedKeys()).toEqual([]);
+  });
+
+  it('ignores a repeated release from the same holder', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.acquire(1, 1, 'engine');
+    await bridge.acquire(1, 1, 'journal');
+    await bridge.release(1, 1, 'engine');
+    await bridge.release(1, 1, 'engine');
+    expect(bridge.isConnected(1, 1)).toBe(true);
+  });
+
+  it('reports only the keys a holder holds', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.acquire(1, 1, 'engine');
+    await bridge.acquire(1, 2, 'journal');
+    expect(bridge.getKeysHeldBy('engine')).toEqual(['1:1']);
+    expect(bridge.getKeysHeldBy('journal')).toEqual(['1:2']);
+  });
+
+  it('closes an unheld on-demand session when the last holder releases', async () => {
+    // A file-browser request opens a session without holding it, as before.
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.executeCommand(1, 1, 'ftgetfilelist cid=1');
+    await bridge.acquire(1, 1, 'engine');
+    expect(harness.clients).toHaveLength(1);
+    await bridge.release(1, 1, 'engine');
+    expect(bridge.getConnectedKeys()).toEqual([]);
+  });
+});
+
+describe('EventBridge after a fatal failure', () => {
+  it('replaces a session that failed fatally on the next connect', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.acquire(1, 1, 'engine');
+    harness.clients[0].hasFatalError = true; // e.g. its host key stopped matching
+    harness.clients[0].isConnected = false;
+
+    await bridge.executeCommand(1, 1, 'whoami');
+
+    expect(harness.clients).toHaveLength(2);
+    expect(harness.clients[0].destroyed).toBe(true);
+    expect(bridge.isConnected(1, 1)).toBe(true);
+  });
+
+  it('restartServer reopens held sessions and command listeners of that server only', async () => {
+    const bridge = new EventBridge(stubPrisma());
+    await bridge.acquire(1, 1, 'engine');
+    await bridge.connectCommandListener(1, 1, 5);
+    await bridge.executeCommand(1, 2, 'whoami'); // on demand, nobody holds it
+    await bridge.acquire(2, 1, 'journal');
+    const [held, listener, unheld, otherServer] = harness.clients;
+
+    await bridge.restartServer(1);
+
+    expect([held.destroyed, listener.destroyed, unheld.destroyed, otherServer.destroyed]).toEqual([true, true, true, false]);
+    expect(harness.clients).toHaveLength(6);
+    expect(bridge.getConnectedKeys().sort()).toEqual(['1:1', '2:1']);
+    expect(bridge.getCommandListenerChannelIds(1, 1)).toEqual([5]);
+    expect(bridge.getKeysHeldBy('engine')).toEqual(['1:1']);
+  });
+});
+
+describe('EventBridge registration retries', () => {
+  it('registers again later instead of leaving the session deaf', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => { });
+    try {
+      harness.registerResults = [['server', 'textserver'], ['textserver']];
+      const bridge = new EventBridge(stubPrisma());
+      const connected = vi.fn();
+      bridge.on('sshConnected', connected);
+
+      await bridge.connectServer(1, 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.registerCalls).toBe(1);
+      expect(connected).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(REGISTER_RETRY_MS);
+      expect(harness.registerCalls).toBe(2);
+      await vi.advanceTimersByTimeAsync(REGISTER_RETRY_MS);
+      expect(harness.registerCalls).toBe(3);
+      expect(connected).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(REGISTER_RETRY_MS * 3);
+      expect(harness.registerCalls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('stops retrying once the session is closed', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => { });
+    try {
+      harness.registerResults = [['server'], ['server'], ['server']];
+      const bridge = new EventBridge(stubPrisma());
+      await bridge.acquire(1, 1, 'engine');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.registerCalls).toBe(1);
+
+      await bridge.release(1, 1, 'engine');
+      await vi.advanceTimersByTimeAsync(REGISTER_RETRY_MS * 3);
+      expect(harness.registerCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+});

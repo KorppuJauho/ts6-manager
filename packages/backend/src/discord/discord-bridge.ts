@@ -15,7 +15,7 @@ import type { ConnectionPool } from '../ts-client/connection-pool.js';
 import type { VoiceBotManager } from '../voice/voice-bot-manager.js';
 import type { VoiceBot } from '../voice/voice-bot.js';
 import type { QueueItem } from '../voice/playlist/queue.js';
-import { EventBridge } from '../bot-engine/event-bridge.js';
+import type { EventBridge } from '../bot-engine/event-bridge.js';
 import { decrypt } from '../utils/crypto.js';
 import { resolvePlayQuery, downloadAndEnqueue, isSpotifyUrl, loadSpotifyConfig, enqueueSpotify } from '../voice/music-ops.js';
 import { fetchLyrics, lyricsInputFromTrack } from '../voice/lyrics.js';
@@ -65,6 +65,9 @@ export interface DiscordFlowMessage {
   authorName: string;
 }
 
+/** The presence bridge's name on the SSH sessions it shares with the flow engine. */
+const SSH_HOLDER = 'discord';
+
 /**
  * Bridges Discord and the TS manager: slash commands for music and stats,
  * TS connect/disconnect notifications, now-playing announcements, and an
@@ -73,7 +76,12 @@ export interface DiscordFlowMessage {
 export class DiscordBridge {
   private client: Client | null = null;
   private settings: DiscordSettings | null = null;
-  private eventBridge: EventBridge | null = null;
+  /** The session the presence bridge holds on the shared EventBridge, and its listener. */
+  private presence: {
+    configId: number;
+    sid: number;
+    listener: (configId: number, sid: number, eventName: string, data: Record<string, string>) => void;
+  } | null = null;
   private voiceRelay: DiscordVoiceRelay | null = null;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private awayTimer: ReturnType<typeof setInterval> | null = null;
@@ -101,10 +109,17 @@ export class DiscordBridge {
     await this.postToChannel(channelId, { content });
   }
 
+  /**
+   * `eventBridge` is the flow engine's. Presence events used to come from a
+   * bridge of our own, which put another ServerQuery session with the same
+   * login on the server; TeamSpeak counts every session from our IP against
+   * one flood allowance, and the extra sessions broke the engine's.
+   */
   constructor(
     private prisma: PrismaClient,
     private pool: ConnectionPool,
     private voiceBotManager: VoiceBotManager,
+    private eventBridge: EventBridge,
   ) {
     // Attach now-playing listeners to bots created after startup too, and
     // re-attach the voice relay when the default music bot is recreated
@@ -221,15 +236,15 @@ export class DiscordBridge {
       this.voiceRelay = null;
     }
     this.detachNowPlayingFromAllBots();
-    if (this.eventBridge) {
-      const settings = this.settings;
-      if (settings?.serverConfigId) {
-        try {
-          await this.eventBridge.disconnectServer(settings.serverConfigId, settings.virtualServerId);
-        } catch { /* already gone */ }
-      }
-      this.eventBridge.removeAllListeners();
-      this.eventBridge = null;
+    if (this.presence) {
+      // Release what start() acquired, not what the settings now say: a
+      // reload may have changed the server before stop() runs.
+      const { configId, sid, listener } = this.presence;
+      this.presence = null;
+      this.eventBridge.off('tsEvent', listener);
+      try {
+        await this.eventBridge.release(configId, sid, SSH_HOLDER);
+      } catch { /* already gone */ }
     }
     await this.teardownClient();
   }
@@ -586,11 +601,16 @@ export class DiscordBridge {
       return;
     }
 
-    // Own EventBridge instance: the flow engine prunes SSH connections its
-    // flows no longer use, which would silently kill a shared subscription.
-    this.eventBridge = new EventBridge(this.prisma);
+    // The bridge is shared with the flow engine and the connection journal,
+    // which hold their own sessions on it; each holder keeps its session open
+    // until it releases it, so the engine pruning its flows cannot close ours.
     const epoch = this.startEpoch;
-    this.eventBridge.on('tsEvent', (_configId, _sid, eventName, data) => {
+    const configId = settings.serverConfigId;
+    const sid = settings.virtualServerId;
+    const listener = (evConfigId: number, evSid: number, eventName: string, data: Record<string, string>) => {
+      // Events from other servers, other virtual servers and the engine's
+      // per-channel command listeners arrive here too.
+      if (evConfigId !== configId || evSid !== sid || data.__cmd_listener_channel_id) return;
       if (eventName === 'notifycliententerview' || eventName === 'notifyclientmoved' || eventName === 'notifyclientleftview') {
         console.log(`[Discord] TS event ${eventName}: clid=${data.clid} ctid=${data.ctid ?? ''} cfid=${data.cfid ?? ''} type=${data.client_type ?? ''}`);
         // In whole-server mode a move never changes the total — skip the refresh.
@@ -602,8 +622,10 @@ export class DiscordBridge {
       this.onTsEvent(eventName, data).catch((err) => {
         console.error(`[Discord] TS event handling failed: ${err.message}`);
       });
-    });
-    await this.eventBridge.connectServer(settings.serverConfigId, settings.virtualServerId);
+    };
+    this.presence = { configId, sid, listener };
+    this.eventBridge.on('tsEvent', listener);
+    await this.eventBridge.acquire(configId, sid, SSH_HOLDER);
     console.log(`[Discord] TS presence bridge active: server=${settings.serverConfigId} sid=${settings.virtualServerId} watchedChannel=${settings.notifyChannelId ?? '(whole server)'} notifChannel=${settings.notificationsChannelId ?? '(none)'} notifications=${wantsNotifications}`);
 
     // Seed the nickname/channel maps with clients already connected before the
