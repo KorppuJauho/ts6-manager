@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const harness = vi.hoisted(() => ({
   connections: [] as any[],
   written: [] as string[],
+  writtenAt: [] as number[],
   reply: (_cmd: string): string | null => 'error id=0 msg=ok',
   refuse: null as null | 'drop' | 'auth' | 'hostkey',
 }));
@@ -18,6 +19,7 @@ vi.mock('ssh2', async () => {
     write(data: string) {
       const cmd = data.trim();
       harness.written.push(cmd);
+      harness.writtenAt.push(Date.now());
       const answer = harness.reply(cmd);
       if (answer !== null) queueMicrotask(() => this.emit('data', Buffer.from(`${answer}\n`)));
     }
@@ -49,12 +51,13 @@ vi.mock('ssh2', async () => {
 });
 
 const { SshQueryClient, FLOOD_RETRY_DELAYS_MS, sshHostKeyFingerprint } = await import('./ssh-query-client.js');
+const { QueryPacer, SSH_COMMANDS_PER_WINDOW, FLOOD_WINDOW_MS } = await import('./query-pacer.js');
 
 const OK = 'error id=0 msg=ok';
 const FLOOD = 'error id=524 msg=client\\sis\\sflooding';
 
-function makeClient(pinned: string | null = null) {
-  const client = new SshQueryClient({ host: 'ts.test', port: 10022, username: 'serveradmin', password: 'pw', hostKeyFingerprint: pinned });
+function makeClient(pinned: string | null = null, pacer?: InstanceType<typeof QueryPacer>) {
+  const client = new SshQueryClient({ host: 'ts.test', port: 10022, username: 'serveradmin', password: 'pw', hostKeyFingerprint: pinned, pacer });
   client.on('error', () => { }); // EventBridge always listens; an unheard 'error' would throw
   return client;
 }
@@ -66,6 +69,7 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => { });
   harness.connections = [];
   harness.written = [];
+  harness.writtenAt = [];
   harness.reply = () => OK;
   harness.refuse = null;
 });
@@ -251,5 +255,42 @@ describe('destroy', () => {
     client.destroy();
 
     expect(harness.written).not.toContain('quit');
+  });
+});
+
+describe('pacing', () => {
+  it('keeps two sessions registering at once under the flood limit together', async () => {
+    // What restarting a server's sessions does: the base session and a
+    // command listener both register straight after connecting.
+    const pacer = new QueryPacer();
+    const base = makeClient(null, pacer);
+    const listener = makeClient(null, pacer);
+    await Promise.all([base.connect(), listener.connect()]);
+
+    const done = Promise.all([base.registerEvents(1), listener.registerCommandListener(1, 5)]);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await done;
+
+    expect(harness.written.length).toBeGreaterThan(SSH_COMMANDS_PER_WINDOW * 2);
+    for (const t of harness.writtenAt) {
+      const inWindow = harness.writtenAt.filter((u) => u >= t && u < t + FLOOD_WINDOW_MS).length;
+      expect(inWindow).toBeLessThanOrEqual(SSH_COMMANDS_PER_WINDOW);
+    }
+    base.destroy();
+    listener.destroy();
+  });
+
+  it('does not time a command out while it waits for the pacer', async () => {
+    const pacer = new QueryPacer(1, 8000);
+    const client = makeClient(null, pacer);
+    await client.connect();
+
+    const first = client.executeCommand('whoami', 5000);
+    const second = client.executeCommand('whoami', 5000); // waits ~8 s for a slot
+    await vi.advanceTimersByTimeAsync(9000);
+
+    await expect(first).resolves.toBe('');
+    await expect(second).resolves.toBe('');
+    client.destroy();
   });
 });

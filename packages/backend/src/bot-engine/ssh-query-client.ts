@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { parseQueryResponse } from '@ts6/common';
 import { TS_EVENT_TYPES } from '@ts6/common';
 import crypto, { createHash, timingSafeEqual } from 'crypto';
+import type { QueryPacer } from './query-pacer.js';
 
 export interface SshQueryClientOptions {
   host: string;
@@ -13,6 +14,8 @@ export interface SshQueryClientOptions {
   hostKeyFingerprint?: string | null;
   /** Called with the fingerprint observed on a first connect, so it can be persisted. */
   onHostKeyPinned?: (fingerprint: string) => void;
+  /** Shared by every session to the same server, to keep them under its flood limit together. */
+  pacer?: QueryPacer;
 }
 
 /** OpenSSH-style fingerprint: "SHA256:<base64 of the key digest, unpadded>". */
@@ -34,7 +37,10 @@ interface QueuedCommand {
   command: string;
   resolve: (result: string) => void;
   reject: (err: Error) => void;
-  timeout: ReturnType<typeof setTimeout>;
+  timeoutMs: number;
+  /** Started when the command is written, so waiting on the pacer does not count against it. */
+  timeout: ReturnType<typeof setTimeout> | null;
+  written: boolean;
   responseLines: string[];
 }
 
@@ -221,22 +227,13 @@ export class SshQueryClient extends EventEmitter {
     }
 
     return new Promise<string>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        if (this.currentCommand === entry) {
-          this.currentCommand = null;
-          this.processQueue();
-        } else {
-          const idx = this.commandQueue.indexOf(entry);
-          if (idx !== -1) this.commandQueue.splice(idx, 1);
-        }
-        reject(new Error(`Command timed out after ${timeoutMs}ms: ${command}`));
-      }, timeoutMs);
-
       const entry: QueuedCommand = {
         command,
         resolve,
         reject,
-        timeout,
+        timeoutMs,
+        timeout: null,
+        written: false,
         responseLines: [],
       };
 
@@ -483,10 +480,10 @@ export class SshQueryClient extends EventEmitter {
   }
 
   private handleErrorLine(line: string): void {
-    if (!this.currentCommand) return;
+    if (!this.currentCommand?.written) return;
 
     const cmd = this.currentCommand;
-    clearTimeout(cmd.timeout);
+    if (cmd.timeout) clearTimeout(cmd.timeout);
     this.currentCommand = null;
 
     // Parse "error id=N msg=..."
@@ -507,9 +504,26 @@ export class SshQueryClient extends EventEmitter {
     if (this.currentCommand || this.commandQueue.length === 0) return;
     if (!this.shell || !this.connected) return;
 
-    this.currentCommand = this.commandQueue.shift()!;
-    this.currentCommand.responseLines = [];
-    this.shell.write(this.currentCommand.command + '\n');
+    // Claimed before the pacer wait, so nothing else writes in between.
+    const cmd = this.commandQueue.shift()!;
+    this.currentCommand = cmd;
+    const send = () => {
+      if (this.currentCommand !== cmd || !this.shell || !this.connected) return;
+      cmd.responseLines = [];
+      cmd.written = true;
+      cmd.timeout = setTimeout(() => this.onCommandTimeout(cmd), cmd.timeoutMs);
+      this.shell.write(cmd.command + '\n');
+    };
+    if (this.options.pacer) this.options.pacer.take().then(send);
+    else send();
+  }
+
+  private onCommandTimeout(cmd: QueuedCommand): void {
+    if (this.currentCommand === cmd) {
+      this.currentCommand = null;
+      this.processQueue();
+    }
+    cmd.reject(new Error(`Command timed out after ${cmd.timeoutMs}ms: ${cmd.command}`));
   }
 
   private startKeepalive(): void {
@@ -572,12 +586,11 @@ export class SshQueryClient extends EventEmitter {
 
   private rejectAllPending(reason: string): void {
     if (this.currentCommand) {
-      clearTimeout(this.currentCommand.timeout);
+      if (this.currentCommand.timeout) clearTimeout(this.currentCommand.timeout);
       this.currentCommand.reject(new Error(reason));
       this.currentCommand = null;
     }
     for (const cmd of this.commandQueue) {
-      clearTimeout(cmd.timeout);
       cmd.reject(new Error(reason));
     }
     this.commandQueue = [];

@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import type { PrismaClient } from '../../generated/prisma/index.js';
 import { SshQueryClient } from './ssh-query-client.js';
 import { decrypt } from '../utils/crypto.js';
+import { QueryPacer } from './query-pacer.js';
 
 export declare interface EventBridge {
   on(event: 'tsEvent', listener: (configId: number, sid: number, eventName: string, data: Record<string, string>) => void): this;
@@ -26,6 +27,14 @@ export class EventBridge extends EventEmitter {
    * closes only when its last holder lets go.
    */
   private holders: Map<string, Set<string>> = new Map();
+  /** One per server: its flood limit counts every session from our IP together. */
+  private pacers: Map<number, QueryPacer> = new Map();
+
+  private pacerFor(configId: number): QueryPacer {
+    let pacer = this.pacers.get(configId);
+    if (!pacer) this.pacers.set(configId, pacer = new QueryPacer());
+    return pacer;
+  }
 
   constructor(private prisma: PrismaClient) {
     super();
@@ -84,6 +93,7 @@ export class EventBridge extends EventEmitter {
       password: decrypt(serverConfig.sshPassword),
       hostKeyFingerprint: serverConfig.sshHostKeyFp,
       onHostKeyPinned: (fp) => this.persistHostKey(configId, fp),
+      pacer: this.pacerFor(configId),
     });
 
     client.on('ready', async () => {
@@ -263,6 +273,7 @@ export class EventBridge extends EventEmitter {
       password: decrypt(serverConfig.sshPassword),
       hostKeyFingerprint: serverConfig.sshHostKeyFp,
       onHostKeyPinned: (fp) => this.persistHostKey(configId, fp),
+      pacer: this.pacerFor(configId),
     });
 
     client.on('ready', async () => {
