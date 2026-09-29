@@ -177,7 +177,10 @@ is fixed at container start, so they travel with each stream instead.
 | `SIDECAR_HW_DECODE` | on | With hardware encoding, also decode the source on the GPU. `0` decodes on the CPU. |
 | `SIDECAR_DEBUG_LOGS` | off | `1` logs per-packet detail and the full SDP offer and answer. Leave off: an SDP carries ICE credentials and host addresses. |
 | `STUN_SERVERS` | — | Comma-separated STUN URLs. |
-| `VIDEO_QUEUE_SIZE` / `AUDIO_QUEUE_SIZE` | `1024` / `2048` | RTP queue lengths. |
+| `VIDEO_QUEUE_SIZE` / `AUDIO_QUEUE_SIZE` | `4096` / `2048` | RTP queue lengths, in packets. They hold what the A/V pacing is waiting to send. |
+| `SYNC_PLAYOUT_BUFFER_MS` | `50` | Added to both tracks after they are lined up, to absorb the encoder's jitter. |
+| `SYNC_MAX_DELAY_MS` | `1000` | The most one track is held back to meet the other, and the longest the first track waits for the other to start. |
+| `SYNC_VIDEO_BIAS_MS` | `0` | Sends video this much later than audio, to correct lip sync by hand. |
 | `VIDEO_RTP_READ_BUFFER` / `AUDIO_RTP_READ_BUFFER` | 4 MiB / 1 MiB | UDP socket buffers. |
 | `AUDIO_BITRATE` | `128k` | Opus bitrate. |
 | `AUDIO_DELAY_MS` | `0` | Delays the stream's audio by this much, to correct a source whose audio runs ahead. |
