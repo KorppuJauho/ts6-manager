@@ -217,7 +217,7 @@ showed no sign of it.
 
 | | |
 |---|---|
-| Commit | `feat(streaming): stream DASH video+audio pairs…` |
+| Commits | `feat(streaming): stream DASH video+audio pairs…` · `fix(sidecar): reconnect a DASH pair's audio input too` |
 | Files | `voice/voice-bot.ts`, `voice/streaming/types.ts`, `packages/sidecar/main.go` |
 
 YouTube caps progressive formats at 720p, so `-f best` made the 1080p preset
@@ -233,6 +233,16 @@ a source could not smuggle an FFmpeg flag; because it inspects the whole
 string and the split happens later, `https://ok|||-flag` would otherwise have
 passed. **When merging upstream changes to `validSource`, preserve the
 per-segment loop.**
+
+**Each input takes its own options.** FFmpeg input options bind to the next
+`-i` only, and `inputArgs` first put `-reconnect`, `-fflags` and `-re` in
+front of the video input alone. The audio of a DASH pair is its own
+connection, and YouTube resets connections mid-stream: the video reconnected,
+the audio input failed with an I/O error, and the stream played on silent.
+Seen twice in a row on the test stack with a one-minute clip. Every input now
+gets the reconnect options (or `-stream_loop` for a file), `-fflags` and `-re`;
+`-hwaccel` stays on the video input only. With the fix, a later run had both
+connections reset and both reconnect.
 
 ### Streaming presets
 

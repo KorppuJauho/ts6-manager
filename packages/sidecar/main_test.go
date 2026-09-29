@@ -128,12 +128,17 @@ func TestInputArgsDecodeVideoOnTheGPU(t *testing.T) {
 	}
 }
 
-func TestInputArgsWithoutHardwareDecodeAreUnchanged(t *testing.T) {
+// Input options bind to the next -i only. A DASH pair's audio is its own
+// connection: without its own reconnect options, the first reset YouTube sent
+// ended the audio while the video played on.
+func TestInputArgsGiveEachInputItsOwnOptions(t *testing.T) {
 	got := inputArgs([]string{"https://example.test/v.m3u8", "https://example.test/a.webm"}, "")
 	want := []string{
 		"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
 		"-fflags", "+genpts+discardcorrupt", "-re",
 		"-i", "https://example.test/v.m3u8",
+		"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+		"-fflags", "+genpts+discardcorrupt", "-re",
 		"-i", "https://example.test/a.webm",
 	}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
