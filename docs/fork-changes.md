@@ -110,22 +110,88 @@ production since 2026-08, with `devices: /dev/dri:/dev/dri` and
 `stat -c '%g' /dev/dri/renderD128`, it is not the same number everywhere).
 VP9 hardware encoding works there for both IPTV and YouTube sources.
 
-### A/V pacing removed
+### A/V pacing: removed, then rebuilt to measure at arrival
 
 | | |
 |---|---|
-| Commit | `perf(sidecar): stop pacing RTP forwarding by track timestamp` |
-| Files | `packages/sidecar/main.go` |
+| Commits | `perf(sidecar): stop pacing RTP forwarding by track timestamp` (removal) · `fix(sidecar): pace A/V against arrival time, and report it in Sender Reports` |
+| Files | `packages/sidecar/main.go`, `packages/sidecar/pacing_test.go`, `README.md` |
 
-`processVideoRTP` and `processAudioRTP` no longer sleep against
-`computeTrackDelay` before forwarding each new timestamp.
+The sidecar held each track so that video and audio left for the viewers in
+step. The pacing was removed during the VP9 port without a recorded reason.
+Measuring it afterwards found why it misbehaved, and that removing it had
+not been the answer.
 
-**Rationale unknown.** This was changed during the VP9 port and the author does
-not recall why; the plausible reading is that encoder latency made the pacing
-model overshoot. It is committed alone and touches nothing else, so
-`git revert` on that one commit restores upstream behaviour.
-`computeTrackDelay` and `resetSyncTiming` are deliberately still in the file.
-**Follow-up: confirm whether audio drifts on long streams.**
+**Where the skew comes from.** Video leaves FFmpeg later than audio, and not
+mainly because of the encoder. FFmpeg decodes the source with frame
+threading, one frame in flight per thread, up to 16 threads: on a 24-core
+host that is about 530 ms of video delay at 30 fps, with every encoder,
+software VP8 included. Limiting the source decoder to one thread brings it
+to about 30 ms. `-hwaccel cuda` does not remove it. NVENC adds about 60 ms
+of its own, and its first frame comes about 250 ms later than a software
+encoder's. The skew scales with core count, so a NAS sees less of it.
+
+**Why the old pacer failed.** `computeTrackDelay` measured each track's
+latency in the forwarding loop, after that loop's own sleep. Each sleep read
+as latency, and the next sleep grew by the playout buffer's share of the
+average, with nothing to stop it: the hold grew by about 150 ms every second
+of streaming, to 2–3 s after 20 s, whatever the real skew. Once the held
+video outgrew its 1024-packet queue, packets were dropped: 63 to 403 in a
+20 s run. A lag that keeps growing and video that breaks up is the likely
+reason it was removed. Before the video's first packet the audio was also
+paced alone, so the first second went out up to 780 ms apart.
+
+**Why removing it was not the answer.** Without pacing the viewers get the
+raw skew, video about half a second behind audio on a many-core host. The
+offset measured constant over 20 s, so this is a fixed lip-sync error, not
+drift.
+
+**The fix.**
+
+- The reader measures each frame's latency when it arrives from FFmpeg
+  (`recordFrame`); the forwarding loop only waits (`waitToSend`). Its sleep
+  can no longer feed the measurement.
+- Both tracks are sent at the same offset: the later track's latency plus
+  `SYNC_PLAYOUT_BUFFER_MS` (50). The earlier track is held by the skew, the
+  later one by the buffer alone.
+- Until the second track starts, the first is held as if the second were as
+  late as allowed, and the wait is re-asked every 10 ms, so it is released
+  together with the second track's first frame. A source with no audio stops
+  waiting after `SYNC_MAX_DELAY_MS`.
+- New: `SYNC_MAX_DELAY_MS`, default 1000, caps both the hold and one bad
+  timestamp's effect on the average; the old pacer had no cap. Measured
+  skews reach 600 ms and NVENC's cold start 900 ms, and with the measurement
+  fixed a high cap costs nothing on streams that are already in step.
+  `VIDEO_QUEUE_SIZE` goes from 1024 to 4096 packets, room for a second of a
+  4K stream.
+- RTCP Sender Reports paired the wall clock with the last timestamp read
+  from FFmpeg for each track, which reported the half-second skew as the
+  intended sync; a receiver that follows its Sender Reports would reproduce
+  it whatever the pacing did. They now report the media time being sent, on
+  the clock both tracks are paced against (`senderReportRTPTime`).
+
+Measured with the sidecar image's FFmpeg (Debian bookworm, 5.1.9) on the
+RTX 5080 host (24 cores), a 1080p30 H.264 + AAC test file, 20 s runs. The
+holds are how long the sidecar keeps a frame; the offset is between the
+tracks as sent. The old pacer's holds are for the last 10 s, and were still
+growing; the new pacer's are steady from the first 3 s.
+
+| Encode path | Skew from FFmpeg (sent as is while pacing was removed) | Old pacer: hold video / audio, video packets dropped | New: hold video / audio, offset |
+|---|---|---|---|
+| VP8, decoder on 1 thread | 29 ms | 2228 / 2264 ms, 129 | 51 / 80 ms, 0 |
+| VP8, threaded decode | 526 ms | 2139 / 2668 ms, 63 | 51 / 577 ms, 0 |
+| NVENC, threaded decode | 586 ms | 2295 / 2890 ms, 159 | 51 / 636 ms, 0 |
+| NVENC + CUDA decode | 587 ms | 2112 / 2700 ms, 72 | 51 / 638 ms, 0 |
+
+The new pacer dropped no packets, and the first second went out within 5 ms.
+Its only cost is the one it exists for: the earlier track waits for the
+later, plus 50 ms.
+
+The Sender Report change is the one part not measured: it needs a viewer
+(lip-sync check in the TeamSpeak client). Both tracks are still assumed to
+start at media time zero, as the old pacer assumed; a live source that
+starts its audio and video at different points would break that, and FFmpeg's
+RTP output does not say.
 
 ### DASH source pairs
 
@@ -881,7 +947,11 @@ retry loop, and the log names the fix.
    known to set the descriptor's P bit, so "P clear means keyframe" needs
    checking against a real capture before it can be relied on; gating on the B
    bit alone would at least align the gate to a frame start.
-2. Confirm whether removing A/V pacing causes audio drift on long streams.
+2. Lip sync in the TeamSpeak client with the rebuilt pacing and Sender Reports
+   (a clap test), then the source decoder's frame threading: about half a
+   second of video delay on a many-core host. With GPU decoding, limiting it
+   should cost little; with CPU decoding of a 4K source one thread may not
+   keep up, so it needs measuring before a default changes.
 3. An H.264 parameter-set detector, so a peer joining mid-stream is held until
    an SPS rather than opening on the first packet. The same gap VP9 has; less
    pressing than it looks, because the PLI interceptor asks for a keyframe and

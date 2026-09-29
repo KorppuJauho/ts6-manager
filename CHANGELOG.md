@@ -11,7 +11,8 @@ Started at the 2026-08-06 security review; earlier history is in the git log.
 > This section records the first import, on 2026-09-13, and is not kept up to
 > date. Several details below have changed since: streaming and IPTV settings
 > moved into the web UI, Auto quality replaced the fixed 1080p default, H.264
-> and NVIDIA encoding were added, and VP8 streams gate on keyframes again.
+> and NVIDIA encoding were added, VP8 streams gate on keyframes again, and A/V
+> pacing was rebuilt rather than left removed.
 > `docs/fork-changes.md` is the maintained record.
 
 Imports the changes this fork had been carrying outside version control, each
