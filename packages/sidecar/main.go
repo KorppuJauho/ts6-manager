@@ -1048,19 +1048,22 @@ func (s *Sidecar) ClosePeer(id string) {
 // format and hands FFmpeg the software one, so the stream decodes on the CPU
 // as it always did.
 //
-// Input options apply to the next -i only. -hwaccel goes on the first input,
-// which is the video in both source shapes: a progressive URL carries video
-// and audio together, and a DASH pair is video then audio.
+// Input options apply to the next -i only, so each input gets its own:
+// reconnecting for a URL, looping for a file, and the read pacing. A DASH
+// pair's audio is a second connection, and YouTube resets idle ones; with
+// the options on the video input alone, the first reset ended the audio for
+// the rest of the stream. -hwaccel goes on the first input only, which is the
+// video in both source shapes: a progressive URL carries video and audio
+// together, and a DASH pair is video then audio.
 func inputArgs(sources []string, hwaccel string) []string {
 	var args []string
-	if strings.HasPrefix(sources[0], "http://") || strings.HasPrefix(sources[0], "https://") {
-		args = append(args, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5")
-	} else {
-		args = append(args, "-stream_loop", "-1")
-	}
-
-	args = append(args, "-fflags", "+genpts+discardcorrupt", "-re")
 	for i, src := range sources {
+		if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
+			args = append(args, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5")
+		} else {
+			args = append(args, "-stream_loop", "-1")
+		}
+		args = append(args, "-fflags", "+genpts+discardcorrupt", "-re")
 		if i == 0 && hwaccel != "" {
 			args = append(args, "-hwaccel", hwaccel)
 		}
