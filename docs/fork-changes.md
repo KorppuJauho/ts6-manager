@@ -185,13 +185,33 @@ growing; the new pacer's are steady from the first 3 s.
 
 The new pacer dropped no packets, and the first second went out within 5 ms.
 Its only cost is the one it exists for: the earlier track waits for the
-later, plus 50 ms.
+later, plus 50 ms. Long runs with the sidecar's exact flags held that: NVENC
+for 30 minutes, software VP8 for 15, 4K NVENC for 10, 2.3 million video
+packets, the offset 0 and the holds flat in every window.
 
-The Sender Report change is the one part not measured: it needs a viewer
-(lip-sync check in the TeamSpeak client). Both tracks are still assumed to
-start at media time zero, as the old pacer assumed; a live source that
-starts its audio and video at different points would break that, and FFmpeg's
-RTP output does not say.
+On the NAS (UGREEN DXP4800 Plus, 6 threads, Intel VAAPI), the same harness in
+a throwaway sidecar container:
+
+| Encode path | Skew from FFmpeg | New: hold video / audio, offset, dropped |
+|---|---|---|
+| VP9 VAAPI 1080p | 260 ms | 51 / 311 ms, 0, 0 |
+| H.264 VAAPI 1080p | 261 ms | 51 / 312 ms, 0, 0 |
+| VP9 VAAPI 1080p, decoder on 1 thread | 63 ms | 50 / 114 ms, 0, 0 |
+| VP9 VAAPI 4K 9500k, 3 min | 258–284 ms | 51 / 309–336 ms, 0, 0 of 187 072 |
+
+`vp8_vaapi` fails to open its encoder on that GPU; the encoder probe falls
+back to software.
+
+In the TeamSpeak client, with an A/V sync test clip (a flash and a beep each
+second): in step on the test stack with H.264 NVENC at 1080p and 4K, and on
+the NAS with H.264 VAAPI at 1440p. A live IPTV channel played with its audio
+ahead of the picture, but the same channel in Jellyfin did too: the offset
+is the channel's own.
+
+Both tracks are still assumed to start at media time zero, as the old pacer
+assumed. A live source that starts its audio and video at different points
+would break that, and FFmpeg's RTP output does not say; the IPTV check above
+showed no sign of it.
 
 ### DASH source pairs
 
@@ -947,9 +967,8 @@ retry loop, and the log names the fix.
    known to set the descriptor's P bit, so "P clear means keyframe" needs
    checking against a real capture before it can be relied on; gating on the B
    bit alone would at least align the gate to a frame start.
-2. Lip sync in the TeamSpeak client with the rebuilt pacing and Sender Reports
-   (a clap test), then the source decoder's frame threading: about half a
-   second of video delay on a many-core host. With GPU decoding, limiting it
+2. The source decoder's frame threading: about half a second of video delay
+   on a many-core host, a quarter on the NAS. With GPU decoding, limiting it
    should cost little; with CPU decoding of a 4K source one thread may not
    keep up, so it needs measuring before a default changes.
 3. An H.264 parameter-set detector, so a peer joining mid-stream is held until
