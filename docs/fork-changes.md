@@ -412,6 +412,25 @@ React Router 7 peers `react >=18`, so that upgrade does not drag React 19 in
 with it — it is a routing-API migration on its own, not part of the React 19
 cluster.
 
+**2026-09-30: brace-expansion again.** GHSA-qhr7-859c-m2p7 (high: DoS through
+unbounded recursion on nested brace groups) turned CI red overnight, on
+`main` as on every branch. It is patched in >=1.1.20 and >=5.0.11, and the
+two existing overrides were the floor holding the tree below that — the undici
+lesson again. Raised to `^1.1.20` and `^5.0.11`; the lockfile resolves 1.1.21
+and 5.0.12. Reached via `eslint` (dev) and `@discordjs/opus`'s install-time
+tooling, neither at runtime. Regenerating the lockfile with pnpm 9.15.9, the
+CI major, also dropped the `libc:` fields a newer pnpm had written; they are
+platform metadata pnpm 9 neither writes nor needs.
+
+The same sweep raised the `ip-address` override from `^10.3.1` to `^10.7.1`
+(resolves 10.7.2): four moderate advisories, three SSRF / subnet-check bypasses
+and a DoS, all patched in the same major. None was reachable. The only user is
+`geoip-lite`, and only its `scripts/updatedb.js`, which rebuilds the GeoIP
+data and is never run here; `geoip.lookup()` does not load it, and the URL
+validator resolves with Node's `dns` and never touches it. Raised anyway, so
+the old floor cannot hold a future runtime user below the fix. The audit is
+down to the two unreachable `react-router` findings above.
+
 ### Field fixes from the first production deploy
 
 Four defects the refactor introduced or exposed, found on a real host rather
