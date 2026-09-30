@@ -11,25 +11,23 @@ export function videoFormatFilter(maxHeight: number): string {
   return `bestvideo[height<=${maxHeight}][dynamic_range=SDR]+bestaudio/best[height<=${maxHeight}][dynamic_range=SDR]/best[height<=${maxHeight}]/best`;
 }
 
-// Among formats of equal resolution and frame rate, prefer VP9 to AV1 —
-// unless the GPU decodes AV1.
+// Among formats of equal resolution and frame rate, prefer VP9 to AV1 — even
+// on a GPU that decodes AV1.
 //
-// yt-dlp ranks AV1 first, and YouTube offers it for many videos. On a GPU the
-// sidecar's probe has seen decode AV1, it does (see the sidecar's
-// decoders.go), and yt-dlp's own order stands. Anywhere else AV1 decodes on
-// the CPU: on the NAS a 1440p60 source took two of its six CPU threads.
-// VP9 decodes on VAAPI and CUDA, and costs a CPU less than AV1 does.
-// Resolution and frame rate still sort first, so the preference never costs
-// quality: where AV1 is the only format at the best resolution, it is picked.
+// yt-dlp ranks AV1 first, and YouTube offers it for many videos. Without a GPU
+// that decodes it, AV1 decodes on the CPU: on the NAS a 1440p60 source took two
+// of its six CPU threads. With one, it is still the slower of the two: on the
+// NAS's Alder Lake GPU a 4K60 AV1 source ran the pipeline at 0.9x real time
+// (the picture stuttered at 22-25 fps), where VP9 kept up at 1.15x. VP9
+// decodes on VAAPI and CUDA, and costs a CPU less than AV1 does. Resolution
+// and frame rate still sort first, so the preference never costs quality:
+// where AV1 is the only format at the best resolution, it is picked, and the
+// sidecar decodes it on the GPU if its probe passed (decoders.go).
 export const VIDEO_FORMAT_SORT = 'res,fps,vcodec:vp9';
 
-/**
- * The yt-dlp arguments that select a video format up to maxHeight.
- * `gpuDecodesAV1` keeps yt-dlp's AV1-first order; otherwise VP9 is preferred.
- */
-export function videoFormatArgs(maxHeight: number, gpuDecodesAV1 = false): string[] {
-  const args = ['-f', videoFormatFilter(maxHeight)];
-  return gpuDecodesAV1 ? args : [...args, '-S', VIDEO_FORMAT_SORT];
+/** The yt-dlp arguments that select a video format up to maxHeight. */
+export function videoFormatArgs(maxHeight: number): string[] {
+  return ['-f', videoFormatFilter(maxHeight), '-S', VIDEO_FORMAT_SORT];
 }
 
 /** The codecs the sidecar accepts as a source's `videoCodec`. */
