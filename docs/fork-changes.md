@@ -64,7 +64,7 @@ sidecar CPU against 40 % for the same stream in software. Software VP8, VP9
 and H.264 were run in the same pass.
 
 **AMD** is covered too: the sidecar image carries Mesa's VA-API driver
-(`mesa-va-drivers`, radeonsi) next to Intel's (`intel-media-va-driver`), and
+(`mesa-va-drivers`, radeonsi) next to Intel's (`intel-media-va-driver-non-free`), and
 libva picks the one matching the render node's kernel driver. AMD hardware has
 no VP9 encoder, so there the encoder probe reports VP9 (VAAPI) unavailable and
 H.264 is the codec to choose; decoding works for VP9 and H.264. Not tested on
@@ -687,15 +687,15 @@ Measured with the 4K60 test video:
 | NAS, Pentium Gold 8505, VAAPI | fails | VP9 4K60 | `vp9 (native)` on VAAPI → `h264_vaapi` | ~108 %, no stutter |
 
 The NAS's GPU does decode AV1 (`vainfo` lists `VAProfileAV1Profile0:
-VAEntrypointVLD`), but not with the image's stack: with Debian bookworm's Intel
-driver (iHD 23.1.1) and FFmpeg 5.1 every frame fails with "internal decoding
-error" and FFmpeg then segfaults, for the embedded sample and a real YouTube
-AV1 stream alike. Debian trixie (iHD 25.2.3, FFmpeg 7.1.5) fails the same way.
-Jellyfin's build (iHD 26.2.4, FFmpeg 8.1) decodes the sample on the same GPU,
-so a newer driver or FFmpeg in the sidecar image would enable it; which of the
-two is needed is not established. Until then the probe rejects it and VP9 is
-chosen, which is what the fallback is for. On the NAS VP9 still takes half the
-CPU the 1440p60 AV1 source did, at 4K.
+VAEntrypointVLD`), but not with Debian's `intel-media-va-driver`: every frame
+fails with "internal decoding error" and FFmpeg then segfaults, for the
+embedded sample and a real YouTube AV1 stream alike. So the probe rejected it
+and VP9 was chosen, as the fallback intends; VP9 at 4K still took half the CPU
+the 1440p60 AV1 source did. The FFmpeg version was not the cause: Debian's
+driver from bookworm (23.1.1), trixie (25.2.3) and sid (26.2.4, with FFmpeg
+9.0) all fail, while bookworm's FFmpeg 5.1 decodes it with Intel's non-free
+driver build. The image now installs that one; see "Intel's non-free VA-API
+driver" below.
 
 **Preferring VP9 even where the GPU decodes AV1** is a one-line change: make
 `videoFormatArgs` in `source-format.ts` always add `-S VIDEO_FORMAT_SORT`
@@ -703,6 +703,34 @@ CPU the 1440p60 AV1 source did, at 4K.
 the best resolution, it is still taken, and still decodes on a GPU that passed
 the probe, with libdav1d as the fallback. The order then reads VP9 → GPU AV1 →
 CPU AV1.
+
+### Intel's non-free VA-API driver
+
+| | |
+|---|---|
+| Commit | `fix(sidecar): install Intel's non-free VA-API driver so AV1 decodes on the GPU` |
+| Files | `Dockerfile.sidecar` |
+
+The sidecar image installs `intel-media-va-driver-non-free` from Debian's
+`non-free` component, in place of `intel-media-va-driver` from `main`. Both are
+the same Intel driver release (iHD 23.1 on bookworm). Debian's `main` build
+removes the pre-built GPU kernels Intel ships without their source; the
+non-free build keeps them. Without them AV1 does not decode on the NAS's Alder
+Lake GPU, so the AV1 probe failed and VP9 was chosen.
+
+Measured on the NAS in throwaway containers, each decode capped at 30 s:
+
+| Driver | FFmpeg | Probe sample | Real AV1 1080p, 5 s | AV1 → `h264_vaapi` | `h264_vaapi`, `vp9_vaapi` |
+|---|---|---|---|---|---|
+| `intel-media-va-driver` 23.1.1 (bookworm) | 5.1 | fails | fails | fails | ok |
+| `intel-media-va-driver` 26.2.4 (sid) | 9.0.2 | fails | fails | fails | ok |
+| `intel-media-va-driver-non-free` (bookworm) | 5.1 | ok | ok, 2.0× real time | ok, 2.0× | ok |
+
+The licence does not change: Intel's driver is MIT (Debian's "Expat"), and
+Debian files the non-free package there only because the kernels come without
+source. AMD's driver (`mesa-va-drivers`) and the NVIDIA path are untouched. The
+build fails if the `non-free` component could not be enabled, rather than
+failing later on a missing package with a less obvious message.
 
 ### NVIDIA: H.264 on NVENC
 
