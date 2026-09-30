@@ -678,6 +678,32 @@ stream never starts. So it is forced only where it is known to work.
 Sources the backend does not resolve with yt-dlp (IPTV, direct URLs) carry no
 codec, and keep FFmpeg's default decoder.
 
+Measured with the 4K60 test video:
+
+| Host | Probe | yt-dlp chose | Pipeline | Sidecar CPU |
+|---|---|---|---|---|
+| RTX 5080, NVENC | passes | AV1 4K60 | `av1 (native)` on CUDA → `h264_nvenc` | ~68 %, GPU decoder 10 % busy |
+| Same, software encoding | not asked | VP9 4K | `vp9 (native)` → `libx264` | |
+| NAS, Pentium Gold 8505, VAAPI | fails | VP9 4K60 | `vp9 (native)` on VAAPI → `h264_vaapi` | ~108 %, no stutter |
+
+The NAS's GPU does decode AV1 (`vainfo` lists `VAProfileAV1Profile0:
+VAEntrypointVLD`), but not with the image's stack: with Debian bookworm's Intel
+driver (iHD 23.1.1) and FFmpeg 5.1 every frame fails with "internal decoding
+error" and FFmpeg then segfaults, for the embedded sample and a real YouTube
+AV1 stream alike. Debian trixie (iHD 25.2.3, FFmpeg 7.1.5) fails the same way.
+Jellyfin's build (iHD 26.2.4, FFmpeg 8.1) decodes the sample on the same GPU,
+so a newer driver or FFmpeg in the sidecar image would enable it; which of the
+two is needed is not established. Until then the probe rejects it and VP9 is
+chosen, which is what the fallback is for. On the NAS VP9 still takes half the
+CPU the 1440p60 AV1 source did, at 4K.
+
+**Preferring VP9 even where the GPU decodes AV1** is a one-line change: make
+`videoFormatArgs` in `source-format.ts` always add `-S VIDEO_FORMAT_SORT`
+(ignore `gpuDecodesAV1`). Nothing else changes: where AV1 is the only format at
+the best resolution, it is still taken, and still decodes on a GPU that passed
+the probe, with libdav1d as the fallback. The order then reads VP9 → GPU AV1 →
+CPU AV1.
+
 ### NVIDIA: H.264 on NVENC
 
 A second hardware backend beside VAAPI: the `h264_nvenc` profile, used when
