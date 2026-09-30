@@ -12,14 +12,23 @@ COPY packages/sidecar/av1-probe.ivf ./
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /sidecar .
 
 FROM debian:bookworm-slim
-# One VA-API driver per GPU vendor: intel-media-va-driver (iHD) for Intel,
-# mesa-va-drivers (radeonsi) for AMD. libva picks the one matching the render
-# node's kernel driver, so both can be present. NVIDIA needs neither: FFmpeg's
-# h264_nvenc loads the driver's own libraries, which the NVIDIA Container
-# Toolkit mounts in at run time (docker-compose.nvidia.yml).
-RUN apt-get update && \
+# One VA-API driver per GPU vendor: intel-media-va-driver-non-free (iHD) for
+# Intel, mesa-va-drivers (radeonsi) for AMD. libva picks the one matching the
+# render node's kernel driver, so both can be present. NVIDIA needs neither:
+# FFmpeg's h264_nvenc loads the driver's own libraries, which the NVIDIA
+# Container Toolkit mounts in at run time (docker-compose.nvidia.yml).
+#
+# Intel's driver is the non-free build: Debian's main one strips the GPU
+# kernels Intel ships without source, and without them AV1 decoding fails on
+# every frame (Alder Lake: "internal decoding error"). Same upstream driver and
+# licence (MIT); Debian files it under non-free only for the missing source.
+# The grep fails the build if the non-free component could not be enabled.
+RUN sed -i 's/^Components: main$/Components: main non-free/' \
+      /etc/apt/sources.list.d/debian.sources && \
+    grep -q '^Components: main non-free$' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && \
     apt-get install -y --no-install-recommends ffmpeg ca-certificates \
-      intel-media-va-driver mesa-va-drivers libva-drm2 && \
+      intel-media-va-driver-non-free mesa-va-drivers libva-drm2 && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
     useradd --system --no-create-home --shell /usr/sbin/nologin sidecar
 COPY --from=build /sidecar /usr/local/bin/sidecar

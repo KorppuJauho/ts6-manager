@@ -17,13 +17,9 @@ describe('videoFormatFilter', () => {
 });
 
 describe('videoFormatArgs', () => {
-  it('prefers VP9 unless the GPU decodes AV1', () => {
+  it('always asks yt-dlp to prefer VP9', () => {
     expect(videoFormatArgs(1080)).toEqual(['-f', videoFormatFilter(1080), '-S', VIDEO_FORMAT_SORT]);
-    expect(videoFormatArgs(1080, false)).toEqual(['-f', videoFormatFilter(1080), '-S', VIDEO_FORMAT_SORT]);
-  });
-
-  it("keeps yt-dlp's AV1-first order when the GPU decodes AV1", () => {
-    expect(videoFormatArgs(2160, true)).toEqual(['-f', videoFormatFilter(2160)]);
+    expect(videoFormatArgs(2160)).toEqual(['-f', videoFormatFilter(2160), '-S', VIDEO_FORMAT_SORT]);
   });
 
   // yt-dlp puts -S fields ahead of its defaults, in the order given. With the

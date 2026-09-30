@@ -64,7 +64,7 @@ sidecar CPU against 40 % for the same stream in software. Software VP8, VP9
 and H.264 were run in the same pass.
 
 **AMD** is covered too: the sidecar image carries Mesa's VA-API driver
-(`mesa-va-drivers`, radeonsi) next to Intel's (`intel-media-va-driver`), and
+(`mesa-va-drivers`, radeonsi) next to Intel's (`intel-media-va-driver-non-free`), and
 libva picks the one matching the render node's kernel driver. AMD hardware has
 no VP9 encoder, so there the encoder probe reports VP9 (VAAPI) unavailable and
 H.264 is the codec to choose; decoding works for VP9 and H.264. Not tested on
@@ -662,11 +662,12 @@ stream never starts. So it is forced only where it is known to work.
   embedded; made from FFmpeg's test pattern with libaom) with `-hwaccel <gpu>
   -c:v av1`, once per device, like the encoder probe. `/capabilities` reports
   the result as `av1HwDecode`.
-- **Format.** With hardware encoding on and `av1HwDecode` true, yt-dlp keeps
-  its AV1-first order. Otherwise it is asked for `-S res,fps,vcodec:vp9`: at the
-  same resolution and frame rate VP9 wins, which the GPU decodes and which costs
-  a CPU less; where AV1 is the only format at the best resolution, it is still
-  taken, and decodes on the CPU.
+- **Format.** yt-dlp is asked for `-S res,fps,vcodec:vp9`: at the same
+  resolution and frame rate VP9 wins, which the GPU decodes and which costs a
+  CPU less; where AV1 is the only format at the best resolution, it is still
+  taken. This first kept yt-dlp's AV1-first order on a GPU that passed the
+  probe; see "VP9 before AV1, even on a GPU that decodes AV1" below for why it
+  no longer does.
 - **Decoder.** yt-dlp prints the chosen codec with the URLs, and the backend
   passes it to `/source` as `videoCodec`. The sidecar adds `-c:v av1`, next to
   `-hwaccel` on the video input, only for an AV1 source decoding on a GPU that
@@ -687,22 +688,94 @@ Measured with the 4K60 test video:
 | NAS, Pentium Gold 8505, VAAPI | fails | VP9 4K60 | `vp9 (native)` on VAAPI → `h264_vaapi` | ~108 %, no stutter |
 
 The NAS's GPU does decode AV1 (`vainfo` lists `VAProfileAV1Profile0:
-VAEntrypointVLD`), but not with the image's stack: with Debian bookworm's Intel
-driver (iHD 23.1.1) and FFmpeg 5.1 every frame fails with "internal decoding
-error" and FFmpeg then segfaults, for the embedded sample and a real YouTube
-AV1 stream alike. Debian trixie (iHD 25.2.3, FFmpeg 7.1.5) fails the same way.
-Jellyfin's build (iHD 26.2.4, FFmpeg 8.1) decodes the sample on the same GPU,
-so a newer driver or FFmpeg in the sidecar image would enable it; which of the
-two is needed is not established. Until then the probe rejects it and VP9 is
-chosen, which is what the fallback is for. On the NAS VP9 still takes half the
-CPU the 1440p60 AV1 source did, at 4K.
+VAEntrypointVLD`), but not with Debian's `intel-media-va-driver`: every frame
+fails with "internal decoding error" and FFmpeg then segfaults, for the
+embedded sample and a real YouTube AV1 stream alike. So the probe rejected it
+and VP9 was chosen, as the fallback intends; VP9 at 4K still took half the CPU
+the 1440p60 AV1 source did. The FFmpeg version was not the cause: Debian's
+driver from bookworm (23.1.1), trixie (25.2.3) and sid (26.2.4, with FFmpeg
+9.0) all fail, while bookworm's FFmpeg 5.1 decodes it with Intel's non-free
+driver build. The image now installs that one; see "Intel's non-free VA-API
+driver" below.
 
-**Preferring VP9 even where the GPU decodes AV1** is a one-line change: make
-`videoFormatArgs` in `source-format.ts` always add `-S VIDEO_FORMAT_SORT`
-(ignore `gpuDecodesAV1`). Nothing else changes: where AV1 is the only format at
-the best resolution, it is still taken, and still decodes on a GPU that passed
-the probe, with libdav1d as the fallback. The order then reads VP9 → GPU AV1 →
-CPU AV1.
+### Intel's non-free VA-API driver
+
+| | |
+|---|---|
+| Commit | `fix(sidecar): install Intel's non-free VA-API driver so AV1 decodes on the GPU` |
+| Files | `Dockerfile.sidecar` |
+
+The sidecar image installs `intel-media-va-driver-non-free` from Debian's
+`non-free` component, in place of `intel-media-va-driver` from `main`. Both are
+the same Intel driver release (iHD 23.1 on bookworm). Debian's `main` build
+removes the pre-built GPU kernels Intel ships without their source; the
+non-free build keeps them. Without them AV1 does not decode on the NAS's Alder
+Lake GPU, so the AV1 probe failed and VP9 was chosen.
+
+Measured on the NAS in throwaway containers, each decode capped at 30 s:
+
+| Driver | FFmpeg | Probe sample | Real AV1 1080p, 5 s | AV1 → `h264_vaapi` | `h264_vaapi`, `vp9_vaapi` |
+|---|---|---|---|---|---|
+| `intel-media-va-driver` 23.1.1 (bookworm) | 5.1 | fails | fails | fails | ok |
+| `intel-media-va-driver` 26.2.4 (sid) | 9.0.2 | fails | fails | fails | ok |
+| `intel-media-va-driver-non-free` (bookworm) | 5.1 | ok | ok, 2.0× real time | ok, 2.0× | ok |
+
+The licence does not change: Intel's driver is MIT (Debian's "Expat"), and
+Debian files the non-free package there only because the kernels come without
+source. AMD's driver (`mesa-va-drivers`) and the NVIDIA path are untouched. The
+build fails if the `non-free` component could not be enabled, rather than
+failing later on a missing package with a less obvious message.
+
+### VP9 before AV1, even on a GPU that decodes AV1
+
+| | |
+|---|---|
+| Commit | `fix(streaming): prefer VP9 over AV1 even on a GPU that decodes AV1` |
+| Files | `voice/streaming/source-format.ts`, `voice/voice-bot.ts` |
+
+With the non-free driver the NAS's probe passed, yt-dlp kept its AV1-first
+order, and the 4K test video decoded on the GPU (`av1 (native) -> h264
+(h264_vaapi)`, sidecar ~90 % CPU). But the stream ran at 0.72–0.85× real time:
+the client showed 22–25 fps instead of 30, and picture and audio stuttered.
+The same video as VP9 had played cleanly.
+
+The GPU decodes AV1 fast enough; copying the decoded frames back to the CPU is
+what is slow, and slower for AV1 than for VP9. The sidecar does that for every
+frame, because the frame-rate and scaling filters run on the CPU before the
+frame is uploaded again for encoding. 4K60, 8 s of each, on the NAS:
+
+| | AV1 | VP9 |
+|---|---|---|
+| Decode only, frames stay on the GPU | 2.0× | 8.3× |
+| Decode and copy back to the CPU | 0.91× | 1.33× |
+| The sidecar's pipeline (fps, scale, `h264_vaapi`) | 0.90× | 1.15× |
+
+So yt-dlp now prefers VP9 everywhere, and the backend no longer asks the
+sidecar whether its GPU decodes AV1 before resolving. The order is VP9 → AV1
+on a GPU that passed the probe → AV1 on the CPU (libdav1d): AV1 is only chosen
+where it is the best resolution on offer, and then still decodes on the GPU
+where it can, which beats the CPU. NVENC hosts lose nothing: CUDA decodes VP9
+too. `/capabilities` still reports `av1HwDecode`, for diagnosis.
+
+**Preferring AV1 instead** (a GPU whose AV1 path keeps up, such as the RTX
+5080 at ~68 % sidecar CPU for 4K60 AV1): the order is one constant,
+`VIDEO_FORMAT_SORT` in `voice/streaming/source-format.ts`.
+
+- *AV1 first everywhere:* set it to `'res,fps,vcodec:av01'`, and update the
+  codec field its test in `source-format.test.ts` checks. The sidecar
+  needs no change: it still decodes AV1 on a GPU that passed the probe and on
+  the CPU (libdav1d) anywhere else, so a host without GPU AV1 decoding pays
+  the CPU cost for every AV1 video.
+- *AV1 first only where the GPU decodes it:* the order this change replaced.
+  Commit `9c1026e` (`feat(streaming): decode AV1 on the GPU, prefer VP9 where it
+  cannot`) has it: `videoFormatArgs` takes `gpuDecodesAV1` and leaves the sort
+  out when it is true, and `VoiceBot.gpuDecodesAV1()` reads `av1HwDecode` from
+  the sidecar's `/capabilities` before resolving. The sidecar still reports it.
+  Measure first: on the NAS's GPU this order stuttered at 4K60.
+
+Keeping the frames on the GPU (`scale_vaapi`, no copy back) would lift both
+codecs well past real time and remove most of the sidecar's CPU use; a
+separate change.
 
 ### NVIDIA: H.264 on NVENC
 

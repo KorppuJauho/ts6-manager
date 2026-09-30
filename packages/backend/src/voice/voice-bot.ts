@@ -49,13 +49,12 @@ function isYtDlpSource(url: string): boolean {
 /**
  * Resolve a source to what the sidecar plays: the direct URL (a DASH pair
  * joined by SOURCE_SEPARATOR) and, when yt-dlp chose the format, its video
- * codec. `gpuDecodesAV1` lets yt-dlp keep AV1 first; see source-format.ts.
+ * codec.
  */
 async function resolveVideoUrl(
   url: string,
   maxHeight: number = 720,
   operatorConfigured = false,
-  gpuDecodesAV1 = false,
 ): Promise<{ url: string; videoCodec: VideoCodecFamily }> {
   assertSafeUrl(url);
 
@@ -87,7 +86,7 @@ async function resolveVideoUrl(
   // normal CPU priority — the user is waiting for the stream to start.
   const stdout = await runYtDlp([
     ...getCookieArgs(),
-    ...videoFormatArgs(maxHeight, gpuDecodesAV1),
+    ...videoFormatArgs(maxHeight),
     '--no-playlist',
     '--print', '%(vcodec)s',  // the chosen video codec, printed first
     '-g',  // then the direct URL of each stream
@@ -212,7 +211,6 @@ export class VoiceBot extends EventEmitter {
   private _videoOperatorConfigured = false;
   private _videoEncoder = '';
   private _videoHwDevice = '';
-  private _videoHwAccel = false;
   private _videoCodec: VideoCodecFamily = '';
   private _videoIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly VIDEO_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -1008,23 +1006,6 @@ export class VoiceBot extends EventEmitter {
   }
 
   /**
-   * Whether this stream's source would decode AV1 on the GPU: hardware
-   * encoding is on, and the sidecar's probe has seen its GPU decode AV1.
-   * Anything else — software encoding, an older sidecar, a failed call —
-   * answers false, which only makes yt-dlp prefer VP9.
-   */
-  private async gpuDecodesAV1(): Promise<boolean> {
-    const sidecar = this.sidecarHttp;
-    if (!this._videoHwAccel || !sidecar) return false;
-    try {
-      const caps = await sidecar.getCapabilities(this._videoHwDevice || undefined);
-      return caps.av1HwDecode === true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * A human-readable name for what is being streamed.
    *
    * An explicit title wins: !tv knows the channel name the viewer asked for,
@@ -1151,7 +1132,6 @@ export class VoiceBot extends EventEmitter {
 
     this._videoEncoder = effectiveEncoder(settings);
     this._videoHwDevice = settings.hwAccelEnabled ? settings.hwAccelDevice : '';
-    this._videoHwAccel = settings.hwAccelEnabled === true;
     const effectiveFramerate = framerate && framerate > 0
       ? framerate
       : presetConfig.framerate;
@@ -1235,8 +1215,7 @@ export class VoiceBot extends EventEmitter {
     // and running the two together keeps that off the stream-start path.
     this._videoOperatorConfigured = opts.operatorConfigured === true;
     const [resolved, title] = await Promise.all([
-      this.gpuDecodesAV1().then((av1) =>
-        resolveVideoUrl(source, presetConfig.height, this._videoOperatorConfigured, av1)),
+      resolveVideoUrl(source, presetConfig.height, this._videoOperatorConfigured),
       this.resolveStreamTitle(source, opts.title),
     ]);
     const resolvedSource = resolved.url;
@@ -1429,9 +1408,7 @@ export class VoiceBot extends EventEmitter {
     const currentPreset = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     // A source swapped mid-stream is a fresh URL from the caller, so it is
     // only trusted if this stream was started from the operator's playlist.
-    const resolved = await resolveVideoUrl(
-      source, currentPreset.height, this._videoOperatorConfigured, await this.gpuDecodesAV1(),
-    );
+    const resolved = await resolveVideoUrl(source, currentPreset.height, this._videoOperatorConfigured);
     if (!stillCurrent()) throw new Error('The video stream was stopped');
     this._videoCodec = resolved.videoCodec;
 
