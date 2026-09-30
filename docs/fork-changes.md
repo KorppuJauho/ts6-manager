@@ -642,6 +642,42 @@ asks again, and FFmpeg picks the software one (`ff_get_format` and FFmpeg's
 own `get_format`, release/5.1). `SIDECAR_HW_DECODE=0` turns it off without a
 rebuild, should a driver decode something wrongly.
 
+### AV1 decoded on the GPU, VP9 where it cannot be
+
+| | |
+|---|---|
+| Commit | `feat(streaming): decode AV1 on the GPU, prefer VP9 where it cannot` |
+| Files | `packages/sidecar/decoders.go`, `packages/sidecar/av1-probe.ivf`, `packages/sidecar/main.go`, `Dockerfile.sidecar`, `voice/streaming/source-format.ts`, `voice/voice-bot.ts`, `voice/streaming/sidecar-client.ts` |
+
+The GPU decode above never reached AV1. yt-dlp ranks AV1 first and YouTube
+offers it for many videos, and FFmpeg opens AV1 with libdav1d, a software
+decoder that ignores `-hwaccel`: `av1 (libdav1d) -> h264 (h264_vaapi)`. On the
+NAS a 1440p60 AV1 source took two of its six CPU threads, and the picture
+stuttered slightly. FFmpeg's own `av1` decoder does use `-hwaccel` (VAAPI, CUDA),
+but in 5.1 it has no software path: without a GPU that decodes AV1 it fails
+with "Your platform doesn't support hardware accelerated AV1 decoding" and the
+stream never starts. So it is forced only where it is known to work.
+
+- **Probe.** The sidecar decodes a 1.4 kB AV1 sample (`av1-probe.ivf`,
+  embedded; made from FFmpeg's test pattern with libaom) with `-hwaccel <gpu>
+  -c:v av1`, once per device, like the encoder probe. `/capabilities` reports
+  the result as `av1HwDecode`.
+- **Format.** With hardware encoding on and `av1HwDecode` true, yt-dlp keeps
+  its AV1-first order. Otherwise it is asked for `-S res,fps,vcodec:vp9`: at the
+  same resolution and frame rate VP9 wins, which the GPU decodes and which costs
+  a CPU less; where AV1 is the only format at the best resolution, it is still
+  taken, and decodes on the CPU.
+- **Decoder.** yt-dlp prints the chosen codec with the URLs, and the backend
+  passes it to `/source` as `videoCodec`. The sidecar adds `-c:v av1`, next to
+  `-hwaccel` on the video input, only for an AV1 source decoding on a GPU that
+  passed the probe.
+- **Fallback.** If FFmpeg exits within five seconds of starting with that
+  decoder, the sidecar starts the same source again on libdav1d, unless the
+  stream was stopped or replaced meanwhile.
+
+Sources the backend does not resolve with yt-dlp (IPTV, direct URLs) carry no
+codec, and keep FFmpeg's default decoder.
+
 ### NVIDIA: H.264 on NVENC
 
 A second hardware backend beside VAAPI: the `h264_nvenc` profile, used when
