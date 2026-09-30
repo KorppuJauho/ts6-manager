@@ -7,6 +7,8 @@ RUN go mod download
 # main.go explicitly compiles that file alone, so a second source file is
 # silently left out and only fails once something references it.
 COPY packages/sidecar/*.go ./
+# Embedded by decoders.go (go:embed): the AV1 sample the GPU decode probe plays.
+COPY packages/sidecar/av1-probe.ivf ./
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /sidecar .
 
 FROM debian:bookworm-slim

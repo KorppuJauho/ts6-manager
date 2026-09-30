@@ -70,11 +70,14 @@ export class SidecarClient {
     bitrate?: string,
     encoder?: string,
     hwDevice?: string,
+    videoCodec?: string,
   ): Promise<void> {
     // Encoder selection travels in the body rather than the sidecar's
     // environment: in a container deployment the sidecar is long-lived and
     // its env is fixed at container start, so a setting changed in the web UI
-    // could not reach it any other way.
+    // could not reach it any other way. videoCodec is the source's own codec
+    // ('av1', 'vp9', 'h264', or '' when unknown); it decides whether AV1
+    // decodes on the GPU.
     await this.call('POST', '/source', {
       source,
       width,
@@ -83,6 +86,7 @@ export class SidecarClient {
       bitrate,
       encoder,
       hwDevice,
+      videoCodec: videoCodec ?? '',
     });
   }
 
@@ -96,8 +100,9 @@ export class SidecarClient {
    * against — without it they report unavailable, because they would be.
    * `hwBackend` is the GPU backend hardware encoding uses on this sidecar,
    * set by its deployment; absent from a sidecar that predates NVENC.
+   * `av1HwDecode` says whether its GPU decodes AV1; absent from an older one.
    */
-  async getCapabilities(device?: string): Promise<{ encoders: EncoderCapability[]; hwBackend?: string }> {
+  async getCapabilities(device?: string): Promise<{ encoders: EncoderCapability[]; hwBackend?: string; av1HwDecode?: boolean }> {
     const query = device ? `?device=${encodeURIComponent(device)}` : '';
     return this.call('GET', `/capabilities${query}`);
   }
