@@ -1158,8 +1158,9 @@ func (s *Sidecar) ClosePeer(id string) {
 // the options on the video input alone, the first reset ended the audio for
 // the rest of the stream. -hwaccel goes on the first input only, which is the
 // video in both source shapes: a progressive URL carries video and audio
-// together, and a DASH pair is video then audio.
-func inputArgs(sources []string, hwaccel string) []string {
+// together, and a DASH pair is video then audio. So does a forced decoder
+// (av1Decoder), and only with a hwaccel, since it exists to use one.
+func inputArgs(sources []string, hwaccel, decoder string) []string {
 	var args []string
 	for i, src := range sources {
 		if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
@@ -1170,6 +1171,9 @@ func inputArgs(sources []string, hwaccel string) []string {
 		args = append(args, "-fflags", "+genpts+discardcorrupt", "-re")
 		if i == 0 && hwaccel != "" {
 			args = append(args, "-hwaccel", hwaccel)
+			if decoder != "" {
+				args = append(args, "-c:v", decoder)
+			}
 		}
 		args = append(args, "-i", src)
 	}
@@ -1189,10 +1193,16 @@ func decodeHWAccel(p EncoderProfile, device string) string {
 	return p.DecodeHWAccel
 }
 
-func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate int, bitrate string, profile EncoderProfile, device string) {
+// StartFFmpeg starts encoding source. videoCodec is the source's video codec
+// as the backend learned it ("av1", "vp9", "h264", or "" when unknown); it
+// only decides whether AV1 decodes on the GPU.
+func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate int, bitrate string, profile EncoderProfile, device string, videoCodec string) {
 	s.ffmpegLock.Lock()
 	defer s.ffmpegLock.Unlock()
+	s.startFFmpegLocked(source, width, height, framerate, bitrate, profile, device, videoCodec)
+}
 
+func (s *Sidecar) startFFmpegLocked(source string, width int, height int, framerate int, bitrate string, profile EncoderProfile, device string, videoCodec string) {
 	s.StopFFmpegLocked()
 	s.resetSyncTiming()
 	s.drainRTPQueues()
@@ -1229,8 +1239,18 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 	// a progressive source is a single URL and splits to a one-element slice.
 	sources := splitSources(source)
 
+	hwaccel := decodeHWAccel(profile, device)
+	decoder := av1Decoder(videoCodec, hwaccel, device)
+	if videoCodec == "av1" {
+		if decoder != "" {
+			log.Printf("[FFmpeg] AV1 source: decoding on the GPU (%s)", hwaccel)
+		} else {
+			log.Printf("[FFmpeg] AV1 source: decoding on the CPU (libdav1d)")
+		}
+	}
+
 	if len(sources) > 0 {
-		args = append(args, inputArgs(sources, decodeHWAccel(profile, device))...)
+		args = append(args, inputArgs(sources, hwaccel, decoder)...)
 	} else {
 		args = append(args, "-re", "-f", "lavfi", "-i", fmt.Sprintf("color=c=black:s=%dx%d:r=1", w, h))
 	}
@@ -1323,10 +1343,25 @@ func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate in
 		return
 	}
 	s.ffmpeg = cmd
+	started := time.Now()
 
 	go func() {
 		err := cmd.Wait()
 		log.Printf("[FFmpeg] Exited: %v", err)
+		if decoder == "" || err == nil || time.Since(started) >= av1FallbackWindow {
+			return
+		}
+		// The probe passed, but this source did not decode on the GPU — a
+		// profile or level the GPU lacks. Start it again on libdav1d rather
+		// than leave the stream dead. Only if this FFmpeg is still the current
+		// one: a stop clears s.ffmpeg, and a new source replaces it.
+		s.ffmpegLock.Lock()
+		defer s.ffmpegLock.Unlock()
+		if s.ffmpeg != cmd {
+			return
+		}
+		log.Printf("[FFmpeg] AV1 did not decode on the GPU (%s); starting again on the CPU decoder", hwaccel)
+		s.startFFmpegLocked(source, width, height, framerate, bitrate, profile, device, "")
 	}()
 }
 
@@ -1386,6 +1421,11 @@ var bitrateRe = regexp.MustCompile(`^[0-9]{1,6}[kKmM]?$`)
 // devicePathRe constrains the DRM render node to a path under /dev, so a
 // settings value cannot point FFmpeg at an arbitrary file on the host.
 var devicePathRe = regexp.MustCompile(`^/dev/[A-Za-z0-9._/-]{1,120}$`)
+
+// videoCodecRe is the source codecs the backend may name. The value only
+// chooses a decoder, and only "av1" changes anything, but it still reaches
+// FFmpeg's arguments, so nothing else gets through.
+var videoCodecRe = regexp.MustCompile(`^(av1|vp9|h264)?$`)
 
 // validSource accepts an empty source (test pattern) or an http(s) URL, nothing
 // else. A leading '-' would be parsed as an extra FFmpeg flag; any other
@@ -1551,6 +1591,9 @@ func main() {
 			// the web UI could never reach it any other way.
 			Encoder  string `json:"encoder"`
 			HWDevice string `json:"hwDevice"`
+			// The source's video codec as the backend learned it (from yt-dlp
+			// or its probe); empty when unknown. See av1Decoder.
+			VideoCodec string `json:"videoCodec"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), 400)
@@ -1558,6 +1601,10 @@ func main() {
 		}
 		if !validSource(req.Source) {
 			http.Error(w, "invalid source", 400)
+			return
+		}
+		if !videoCodecRe.MatchString(req.VideoCodec) {
+			http.Error(w, "invalid videoCodec", 400)
 			return
 		}
 		if req.Bitrate != "" && !bitrateRe.MatchString(req.Bitrate) {
@@ -1580,7 +1627,7 @@ func main() {
 
 		log.Printf("[API] Setting source: %s (%dx%d @ %dfps, bitrate=%s, encoder=%s)",
 			req.Source, req.Width, req.Height, req.Framerate, req.Bitrate, profile.Key)
-		sidecar.StartFFmpeg(req.Source, req.Width, req.Height, req.Framerate, req.Bitrate, profile, req.HWDevice)
+		sidecar.StartFFmpeg(req.Source, req.Width, req.Height, req.Framerate, req.Bitrate, profile, req.HWDevice, req.VideoCodec)
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":  "ok",
 			"encoder": profile.Key,
@@ -1616,6 +1663,9 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{
 			"encoders":  encoderCapabilities(device),
 			"hwBackend": hwBackend(),
+			// Whether this host's GPU decodes AV1. The backend asks yt-dlp for
+			// AV1 only when it does, and for VP9 over AV1 otherwise.
+			"av1HwDecode": canDecodeAV1(hostDecodeHWAccel(device), device),
 		})
 	})
 

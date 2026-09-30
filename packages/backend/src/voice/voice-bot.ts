@@ -19,6 +19,7 @@ import {
   type VideoStreamStatus,
 } from './streaming/types.js';
 import { probeVideoHeight } from './streaming/probe.js';
+import { videoFormatArgs, parseResolvedFormat, type VideoCodecFamily } from './streaming/source-format.js';
 import { nowPlayingNickname, streamingNickname, MAX_NICKNAME_LENGTH } from './nickname.js';
 import { getCookieArgs, runYtDlp, assertSafeUrl, fetchVideoTitle } from './audio/youtube.js';
 import { validateUrl } from '../utils/url-validator.js';
@@ -45,11 +46,17 @@ function isYtDlpSource(url: string): boolean {
   return url.includes('youtube.com/') || url.includes('youtu.be/') || url.includes('twitch.tv/');
 }
 
+/**
+ * Resolve a source to what the sidecar plays: the direct URL (a DASH pair
+ * joined by SOURCE_SEPARATOR) and, when yt-dlp chose the format, its video
+ * codec. `gpuDecodesAV1` lets yt-dlp keep AV1 first; see source-format.ts.
+ */
 async function resolveVideoUrl(
   url: string,
   maxHeight: number = 720,
   operatorConfigured = false,
-): Promise<string> {
+  gpuDecodesAV1 = false,
+): Promise<{ url: string; videoCodec: VideoCodecFamily }> {
   assertSafeUrl(url);
 
   // Only resolve YouTube and other yt-dlp-supported sites
@@ -70,38 +77,33 @@ async function resolveVideoUrl(
         throw new Error(`Video source blocked: ${check.error}`);
       }
     }
-    return url;
+    return { url, videoCodec: '' };
   }
 
-  // Prefer a separate video+audio (DASH) pair over a combined progressive
-  // format: YouTube caps progressive at 720p, so asking for `best` puts a hard
-  // ceiling on the 1080p preset. The `+` makes yt-dlp print one URL per line,
-  // which we hand to the sidecar joined by SOURCE_SEPARATOR.
-  //
-  // dynamic_range=SDR excludes HDR formats — VP9 HDR tone-maps poorly through
-  // the VAAPI path and arrives washed out.
+  // The format choice (a DASH pair, SDR, AV1 or VP9) is explained in
+  // streaming/source-format.ts.
   //
   // runYtDlp adds the cookie args' siblings (timeout, full stderr logging);
   // normal CPU priority — the user is waiting for the stream to start.
-  const formatFilter = `bestvideo[height<=${maxHeight}][dynamic_range=SDR]+bestaudio/best[height<=${maxHeight}][dynamic_range=SDR]/best[height<=${maxHeight}]/best`;
   const stdout = await runYtDlp([
     ...getCookieArgs(),
-    '-f', formatFilter,
+    ...videoFormatArgs(maxHeight, gpuDecodesAV1),
     '--no-playlist',
-    '-g',  // print direct URL only
+    '--print', '%(vcodec)s',  // the chosen video codec, printed first
+    '-g',  // then the direct URL of each stream
     '--',  // nothing past this point is parsed as an option
     url,
   ], 60_000, { lowPriority: false });
 
-  // yt-dlp -g prints one URL per stream: a single line for a progressive
-  // format, two (video then audio) for a DASH pair.
-  const urls = stdout.trim().split('\n').map((u) => u.trim()).filter(Boolean);
+  // One URL per stream: a single line for a progressive format, two (video
+  // then audio) for a DASH pair.
+  const { urls, videoCodec } = parseResolvedFormat(stdout);
   const directUrl = urls.join(SOURCE_SEPARATOR);
   if (!directUrl) {
     throw new Error('yt-dlp returned no URL');
   }
-  console.log(`[VideoResolve] Resolved: ${url.substring(0, 60)}... → direct URL`);
-  return directUrl;
+  console.log(`[VideoResolve] Resolved: ${url.substring(0, 60)}... → direct URL${videoCodec ? ` (${videoCodec})` : ''}`);
+  return { url: directUrl, videoCodec };
 }
 
 export type VoiceBotStatus = 'stopped' | 'starting' | 'connected' | 'playing' | 'paused' | 'error';
@@ -210,6 +212,8 @@ export class VoiceBot extends EventEmitter {
   private _videoOperatorConfigured = false;
   private _videoEncoder = '';
   private _videoHwDevice = '';
+  private _videoHwAccel = false;
+  private _videoCodec: VideoCodecFamily = '';
   private _videoIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly VIDEO_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -1004,6 +1008,23 @@ export class VoiceBot extends EventEmitter {
   }
 
   /**
+   * Whether this stream's source would decode AV1 on the GPU: hardware
+   * encoding is on, and the sidecar's probe has seen its GPU decode AV1.
+   * Anything else — software encoding, an older sidecar, a failed call —
+   * answers false, which only makes yt-dlp prefer VP9.
+   */
+  private async gpuDecodesAV1(): Promise<boolean> {
+    const sidecar = this.sidecarHttp;
+    if (!this._videoHwAccel || !sidecar) return false;
+    try {
+      const caps = await sidecar.getCapabilities(this._videoHwDevice || undefined);
+      return caps.av1HwDecode === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * A human-readable name for what is being streamed.
    *
    * An explicit title wins: !tv knows the channel name the viewer asked for,
@@ -1130,6 +1151,7 @@ export class VoiceBot extends EventEmitter {
 
     this._videoEncoder = effectiveEncoder(settings);
     this._videoHwDevice = settings.hwAccelEnabled ? settings.hwAccelDevice : '';
+    this._videoHwAccel = settings.hwAccelEnabled === true;
     const effectiveFramerate = framerate && framerate > 0
       ? framerate
       : presetConfig.framerate;
@@ -1212,10 +1234,13 @@ export class VoiceBot extends EventEmitter {
     // The display title resolves alongside: it may need its own yt-dlp call,
     // and running the two together keeps that off the stream-start path.
     this._videoOperatorConfigured = opts.operatorConfigured === true;
-    const [resolvedSource, title] = await Promise.all([
-      resolveVideoUrl(source, presetConfig.height, this._videoOperatorConfigured),
+    const [resolved, title] = await Promise.all([
+      this.gpuDecodesAV1().then((av1) =>
+        resolveVideoUrl(source, presetConfig.height, this._videoOperatorConfigured, av1)),
       this.resolveStreamTitle(source, opts.title),
     ]);
+    const resolvedSource = resolved.url;
+    this._videoCodec = resolved.videoCodec;
 
     // Auto encodes at the source's own resolution rather than upscaling: a
     // 720p channel gains nothing from a 1080p encode but spends the higher
@@ -1251,6 +1276,7 @@ export class VoiceBot extends EventEmitter {
       this._videoBitrate,
       this._videoEncoder,
       this._videoHwDevice,
+      this._videoCodec,
     );
 
     let stream: ActiveStream;
@@ -1403,19 +1429,24 @@ export class VoiceBot extends EventEmitter {
     const currentPreset = STREAM_PRESETS[this._videoPreset] || STREAM_PRESETS[DEFAULT_PRESET];
     // A source swapped mid-stream is a fresh URL from the caller, so it is
     // only trusted if this stream was started from the operator's playlist.
-    const resolvedSource = await resolveVideoUrl(source, currentPreset.height, this._videoOperatorConfigured);
+    const resolved = await resolveVideoUrl(
+      source, currentPreset.height, this._videoOperatorConfigured, await this.gpuDecodesAV1(),
+    );
     if (!stillCurrent()) throw new Error('The video stream was stopped');
+    this._videoCodec = resolved.videoCodec;
 
     // Reuses the encoder resolved at stream start: changing it here would
-    // renegotiate the codec under peers that are already connected.
+    // renegotiate the codec under peers that are already connected. The
+    // source's own codec is new, and only chooses how it is decoded.
     await sidecar.setSource(
-      resolvedSource,
+      resolved.url,
       currentPreset.width,
       currentPreset.height,
       this._videoFramerate,
       this._videoBitrate,
       this._videoEncoder,
       this._videoHwDevice,
+      this._videoCodec,
     );
     // The preset stays as it is: renegotiating dimensions under peers that
     // are already connected is a bigger change than this path should make.

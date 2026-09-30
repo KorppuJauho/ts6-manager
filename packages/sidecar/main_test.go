@@ -114,7 +114,7 @@ func TestVideoCodecCarriesTheEncodedSize(t *testing.T) {
 func TestInputArgsDecodeVideoOnTheGPU(t *testing.T) {
 	video, audio := "https://example.test/v.m3u8", "https://example.test/a.webm"
 
-	got := strings.Join(inputArgs([]string{video, audio}, "vaapi"), " ")
+	got := strings.Join(inputArgs([]string{video, audio}, "vaapi", ""), " ")
 	if !strings.Contains(got, "-hwaccel vaapi -i "+video) {
 		t.Errorf("DASH video input is not GPU-decoded: %q", got)
 	}
@@ -123,7 +123,7 @@ func TestInputArgsDecodeVideoOnTheGPU(t *testing.T) {
 	}
 
 	// A progressive source carries video and audio in the one input.
-	if got := strings.Join(inputArgs([]string{video}, "vaapi"), " "); !strings.Contains(got, "-hwaccel vaapi -i "+video) {
+	if got := strings.Join(inputArgs([]string{video}, "vaapi", ""), " "); !strings.Contains(got, "-hwaccel vaapi -i "+video) {
 		t.Errorf("progressive input is not GPU-decoded: %q", got)
 	}
 }
@@ -132,7 +132,7 @@ func TestInputArgsDecodeVideoOnTheGPU(t *testing.T) {
 // connection: without its own reconnect options, the first reset YouTube sent
 // ended the audio while the video played on.
 func TestInputArgsGiveEachInputItsOwnOptions(t *testing.T) {
-	got := inputArgs([]string{"https://example.test/v.m3u8", "https://example.test/a.webm"}, "")
+	got := inputArgs([]string{"https://example.test/v.m3u8", "https://example.test/a.webm"}, "", "")
 	want := []string{
 		"-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
 		"-fflags", "+genpts+discardcorrupt", "-re",
@@ -146,7 +146,7 @@ func TestInputArgsGiveEachInputItsOwnOptions(t *testing.T) {
 	}
 
 	// A local file loops instead of reconnecting.
-	if got := strings.Join(inputArgs([]string{"/media/clip.mp4"}, ""), " "); !strings.HasPrefix(got, "-stream_loop -1 ") {
+	if got := strings.Join(inputArgs([]string{"/media/clip.mp4"}, "", ""), " "); !strings.HasPrefix(got, "-stream_loop -1 ") {
 		t.Errorf("local file should loop: %q", got)
 	}
 }
@@ -177,7 +177,7 @@ func TestDecodeHWAccelFollowsTheEncodingGPU(t *testing.T) {
 
 func TestInputArgsDecodeWithCUDA(t *testing.T) {
 	video, audio := "https://example.test/v.m3u8", "https://example.test/a.webm"
-	got := strings.Join(inputArgs([]string{video, audio}, "cuda"), " ")
+	got := strings.Join(inputArgs([]string{video, audio}, "cuda", ""), " ")
 	if !strings.Contains(got, "-hwaccel cuda -i "+video) || strings.Count(got, "-hwaccel") != 1 {
 		t.Errorf("CUDA must decode the video input only: %q", got)
 	}
