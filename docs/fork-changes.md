@@ -757,6 +757,22 @@ where it is the best resolution on offer, and then still decodes on the GPU
 where it can, which beats the CPU. NVENC hosts lose nothing: CUDA decodes VP9
 too. `/capabilities` still reports `av1HwDecode`, for diagnosis.
 
+**Preferring AV1 instead** (a GPU whose AV1 path keeps up, such as the RTX
+5080 at ~68 % sidecar CPU for 4K60 AV1): the order is one constant,
+`VIDEO_FORMAT_SORT` in `voice/streaming/source-format.ts`.
+
+- *AV1 first everywhere:* set it to `'res,fps,vcodec:av01'`, and update the
+  codec field its test in `source-format.test.ts` checks. The sidecar
+  needs no change: it still decodes AV1 on a GPU that passed the probe and on
+  the CPU (libdav1d) anywhere else, so a host without GPU AV1 decoding pays
+  the CPU cost for every AV1 video.
+- *AV1 first only where the GPU decodes it:* the order this change replaced.
+  Commit `9c1026e` (`feat(streaming): decode AV1 on the GPU, prefer VP9 where it
+  cannot`) has it: `videoFormatArgs` takes `gpuDecodesAV1` and leaves the sort
+  out when it is true, and `VoiceBot.gpuDecodesAV1()` reads `av1HwDecode` from
+  the sidecar's `/capabilities` before resolving. The sidecar still reports it.
+  Measure first: on the NAS's GPU this order stuttered at 4K60.
+
 Keeping the frames on the GPU (`scale_vaapi`, no copy back) would lift both
 codecs well past real time and remove most of the sidecar's CPU use; a
 separate change.

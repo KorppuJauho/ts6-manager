@@ -23,6 +23,9 @@ export function videoFormatFilter(maxHeight: number): string {
 // and frame rate still sort first, so the preference never costs quality:
 // where AV1 is the only format at the best resolution, it is picked, and the
 // sidecar decodes it on the GPU if its probe passed (decoders.go).
+//
+// To prefer AV1 instead, see "VP9 before AV1, even on a GPU that decodes AV1"
+// in docs/fork-changes.md.
 export const VIDEO_FORMAT_SORT = 'res,fps,vcodec:vp9';
 
 /** The yt-dlp arguments that select a video format up to maxHeight. */
