@@ -1,0 +1,9 @@
+# Commits git blame should skip: whole-file changes with no change to the text.
+# GitHub reads this file on its own; locally, once per clone:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# docs/fork-changes.md converted to CRLF by accident (the commit also added one section,
+# which blame then credits to the lines around it)
+7729fbd6b1affb26dda3c7a5d169440930baf022
+# docs/fork-changes.md converted back to LF
+77aa32f20b6098d59da152f695087601d6887379
