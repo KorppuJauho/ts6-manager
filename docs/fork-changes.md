@@ -773,9 +773,52 @@ too. `/capabilities` still reports `av1HwDecode`, for diagnosis.
   the sidecar's `/capabilities` before resolving. The sidecar still reports it.
   Measure first: on the NAS's GPU this order stuttered at 4K60.
 
-Keeping the frames on the GPU (`scale_vaapi`, no copy back) would lift both
-codecs well past real time and remove most of the sidecar's CPU use; a
-separate change.
+Keeping the frames on the GPU (`scale_vaapi`, no copy back) lifts both codecs
+well past real time and removes most of the sidecar's CPU use: see the next
+section.
+
+### VAAPI frames stay on the GPU
+
+| | |
+|---|---|
+| Commit | `feat(sidecar): keep VAAPI-decoded frames on the GPU` |
+| Files | `sidecar/main.go` |
+
+With VAAPI decoding and encoding, each decoded frame used to be copied back to
+system memory for the `fps`, `scale` and `pad` filters and uploaded again for
+the encoder. The input now asks for VAAPI surfaces
+(`-hwaccel_output_format vaapi`) and the chain scales them on the GPU:
+
+```
+fps=30,format=nv12|vaapi,hwupload,scale_vaapi=w=1920:h=1080:force_original_aspect_ratio=decrease:force_divisible_by=2:format=nv12
+```
+
+Measured on the NAS (Pentium Gold 8505, Alder Lake UHD), 20 s of a 4K60
+YouTube video to 1080p30 `h264_vaapi`, encoding as fast as it goes:
+
+| Source | CPU decode | GPU decode, copy back (before) | GPU decode, frames stay (now) |
+|---|---|---|---|
+| VP9 2160p60 | 3.0×, 384 % CPU | 1.13×, 165 % CPU | 6.1×, 62–70 % CPU |
+| AV1 2160p60 | 2.5×, 466 % CPU | 0.8×, 139 % CPU | 4.9×, 40 % CPU |
+
+The copy-back path was slower than decoding on the CPU, which is why 4K was
+only just real time on the NAS.
+
+- **Fallback kept.** `format=nv12|vaapi,hwupload` passes GPU frames through
+  and uploads CPU ones, so a source the GPU cannot decode (libavcodec falls
+  back to software frames) or AV1 decoded by libdav1d still streams: AV1
+  through libdav1d measured 2.2× with this chain.
+- **No padding.** FFmpeg 5.1 has no `pad_vaapi`, and `overlay_vaapi` places
+  the picture at a fixed position, which needs the source's size before the
+  stream starts. (It also needs `alpha=1.0` set explicitly on 5.1, or it
+  outputs only the background.) So a source of another shape is sent at its
+  own aspect ratio inside the preset, for example 4:3 as 1440×1080 at 1080p,
+  and the player letterboxes it.
+- **VAAPI only.** NVENC can keep CUDA frames the same way (`hwupload`, which
+  passes them through, and `scale_cuda`), but on the RTX 5080 it traded speed
+  for CPU (4.2× at 190 % → 2.4× at 64 %) on a host with CPU to spare, so CUDA
+  keeps the copy.
+- `SIDECAR_GPU_FILTERS=0` goes back to the copy, without a rebuild.
 
 ### NVIDIA: H.264 on NVENC
 

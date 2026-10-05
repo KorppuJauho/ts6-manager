@@ -1170,6 +1170,9 @@ func inputArgs(sources []string, hwaccel, decoder string) []string {
 		}
 		args = append(args, "-fflags", "+genpts+discardcorrupt", "-re")
 		if i == 0 && hwaccel != "" {
+			if framesStayOnGPU(hwaccel) {
+				args = append(args, "-hwaccel_output_format", hwaccel)
+			}
 			args = append(args, "-hwaccel", hwaccel)
 			if decoder != "" {
 				args = append(args, "-c:v", decoder)
@@ -1178,6 +1181,41 @@ func inputArgs(sources []string, hwaccel, decoder string) []string {
 		args = append(args, "-i", src)
 	}
 	return args
+}
+
+// framesStayOnGPU reports whether frames decoded with hwaccel are kept in GPU
+// memory and scaled there (gpuVideoFilter), instead of being copied back for
+// the CPU's fps, scale and pad filters and uploaded again for the encoder.
+//
+// The copy is what limited the NAS (Alder Lake UHD), not the GPU: 4K60 VP9 to
+// 1080p h264_vaapi ran at 1.13x real time with the copy and 6.1x without it,
+// AV1 at 0.8x and 4.9x, and the sidecar's CPU use fell from 140-165 % to
+// 40-70 %. Decoding on the CPU instead was 2.5-3x at 380-470 %.
+//
+// VAAPI only. NVENC can do the same with CUDA frames, but measured on an RTX
+// 5080 it only traded speed (4.2x -> 2.4x) for CPU (190 % -> 64 %), on a host
+// with CPU to spare. SIDECAR_GPU_FILTERS=0 goes back to the copy.
+func framesStayOnGPU(hwaccel string) bool {
+	return hwaccel == "vaapi" && envBoolOrDefault("SIDECAR_GPU_FILTERS", true)
+}
+
+// gpuVideoFilter is the video filter chain for frames that stay on the GPU.
+//
+// format=nv12|vaapi,hwupload passes GPU frames through untouched and uploads
+// CPU ones, so a source the GPU could not decode — libavcodec then falls back
+// to software frames, see inputArgs — still streams; so does AV1 decoded by
+// libdav1d. fps works on GPU frames as they are.
+//
+// There is no padding: FFmpeg 5.1 has no pad_vaapi, and overlay_vaapi can
+// only place the picture at a fixed position, which needs the source's size
+// before the stream starts. A source of another shape is sent at its own
+// aspect ratio inside the preset (a 4:3 source as 1440x1080 for 1080p), and
+// the viewer's player letterboxes it.
+func gpuVideoFilter(fps, w, h int) string {
+	return fmt.Sprintf(
+		"fps=%d,format=nv12|vaapi,hwupload,scale_vaapi=w=%d:h=%d:force_original_aspect_ratio=decrease:force_divisible_by=2:format=nv12",
+		fps, w, h,
+	)
 }
 
 // decodeHWAccel is the -hwaccel to decode the source with, or "" for the CPU:
@@ -1275,6 +1313,10 @@ func (s *Sidecar) startFFmpegLocked(source string, width int, height int, framer
 			"fps=%d,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,format=%s%s",
 			fps, w, h, w, h, profile.PixelFormat, hwUpload,
 		)
+		if framesStayOnGPU(hwaccel) {
+			vf = gpuVideoFilter(fps, w, h)
+			log.Printf("[FFmpeg] Frames stay on the GPU: %s decode, scale_vaapi, %s", hwaccel, profile.Encoder)
+		}
 		args = append(args,
 			"-map", "0:v:0",
 			"-vf", vf,

@@ -118,7 +118,7 @@ func TestInputArgsDecodeVideoOnTheGPU(t *testing.T) {
 	if !strings.Contains(got, "-hwaccel vaapi -i "+video) {
 		t.Errorf("DASH video input is not GPU-decoded: %q", got)
 	}
-	if strings.Contains(got, "-hwaccel vaapi -i "+audio) || strings.Count(got, "-hwaccel") != 1 {
+	if strings.Contains(got, "-hwaccel vaapi -i "+audio) || strings.Count(got, "-hwaccel ") != 1 {
 		t.Errorf("-hwaccel must apply to the video input only: %q", got)
 	}
 
@@ -197,5 +197,56 @@ func TestEnvBoolOrDefault(t *testing.T) {
 		if got := envBoolOrDefault("SIDECAR_TEST_FLAG", c.def); got != c.want {
 			t.Errorf("envBoolOrDefault(%q, %v) = %v, want %v", c.value, c.def, got, c.want)
 		}
+	}
+}
+
+// With VAAPI decoding, the decoded frames stay on the GPU: the input asks for
+// VAAPI surfaces and the filters scale them there, with no copy back.
+func TestVAAPIFramesStayOnTheGPU(t *testing.T) {
+	video, audio := "https://example.test/v.webm", "https://example.test/a.webm"
+	got := strings.Join(inputArgs([]string{video, audio}, "vaapi", ""), " ")
+	if !strings.Contains(got, "-hwaccel_output_format vaapi -hwaccel vaapi -i "+video) {
+		t.Errorf("the video input must keep its frames on the GPU: %q", got)
+	}
+	if strings.Count(got, "-hwaccel_output_format") != 1 {
+		t.Errorf("only the video input decodes on the GPU: %q", got)
+	}
+
+	vf := gpuVideoFilter(30, 1920, 1080)
+	for _, want := range []string{"fps=30", "format=nv12|vaapi,hwupload", "scale_vaapi=w=1920:h=1080", "force_original_aspect_ratio=decrease", "format=nv12"} {
+		if !strings.Contains(vf, want) {
+			t.Errorf("GPU filter chain lacks %q: %s", want, vf)
+		}
+	}
+	// Nothing in it may need CPU frames: those filters would force the copy
+	// back this chain exists to avoid.
+	for _, cpuOnly := range []string{"scale=", "pad="} {
+		if strings.Contains(strings.ReplaceAll(vf, "scale_vaapi=", ""), cpuOnly) {
+			t.Errorf("GPU filter chain has the CPU filter %q: %s", cpuOnly, vf)
+		}
+	}
+}
+
+// CUDA decoding keeps copying back (measured: no gain on an NVENC host), and
+// SIDECAR_GPU_FILTERS=0 turns the VAAPI chain off.
+func TestFramesStayOnTheGPUOnlyForVAAPI(t *testing.T) {
+	if !framesStayOnGPU("vaapi") {
+		t.Error("VAAPI decoding should keep its frames on the GPU")
+	}
+	for _, hw := range []string{"cuda", ""} {
+		if framesStayOnGPU(hw) {
+			t.Errorf("hwaccel %q should not keep frames on the GPU", hw)
+		}
+	}
+	if got := strings.Join(inputArgs([]string{"https://example.test/v.webm"}, "cuda", ""), " "); strings.Contains(got, "hwaccel_output_format") {
+		t.Errorf("CUDA frames must come back for the CPU filters: %q", got)
+	}
+
+	t.Setenv("SIDECAR_GPU_FILTERS", "0")
+	if framesStayOnGPU("vaapi") {
+		t.Error("SIDECAR_GPU_FILTERS=0 must copy the frames back")
+	}
+	if got := strings.Join(inputArgs([]string{"https://example.test/v.webm"}, "vaapi", ""), " "); strings.Contains(got, "hwaccel_output_format") {
+		t.Errorf("SIDECAR_GPU_FILTERS=0 must not ask for GPU frames: %q", got)
 	}
 }
