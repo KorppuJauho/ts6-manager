@@ -295,3 +295,44 @@ func TestNVENCFramesStayOnTheGPUWhenAskedFor(t *testing.T) {
 		t.Error("SIDECAR_GPU_FILTERS=0 must copy CUDA frames back too")
 	}
 }
+
+// The audio output's map: the source's own audio, optional, from the input
+// that carries it, or the silent input after the source's when it has none.
+func TestAudioMapFollowsTheSourceShape(t *testing.T) {
+	for _, c := range []struct {
+		inputs int
+		silent bool
+		want   string
+	}{
+		{1, false, "0:a:0?"},
+		{2, false, "1:a:0?"},
+		{1, true, "1:a:0"},
+		{2, true, "2:a:0"},
+	} {
+		if got := audioMap(c.inputs, c.silent); got != c.want {
+			t.Errorf("audioMap(%d, %v) = %q, want %q", c.inputs, c.silent, got, c.want)
+		}
+	}
+	if got := strings.Join(silentAudioInput, " "); !strings.HasPrefix(got, "-re -f lavfi -i anullsrc=") {
+		t.Errorf("the silence must be read at the source's pace: %q", got)
+	}
+}
+
+// FFmpeg 5.1's words when the audio output (-vn) finds no audio to take.
+func TestNoAudioTrackIsRecognised(t *testing.T) {
+	if !noAudioTrack("Input #0, matroska,webm, from 'x':\nOutput file #1 does not contain any stream\n") {
+		t.Error("a source without audio must be recognised")
+	}
+	if noAudioTrack("Server returned 403 Forbidden (access denied)\n") {
+		t.Error("another failure must not be taken for a missing audio track")
+	}
+}
+
+func TestTailBufferKeepsTheEnd(t *testing.T) {
+	tb := &tailBuffer{max: 8}
+	_, _ = tb.Write([]byte("0123456789"))
+	_, _ = tb.Write([]byte("ab"))
+	if got := tb.String(); got != "456789ab" {
+		t.Errorf("tail = %q, want the last 8 bytes", got)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -1280,10 +1281,10 @@ func decodeHWAccel(p EncoderProfile, device string) string {
 func (s *Sidecar) StartFFmpeg(source string, width int, height int, framerate int, bitrate string, profile EncoderProfile, device string, videoCodec string) {
 	s.ffmpegLock.Lock()
 	defer s.ffmpegLock.Unlock()
-	s.startFFmpegLocked(source, width, height, framerate, bitrate, profile, device, videoCodec)
+	s.startFFmpegLocked(source, width, height, framerate, bitrate, profile, device, videoCodec, false)
 }
 
-func (s *Sidecar) startFFmpegLocked(source string, width int, height int, framerate int, bitrate string, profile EncoderProfile, device string, videoCodec string) {
+func (s *Sidecar) startFFmpegLocked(source string, width int, height int, framerate int, bitrate string, profile EncoderProfile, device string, videoCodec string, silentAudio bool) {
 	s.StopFFmpegLocked()
 	s.resetSyncTiming()
 	s.drainRTPQueues()
@@ -1333,6 +1334,9 @@ func (s *Sidecar) startFFmpegLocked(source string, width int, height int, framer
 
 	if len(sources) > 0 {
 		args = append(args, inputArgs(sources, hwaccel, decoder)...)
+		if silentAudio {
+			args = append(args, silentAudioInput...)
+		}
 	} else {
 		args = append(args, "-re", "-f", "lavfi", "-i", fmt.Sprintf("color=c=black:s=%dx%d:r=1", w, h))
 	}
@@ -1391,15 +1395,15 @@ func (s *Sidecar) startFFmpegLocked(source string, width int, height int, framer
 	if len(sources) > 0 {
 		aBitrate := envOrDefault("AUDIO_BITRATE", "128k")
 
-		// With a DASH pair the audio is its own input; a progressive file
-		// carries both streams in input 0.
-		audioInput := "0:a:0?"
-		if len(sources) > 1 {
-			audioInput = "1:a:0?"
-		}
-		args = append(args,
-			"-map", audioInput,
-		)
+		args = append(args, "-map", audioMap(len(sources), silentAudio))
+		// The audio output may only ever take audio. Without this, a source
+		// with no audio track left the optional map above matching nothing,
+		// and FFmpeg picked a stream for the output itself: the video, encoded
+		// a second time (as MPEG-4) into the audio RTP port, and on a GPU path
+		// a stream that could not start, because those frames stay on the GPU.
+		// Now FFmpeg exits with "does not contain any stream" instead, and the
+		// stream is started again with silence (noAudioTrack).
+		args = append(args, "-vn", "-sn", "-dn")
 
 		if audioDelayMs > 0 {
 			args = append(args,
@@ -1423,7 +1427,8 @@ func (s *Sidecar) startFFmpegLocked(source string, width int, height int, framer
 
 	cmd := exec.Command(getFfmpegPath(), args...)
 	cmd.Stdout = nil
-	cmd.Stderr = os.Stderr
+	stderrTail := &tailBuffer{max: 8 << 10}
+	cmd.Stderr = io.MultiWriter(os.Stderr, stderrTail)
 	if err := cmd.Start(); err != nil {
 		log.Printf("[FFmpeg] Start error: %v", err)
 		return
@@ -1434,21 +1439,81 @@ func (s *Sidecar) startFFmpegLocked(source string, width int, height int, framer
 	go func() {
 		err := cmd.Wait()
 		log.Printf("[FFmpeg] Exited: %v", err)
-		if decoder == "" || err == nil || time.Since(started) >= av1FallbackWindow {
+		if err == nil {
 			return
 		}
-		// The probe passed, but this source did not decode on the GPU — a
-		// profile or level the GPU lacks. Start it again on libdav1d rather
-		// than leave the stream dead. Only if this FFmpeg is still the current
-		// one: a stop clears s.ffmpeg, and a new source replaces it.
+		noAudio := !silentAudio && len(sources) > 0 && noAudioTrack(stderrTail.String())
+		av1Retry := decoder != "" && time.Since(started) < av1FallbackWindow
+		if !noAudio && !av1Retry {
+			return
+		}
+		// Only if this FFmpeg is still the current one: a stop clears
+		// s.ffmpeg, and a new source replaces it.
 		s.ffmpegLock.Lock()
 		defer s.ffmpegLock.Unlock()
 		if s.ffmpeg != cmd {
 			return
 		}
+		if noAudio {
+			log.Printf("[FFmpeg] The source has no audio track; starting again with silence")
+			s.startFFmpegLocked(source, width, height, framerate, bitrate, profile, device, videoCodec, true)
+			return
+		}
+		// The probe passed, but this source did not decode on the GPU — a
+		// profile or level the GPU lacks. Start it again on libdav1d rather
+		// than leave the stream dead.
 		log.Printf("[FFmpeg] AV1 did not decode on the GPU (%s); starting again on the CPU decoder", hwaccel)
-		s.startFFmpegLocked(source, width, height, framerate, bitrate, profile, device, "")
+		s.startFFmpegLocked(source, width, height, framerate, bitrate, profile, device, "", silentAudio)
 	}()
+}
+
+// silentAudioInput stands in for the audio of a source that has none, so the
+// audio RTP output always has something to send. Read at the source's pace
+// (-re), or it would be generated as fast as FFmpeg can. It does not end: like
+// a stream whose video has ended, the stream then stays open until stopped.
+var silentAudioInput = []string{"-re", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"}
+
+// audioMap is the -map for the audio output. With a DASH pair the audio is
+// its own input, a progressive source carries both in input 0, and the
+// silence is the input after the source's.
+func audioMap(sourceInputs int, silentAudio bool) string {
+	switch {
+	case silentAudio:
+		return fmt.Sprintf("%d:a:0", sourceInputs)
+	case sourceInputs > 1:
+		return "1:a:0?"
+	}
+	return "0:a:0?"
+}
+
+// noAudioTrack reports whether FFmpeg stopped because the audio output had
+// nothing to take: the source has no audio track (see the -vn on that output).
+func noAudioTrack(stderr string) bool {
+	return strings.Contains(stderr, "does not contain any stream")
+}
+
+// tailBuffer keeps the last max bytes written to it, for reading why a
+// process stopped.
+type tailBuffer struct {
+	mu  sync.Mutex
+	max int
+	buf []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if over := len(t.buf) - t.max; over > 0 {
+		t.buf = append(t.buf[:0], t.buf[over:]...)
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return string(t.buf)
 }
 
 func (s *Sidecar) StopFFmpegLocked() {
