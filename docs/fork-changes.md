@@ -826,12 +826,8 @@ Watched in the TeamSpeak client on the NAS, sidecar CPU from `docker stats`:
   client.
 - **NVENC only on request**, see the next section.
 - `SIDECAR_GPU_FILTERS=0` goes back to the copy, without a rebuild.
-- **A source without an audio track** does not stream on this path. The audio
-  output's `-map 0:a:0?` then matches nothing, FFmpeg falls back to picking a
-  stream for it itself, takes the video, and cannot convert GPU frames for it.
-  On the copy path the same source streams, but FFmpeg encodes the video a
-  second time (as MPEG-4) into the audio RTP output. YouTube and IPTV sources
-  always carry audio; seen only with a video-only test clip.
+- **A source without an audio track** streams with silence: see "Sources
+  without audio" below.
 
 ### NVENC frames stay on the GPU, on request
 
@@ -1107,6 +1103,30 @@ manager retried, ten times over. 1796 never appeared.
 `CONNECTION_REFUSED_ERRORS` in `tslib/client.ts` now holds 1027, 1028 and
 3329, and the bot reads the same set. A refused connection fails at once
 with the server's reason; 2568 is the error of the one command that drew it.
+
+### Sources without audio
+
+| | |
+|---|---|
+| Commit | `fix(sidecar): stream sources without an audio track, with silence` |
+| Files | `sidecar/main.go` |
+
+The audio output maps `0:a:0?` (or `1:a:0?` for a DASH pair). For a source
+with no audio track that map matched nothing, and FFmpeg then picked a stream
+for the output itself: the video. On the copy path that meant encoding the
+video a second time, as MPEG-4, into the audio RTP port (about 200 % sidecar
+CPU instead of 60 % for a 4K test clip); on a GPU path the stream could not
+start at all, because those frames stay on the GPU.
+
+The audio output now gets `-vn -sn -dn`, so it can only ever take audio. For a
+source without one, FFmpeg stops at once with "Output file #1 does not contain
+any stream"; the sidecar recognises that in FFmpeg's last output and starts
+the stream again, once, with a silent input (`anullsrc`, read at the source's
+pace) mapped to the audio output. Checked with a video-only 4K clip through the
+sidecar's API: on the NVENC GPU path and on the copy path the stream restarts
+within the same second and runs; a clip with audio is unchanged. The silence
+does not end, so like a source whose video has ended, the stream stays open
+until it is stopped.
 
 ## Fixes to coom's changes (fork only)
 
