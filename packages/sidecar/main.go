@@ -1174,6 +1174,11 @@ func inputArgs(sources []string, hwaccel, decoder string) []string {
 				args = append(args, "-hwaccel_output_format", hwaccel)
 			}
 			args = append(args, "-hwaccel", hwaccel)
+			if hwaccel == "cuda" && framesStayOnGPU(hwaccel) {
+				// The device the filters upload to (gpuDeviceArgs); the
+				// decoder uses it too, so its frames need no transfer.
+				args = append(args, "-hwaccel_device", cudaFilterDevice)
+			}
 			if decoder != "" {
 				args = append(args, "-c:v", decoder)
 			}
@@ -1190,32 +1195,70 @@ func inputArgs(sources []string, hwaccel, decoder string) []string {
 // The copy is what limited the NAS (Alder Lake UHD), not the GPU: 4K60 VP9 to
 // 1080p h264_vaapi ran at 1.13x real time with the copy and 6.1x without it,
 // AV1 at 0.8x and 4.9x, and the sidecar's CPU use fell from 140-165 % to
-// 40-70 %. Decoding on the CPU instead was 2.5-3x at 380-470 %.
+// 40-70 %. Decoding on the CPU instead was 2.5-3x at 380-470 %. So VAAPI does
+// it by default; SIDECAR_GPU_FILTERS=0 goes back to the copy.
 //
-// VAAPI only. NVENC can do the same with CUDA frames, but measured on an RTX
-// 5080 it only traded speed (4.2x -> 2.4x) for CPU (190 % -> 64 %), on a host
-// with CPU to spare. SIDECAR_GPU_FILTERS=0 goes back to the copy.
+// NVENC (CUDA frames) only with SIDECAR_GPU_FILTERS_NVENC=1. On an RTX 5080,
+// 4K60 VP9 to 1080p, it cut the sidecar's CPU from 179-190 % to 63 % but also
+// its speed, from 3.2-4.2x to 2.5x real time: decoding alone ran at 5.3x and
+// decoding plus scale_cuda at 2.6x whatever the scaling method, so the cost is
+// the per-frame handover between decoder and filter (measured under WSL, with
+// this FFmpeg 5.1), not the GPU's work. Still far above real time, so worth it
+// on a host whose CPU is the bottleneck, not on one with CPU to spare.
 func framesStayOnGPU(hwaccel string) bool {
-	return hwaccel == "vaapi" && envBoolOrDefault("SIDECAR_GPU_FILTERS", true)
+	if !envBoolOrDefault("SIDECAR_GPU_FILTERS", true) {
+		return false
+	}
+	switch hwaccel {
+	case "vaapi":
+		return true
+	case "cuda":
+		return envBoolOrDefault("SIDECAR_GPU_FILTERS_NVENC", false)
+	}
+	return false
+}
+
+// cudaFilterDevice names the CUDA device gpuDeviceArgs creates for the filters.
+const cudaFilterDevice = "cu"
+
+// gpuDeviceArgs are the global options a GPU filter chain needs beyond the
+// encoder's own. hwupload uploads to the filter device, which VAAPI already
+// has from -vaapi_device; CUDA has none until one is created here and named
+// for the decoder (inputArgs) and the filters alike.
+func gpuDeviceArgs(hwaccel string) []string {
+	if hwaccel == "cuda" && framesStayOnGPU(hwaccel) {
+		return []string{"-init_hw_device", "cuda=" + cudaFilterDevice, "-filter_hw_device", cudaFilterDevice}
+	}
+	return nil
 }
 
 // gpuVideoFilter is the video filter chain for frames that stay on the GPU.
 //
-// format=nv12|vaapi,hwupload passes GPU frames through untouched and uploads
+// format=nv12|<hw>,hwupload passes GPU frames through untouched and uploads
 // CPU ones, so a source the GPU could not decode — libavcodec then falls back
 // to software frames, see inputArgs — still streams; so does AV1 decoded by
 // libdav1d. fps works on GPU frames as they are.
 //
-// There is no padding: FFmpeg 5.1 has no pad_vaapi, and overlay_vaapi can
-// only place the picture at a fixed position, which needs the source's size
+// (hwupload_cuda does not pass CUDA frames through; the generic hwupload does.)
+//
+// There is no padding: FFmpeg 5.1 has no pad_vaapi or pad_cuda, and the overlay
+// filters can only place the picture at a fixed position, which needs the source's size
 // before the stream starts. A source of another shape is sent at its own
 // aspect ratio inside the preset (a 4:3 source as 1440x1080 for 1080p), and
 // the viewer's player letterboxes it.
-func gpuVideoFilter(fps, w, h int) string {
+func gpuVideoFilter(hwaccel string, fps, w, h int) string {
 	return fmt.Sprintf(
-		"fps=%d,format=nv12|vaapi,hwupload,scale_vaapi=w=%d:h=%d:force_original_aspect_ratio=decrease:force_divisible_by=2:format=nv12",
-		fps, w, h,
+		"fps=%d,format=nv12|%s,hwupload,%s=w=%d:h=%d:force_original_aspect_ratio=decrease:force_divisible_by=2:format=nv12",
+		fps, hwaccel, gpuScaleFilter(hwaccel), w, h,
 	)
+}
+
+// gpuScaleFilter is the scaler for frames of hwaccel's kind.
+func gpuScaleFilter(hwaccel string) string {
+	if hwaccel == "cuda" {
+		return "scale_cuda"
+	}
+	return "scale_vaapi"
 }
 
 // decodeHWAccel is the -hwaccel to decode the source with, or "" for the CPU:
@@ -1278,6 +1321,7 @@ func (s *Sidecar) startFFmpegLocked(source string, width int, height int, framer
 	sources := splitSources(source)
 
 	hwaccel := decodeHWAccel(profile, device)
+	args = append(args, gpuDeviceArgs(hwaccel)...)
 	decoder := av1Decoder(videoCodec, hwaccel, device)
 	if videoCodec == "av1" {
 		if decoder != "" {
@@ -1314,8 +1358,8 @@ func (s *Sidecar) startFFmpegLocked(source string, width int, height int, framer
 			fps, w, h, w, h, profile.PixelFormat, hwUpload,
 		)
 		if framesStayOnGPU(hwaccel) {
-			vf = gpuVideoFilter(fps, w, h)
-			log.Printf("[FFmpeg] Frames stay on the GPU: %s decode, scale_vaapi, %s", hwaccel, profile.Encoder)
+			vf = gpuVideoFilter(hwaccel, fps, w, h)
+			log.Printf("[FFmpeg] Frames stay on the GPU: %s decode, %s, %s", hwaccel, gpuScaleFilter(hwaccel), profile.Encoder)
 		}
 		args = append(args,
 			"-map", "0:v:0",
