@@ -824,11 +824,42 @@ Watched in the TeamSpeak client on the NAS, sidecar CPU from `docker stats`:
   and the player letterboxes it. Checked in the TeamSpeak client: a 4:3 stream
   (2880×2160 at the 2160p preset) shows with bars at the sides, drawn by the
   client.
-- **VAAPI only.** NVENC can keep CUDA frames the same way (`hwupload`, which
-  passes them through, and `scale_cuda`), but on the RTX 5080 it traded speed
-  for CPU (4.2× at 190 % → 2.4× at 64 %) on a host with CPU to spare, so CUDA
-  keeps the copy.
+- **NVENC only on request**, see the next section.
 - `SIDECAR_GPU_FILTERS=0` goes back to the copy, without a rebuild.
+- **A source without an audio track** does not stream on this path. The audio
+  output's `-map 0:a:0?` then matches nothing, FFmpeg falls back to picking a
+  stream for it itself, takes the video, and cannot convert GPU frames for it.
+  On the copy path the same source streams, but FFmpeg encodes the video a
+  second time (as MPEG-4) into the audio RTP output. YouTube and IPTV sources
+  always carry audio; seen only with a video-only test clip.
+
+### NVENC frames stay on the GPU, on request
+
+| | |
+|---|---|
+| Commit | `feat(sidecar): keep NVENC frames on the GPU with SIDECAR_GPU_FILTERS_NVENC` |
+| Files | `sidecar/main.go` |
+
+`SIDECAR_GPU_FILTERS_NVENC=1` keeps CUDA-decoded frames on the GPU the same
+way: a CUDA device named for the decoder and the filters (`-init_hw_device
+cuda=cu -filter_hw_device cu`, `-hwaccel_device cu`), CUDA frames out of the
+decoder, and `fps,format=nv12|cuda,hwupload,scale_cuda=…` in the chain. The
+generic `hwupload` passes CUDA frames through; `hwupload_cuda` does not.
+
+It is off by default because on NVIDIA it trades speed for CPU. RTX 5080 under
+WSL, 4K60 VP9 to 1080p30 `h264_nvenc`:
+
+| | Copy back (default) | Frames stay on the GPU |
+|---|---|---|
+| As fast as it goes | 3.2–4.2×, 179–190 % CPU | 2.5×, 63 % CPU |
+| At real time, through the sidecar's API | ~50 % CPU | ~10 % CPU |
+
+Decoding alone ran at 5.3× and decoding plus `scale_cuda` at 2.6× whatever the
+scaling method (nearest and bicubic alike), so the slowdown is the per-frame
+handover between decoder and filter, not the GPU's work; WSL's GPU
+virtualisation and FFmpeg 5.1's CUDA path add to it. 2.5× is still well above
+real time. So it suits a weak CPU with an NVIDIA card; on a host with CPU to
+spare, the default is faster.
 
 ### NVIDIA: H.264 on NVENC
 

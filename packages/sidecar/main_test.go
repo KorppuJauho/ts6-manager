@@ -212,7 +212,7 @@ func TestVAAPIFramesStayOnTheGPU(t *testing.T) {
 		t.Errorf("only the video input decodes on the GPU: %q", got)
 	}
 
-	vf := gpuVideoFilter(30, 1920, 1080)
+	vf := gpuVideoFilter("vaapi", 30, 1920, 1080)
 	for _, want := range []string{"fps=30", "format=nv12|vaapi,hwupload", "scale_vaapi=w=1920:h=1080", "force_original_aspect_ratio=decrease", "format=nv12"} {
 		if !strings.Contains(vf, want) {
 			t.Errorf("GPU filter chain lacks %q: %s", want, vf)
@@ -227,9 +227,10 @@ func TestVAAPIFramesStayOnTheGPU(t *testing.T) {
 	}
 }
 
-// CUDA decoding keeps copying back (measured: no gain on an NVENC host), and
-// SIDECAR_GPU_FILTERS=0 turns the VAAPI chain off.
-func TestFramesStayOnTheGPUOnlyForVAAPI(t *testing.T) {
+// CUDA decoding keeps copying back unless SIDECAR_GPU_FILTERS_NVENC is set
+// (it trades speed for CPU), and SIDECAR_GPU_FILTERS=0 turns the VAAPI chain
+// off.
+func TestFramesStayOnTheGPUByDefaultOnlyForVAAPI(t *testing.T) {
 	if !framesStayOnGPU("vaapi") {
 		t.Error("VAAPI decoding should keep its frames on the GPU")
 	}
@@ -241,6 +242,9 @@ func TestFramesStayOnTheGPUOnlyForVAAPI(t *testing.T) {
 	if got := strings.Join(inputArgs([]string{"https://example.test/v.webm"}, "cuda", ""), " "); strings.Contains(got, "hwaccel_output_format") {
 		t.Errorf("CUDA frames must come back for the CPU filters: %q", got)
 	}
+	if got := gpuDeviceArgs("cuda"); got != nil {
+		t.Errorf("no CUDA filter device without the opt-in: %q", got)
+	}
 
 	t.Setenv("SIDECAR_GPU_FILTERS", "0")
 	if framesStayOnGPU("vaapi") {
@@ -248,5 +252,46 @@ func TestFramesStayOnTheGPUOnlyForVAAPI(t *testing.T) {
 	}
 	if got := strings.Join(inputArgs([]string{"https://example.test/v.webm"}, "vaapi", ""), " "); strings.Contains(got, "hwaccel_output_format") {
 		t.Errorf("SIDECAR_GPU_FILTERS=0 must not ask for GPU frames: %q", got)
+	}
+}
+
+// With SIDECAR_GPU_FILTERS_NVENC=1, CUDA frames stay on the GPU too: a named
+// CUDA device for the decoder and hwupload, and scale_cuda in place of the CPU
+// filters. SIDECAR_GPU_FILTERS=0 still wins.
+func TestNVENCFramesStayOnTheGPUWhenAskedFor(t *testing.T) {
+	t.Setenv("SIDECAR_GPU_FILTERS_NVENC", "1")
+	if !framesStayOnGPU("cuda") {
+		t.Fatal("SIDECAR_GPU_FILTERS_NVENC=1 should keep CUDA frames on the GPU")
+	}
+
+	video, audio := "https://example.test/v.webm", "https://example.test/a.webm"
+	got := strings.Join(inputArgs([]string{video, audio}, "cuda", "av1"), " ")
+	if !strings.Contains(got, "-hwaccel_output_format cuda -hwaccel cuda -hwaccel_device cu -c:v av1 -i "+video) {
+		t.Errorf("the video input must decode into the filter device's CUDA frames: %q", got)
+	}
+	if strings.Count(got, "-hwaccel ") != 1 {
+		t.Errorf("only the video input decodes on the GPU: %q", got)
+	}
+
+	if dev := strings.Join(gpuDeviceArgs("cuda"), " "); dev != "-init_hw_device cuda=cu -filter_hw_device cu" {
+		t.Errorf("CUDA filter device args = %q", dev)
+	}
+	if dev := gpuDeviceArgs("vaapi"); dev != nil {
+		t.Errorf("VAAPI already has its device from -vaapi_device, got %q", dev)
+	}
+
+	vf := gpuVideoFilter("cuda", 30, 1920, 1080)
+	for _, want := range []string{"fps=30", "format=nv12|cuda,hwupload", "scale_cuda=w=1920:h=1080", "force_original_aspect_ratio=decrease", "format=nv12"} {
+		if !strings.Contains(vf, want) {
+			t.Errorf("CUDA filter chain lacks %q: %s", want, vf)
+		}
+	}
+	if strings.Contains(vf, "hwupload_cuda") || strings.Contains(vf, "scale_vaapi") {
+		t.Errorf("wrong upload or scaler for CUDA frames: %s", vf)
+	}
+
+	t.Setenv("SIDECAR_GPU_FILTERS", "0")
+	if framesStayOnGPU("cuda") || gpuDeviceArgs("cuda") != nil {
+		t.Error("SIDECAR_GPU_FILTERS=0 must copy CUDA frames back too")
 	}
 }

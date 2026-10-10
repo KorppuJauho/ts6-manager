@@ -175,7 +175,8 @@ is fixed at container start, so they travel with each stream instead.
 | `SIDECAR_H264_PROFILE` | `constrained_high` | H.264 profile. The others (`constrained_baseline`, `main`, `high`) do not play in the TeamSpeak client; they exist for testing. |
 | `SIDECAR_HW_BACKEND` | `vaapi` | Which GPU hardware encoding uses: `vaapi` (Intel, AMD) or `nvenc` (NVIDIA, H.264 only). Set by `docker-compose.nvidia.yml`. |
 | `SIDECAR_HW_DECODE` | on | With hardware encoding, also decode the source on the GPU. `0` decodes on the CPU. |
-| `SIDECAR_GPU_FILTERS` | on | With VAAPI decoding, keep the frames on the GPU and scale them there (`scale_vaapi`) instead of copying them back to the CPU. `0` copies them back. |
+| `SIDECAR_GPU_FILTERS` | on | With VAAPI decoding, keep the frames on the GPU and scale them there (`scale_vaapi`) instead of copying them back to the CPU. `0` copies them back (for NVENC too). |
+| `SIDECAR_GPU_FILTERS_NVENC` | off | `1` does the same for NVENC (`scale_cuda`). Uses far less CPU but is slower end to end; for a weak CPU with an NVIDIA card. |
 | `SIDECAR_DEBUG_LOGS` | off | `1` logs per-packet detail and the full SDP offer and answer. Leave off: an SDP carries ICE credentials and host addresses. |
 | `STUN_SERVERS` | — | Comma-separated STUN URLs. |
 | `VIDEO_QUEUE_SIZE` / `AUDIO_QUEUE_SIZE` | `4096` / `2048` | RTP queue lengths, in packets. They hold what the A/V pacing is waiting to send. |
