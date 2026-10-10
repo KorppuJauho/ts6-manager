@@ -804,6 +804,14 @@ YouTube video to 1080p30 `h264_vaapi`, encoding as fast as it goes:
 The copy-back path was slower than decoding on the CPU, which is why 4K was
 only just real time on the NAS.
 
+Watched in the TeamSpeak client on the NAS, sidecar CPU from `docker stats`:
+
+| Stream | Before | Now |
+|---|---|---|
+| YouTube VP9 3840×2160 60 fps → 2160p30 `h264_vaapi` | ~100 % | ~30 %, steady 30 fps |
+| YouTube VP9 2880×2160 (4:3) 24 fps → 2160p30 | | ~28 % |
+| IPTV H.264 1280×720 50 fps → 720p30 | | ~20 % |
+
 - **Fallback kept.** `format=nv12|vaapi,hwupload` passes GPU frames through
   and uploads CPU ones, so a source the GPU cannot decode (libavcodec falls
   back to software frames) or AV1 decoded by libdav1d still streams: AV1
@@ -813,7 +821,9 @@ only just real time on the NAS.
   stream starts. (It also needs `alpha=1.0` set explicitly on 5.1, or it
   outputs only the background.) So a source of another shape is sent at its
   own aspect ratio inside the preset, for example 4:3 as 1440×1080 at 1080p,
-  and the player letterboxes it.
+  and the player letterboxes it. Checked in the TeamSpeak client: a 4:3 stream
+  (2880×2160 at the 2160p preset) shows with bars at the sides, drawn by the
+  client.
 - **VAAPI only.** NVENC can keep CUDA frames the same way (`hwupload`, which
   passes them through, and `scale_cuda`), but on the RTX 5080 it traded speed
   for CPU (4.2× at 190 % → 2.4× at 64 %) on a host with CPU to spare, so CUDA
