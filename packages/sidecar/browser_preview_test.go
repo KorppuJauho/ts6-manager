@@ -166,6 +166,25 @@ func TestTeamSpeakPeerOfferIsUnchanged(t *testing.T) {
 	}
 }
 
+// The TeamSpeak 6.0.0-beta5 client never answers an offer whose media is
+// sendrecv, so no viewer could watch: every media section is send-only.
+func TestPeerOfferIsSendOnly(t *testing.T) {
+	t.Setenv("STUN_SERVERS", "")
+	for _, codec := range []string{codecH264, codecVP8, codecVP9} {
+		for _, browser := range []bool{false, true} {
+			s := NewSidecar()
+			offer, err := s.CreatePeerFor("viewer", codec, browser)
+			if err != nil {
+				t.Fatalf("CreatePeerFor(%s, browser=%v): %v", codec, browser, err)
+			}
+			s.ClosePeer("viewer")
+			if n := strings.Count(offer, "\na=sendonly"); n != 2 || strings.Contains(offer, "a=sendrecv") {
+				t.Errorf("%s browser=%v: want both media sections sendonly, got %d:\n%s", codec, browser, n, offer)
+			}
+		}
+	}
+}
+
 func TestBrowserFallbacksAreForH264Only(t *testing.T) {
 	for _, codec := range []string{codecVP8, codecVP9} {
 		if got := browserVideoFallbacks(codec); len(got) != 0 {
