@@ -876,11 +876,15 @@ func (s *Sidecar) CreatePeer(id string) (sdp string, err error) {
 		return "", err
 	}
 
-	if _, err = pc.AddTrack(videoTrack); err != nil {
+	// Send-only, not AddTrack's sendrecv: the sidecar never receives, and the
+	// TeamSpeak 6.0.0-beta5 client never answers an offer whose media is
+	// sendrecv, so no viewer could watch.
+	sendOnly := webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly}
+	if _, err = pc.AddTransceiverFromTrack(videoTrack, sendOnly); err != nil {
 		pc.Close()
 		return "", err
 	}
-	if _, err = pc.AddTrack(audioTrack); err != nil {
+	if _, err = pc.AddTransceiverFromTrack(audioTrack, sendOnly); err != nil {
 		pc.Close()
 		return "", err
 	}

@@ -336,3 +336,32 @@ func TestTailBufferKeepsTheEnd(t *testing.T) {
 		t.Errorf("tail = %q, want the last 8 bytes", got)
 	}
 }
+
+// The TeamSpeak 6.0.0-beta5 client never answers an offer whose media is
+// sendrecv, so no viewer could watch: every media section of every offer —
+// to a TeamSpeak viewer and to the web UI preview, for each video codec — is
+// send-only.
+func TestPeerOfferIsSendOnly(t *testing.T) {
+	// A closed local port: gathering ends at its timeout, without the network.
+	t.Setenv("STUN_SERVERS", "stun:127.0.0.1:9")
+	seen := map[string]bool{}
+	for _, p := range encoderProfiles {
+		if seen[p.MimeType] {
+			continue
+		}
+		seen[p.MimeType] = true
+		for _, id := range []string{"42", "webui-preview"} {
+			s := NewSidecar()
+			s.setActiveProfile(p, "", 1280, 720, 30)
+			offer, err := s.CreatePeer(id)
+			if err != nil {
+				t.Fatalf("%s peer %s: %v", p.Key, id, err)
+			}
+			s.ClosePeer(id)
+			media := strings.Count(offer, "\nm=")
+			if n := strings.Count(offer, "\na=sendonly"); media != 2 || n != media || strings.Contains(offer, "a=sendrecv") {
+				t.Errorf("%s peer %s: want 2 send-only media sections, got %d of %d:\n%s", p.Key, id, n, media, offer)
+			}
+		}
+	}
+}
