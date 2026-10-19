@@ -8,6 +8,7 @@ import type { QueueItem } from './playlist/queue.js';
 import type { MusicCommandHandler } from './music-command-handler.js';
 import { decrypt, encrypt } from '../utils/crypto.js';
 import { broadcastScoped } from '../ws/ws-broadcast.js';
+import { loadTeamSpeakAvatar, removeBotAvatarFiles, type AvatarMode } from './bot-avatar.js';
 
 const PROGRESS_INTERVAL_MS = 1000;
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -84,6 +85,7 @@ export class VoiceBotManager extends EventEmitter {
         sidecarPort: (dbBot as any).sidecarPort ?? 9800,
         streamPreset: (dbBot as any).streamPreset ?? undefined,
         getStreamSettings: () => getStreamSettings(this.prisma),
+        getAvatar: () => this.readAvatar(dbBot.id),
       };
 
       const bot = this.createBotInstance(config);
@@ -168,6 +170,10 @@ export class VoiceBotManager extends EventEmitter {
       this.broadcast('music:bot:videoSourceChanged', { botId: config.id, source }, config.serverConfigId);
     });
 
+    bot.on('avatarStatus', (avatar: unknown) => {
+      this.broadcast('music:bot:avatar', { botId: config.id, avatar }, config.serverConfigId);
+    });
+
     bot.on('fatalError', (msg: string) => {
       console.error(`[VoiceBotManager] Bot ${config.id}: fatal error — ${msg}. No reconnect.`);
       this.clearReconnect(config.id);
@@ -198,6 +204,7 @@ export class VoiceBotManager extends EventEmitter {
     voicePort?: number;
     volume?: number;
     autoStart?: boolean;
+    avatarMode?: Exclude<AvatarMode, 'upload'>;
   }): Promise<{ id: number }> {
     // Enforce bot limit
     const limitSetting = await this.prisma.appSetting.findUnique({ where: { key: 'max_music_bots' } });
@@ -230,6 +237,8 @@ export class VoiceBotManager extends EventEmitter {
         voicePort: data.voicePort ?? 9987,
         volume: data.volume ?? 50,
         autoStart: data.autoStart ?? false,
+        // New bots show the app icon; bots that predate avatars keep none.
+        avatarMode: data.avatarMode ?? 'default',
         identityData,
       },
     });
@@ -250,6 +259,7 @@ export class VoiceBotManager extends EventEmitter {
       sidecarPort: 9800,
       streamPreset: undefined,
       getStreamSettings: () => getStreamSettings(this.prisma),
+      getAvatar: () => this.readAvatar(dbBot.id),
     };
 
     const bot = this.createBotInstance(config);
@@ -272,6 +282,24 @@ export class VoiceBotManager extends EventEmitter {
     this.bots.delete(id);
     this.musicCmdHandler?.unregisterBot(id);
     await this.prisma.musicBot.delete({ where: { id } });
+    await removeBotAvatarFiles(id).catch((err: Error) => {
+      console.warn(`[VoiceBotManager] Bot ${id}: avatar files not removed: ${err.message}`);
+    });
+  }
+
+  /** The avatar a bot uploads to TeamSpeak, from its setting in the database. */
+  private async readAvatar(botId: number): Promise<{ data: Buffer; md5: string } | null> {
+    const row = await this.prisma.musicBot.findUnique({
+      where: { id: botId },
+      select: { avatarMode: true, avatarFile: true },
+    });
+    if (!row) return null;
+    return loadTeamSpeakAvatar(row);
+  }
+
+  /** Applies a changed avatar setting; a stopped bot applies it when it connects. */
+  async refreshAvatar(id: number): Promise<void> {
+    await this.bots.get(id)?.refreshAvatar();
   }
 
   async getBotsForServer(configId: number): Promise<Array<{ botId: number; bot: VoiceBot }>> {

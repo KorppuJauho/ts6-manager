@@ -22,6 +22,16 @@ import { probeVideoHeight } from './streaming/probe.js';
 import { videoFormatArgs, parseResolvedFormat, type VideoCodecFamily } from './streaming/source-format.js';
 import { nowPlayingNickname, streamingNickname, MAX_NICKNAME_LENGTH } from './nickname.js';
 import { getCookieArgs, runYtDlp, assertSafeUrl, fetchVideoTitle } from './audio/youtube.js';
+import {
+  uploadFile,
+  deleteFile,
+  sendConfirmed,
+  FileTransferError,
+  ERROR_NO_PERMISSION,
+  ERROR_INVALID_SIZE,
+} from './tslib/filetransfer.js';
+import { AVATAR_UPLOAD_NAME, serverAvatarPath } from './bot-avatar.js';
+import type { BotAvatarFailure, BotAvatarStatus } from '@ts6/common';
 import { validateUrl } from '../utils/url-validator.js';
 import {
   STREAM_SETTINGS_DEFAULTS,
@@ -39,6 +49,14 @@ const FLOOD_ERROR_ID = 524;
  * how a few quick retries kept a bot unable to stream for minutes.
  */
 export const FLOOD_COOLDOWN_MS = 30_000;
+
+/**
+ * How long an avatar change waits for the server to list the bot itself
+ * (notifycliententerview), which carries the identity its avatar file is
+ * named after. It arrives within a second of connecting; without it an avatar
+ * is still set, only the file of a removed one is not asked to be deleted.
+ */
+const OWN_ENTRY_WAIT_MS = 5_000;
 
 /** Resolve a YouTube/yt-dlp-compatible URL to a direct stream URL */
 /** Sites whose URLs are page addresses yt-dlp must turn into media URLs. */
@@ -133,6 +151,12 @@ export interface VoiceBotConfig {
    * web UI applies to the next stream without restarting the bot.
    */
   getStreamSettings?: () => Promise<StreamSettingsValue>;
+  /**
+   * Reads the bot's avatar: the file to upload with its MD5, or null for
+   * none. Supplied by VoiceBotManager and read at every connect and change,
+   * so the setting in the database is what the bot shows.
+   */
+  getAvatar?: () => Promise<{ data: Buffer; md5: string } | null>;
 }
 
 export class VoiceBot extends EventEmitter {
@@ -215,6 +239,18 @@ export class VoiceBot extends EventEmitter {
   private _videoIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly VIDEO_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
+  // Avatar: one change at a time, and changes asked for while one runs are
+  // made once after it, with the setting as it is then.
+  private _avatarStatus: BotAvatarStatus | null = null;
+  private _avatarRun: Promise<void> = Promise.resolve();
+  private _avatarQueued: Promise<void> | null = null;
+  private _avatarQueuedChange = false;
+  /** The bot's own entry as the server lists it, per connection. */
+  private _ownEntrySeen = false;
+  private _ownEntryWaiters: Array<() => void> = [];
+  private _ownAvatarPath: string | null = null;
+  private _ownAvatarFlag = '';
+
   constructor(config: VoiceBotConfig) {
     super();
     this.config = config;
@@ -261,6 +297,7 @@ export class VoiceBot extends EventEmitter {
     });
 
     this.client.on('command', (cmd) => {
+      this.noteOwnEntry(cmd);
       this.emit('command', cmd);
     });
 
@@ -429,6 +466,9 @@ export class VoiceBot extends EventEmitter {
     this.identity = this.config.identity ?? generateIdentity(8);
     // A new connection starts with no registrations, whatever the old one had.
     this._streamNotificationsRegistered = false;
+    this._ownEntrySeen = false;
+    this._ownAvatarPath = null;
+    this._ownAvatarFlag = '';
 
     const opts: Ts3ClientOptions = {
       host: this.config.serverHost,
@@ -444,6 +484,130 @@ export class VoiceBot extends EventEmitter {
     this._status = 'connected';
     this.emit('statusChange', this._status);
     this.emit('connected');
+    // The server keeps an avatar with the identity, but an admin can delete
+    // the file, and a bot moved to another server never had it there: set it
+    // on every connect. Not awaited: a refused upload must neither hold up
+    // nor fail the connect.
+    void this.scheduleAvatar(false);
+  }
+
+  // --- Avatar ---
+
+  get avatarStatus(): BotAvatarStatus | null {
+    return this._avatarStatus;
+  }
+
+  /**
+   * Applies the avatar setting as it is now. Settles once TeamSpeak has the
+   * avatar or refused it (avatarStatus says which); a stopped bot applies it
+   * when it next connects.
+   */
+  refreshAvatar(): Promise<void> {
+    return this.scheduleAvatar(true);
+  }
+
+  private scheduleAvatar(changed: boolean): Promise<void> {
+    if (changed) this._avatarQueuedChange = true;
+    if (this._avatarQueued) return this._avatarQueued;
+    const queued = this._avatarRun.then(() => {
+      this._avatarQueued = null;
+      const wasChanged = this._avatarQueuedChange;
+      this._avatarQueuedChange = false;
+      return this.applyAvatar(wasChanged);
+    });
+    this._avatarQueued = queued;
+    this._avatarRun = queued.catch(() => {});
+    return queued;
+  }
+
+  private setAvatarStatus(state: BotAvatarStatus['state'], reason?: BotAvatarFailure, detail?: string): void {
+    this._avatarStatus = { state, ...(reason && { reason }), ...(detail && { detail }), at: new Date().toISOString() };
+    this.emit('avatarStatus', this._avatarStatus);
+  }
+
+  private isConnected(): boolean {
+    return this._status === 'connected' || this._status === 'playing' || this._status === 'paused';
+  }
+
+  /** `changed`: the setting changed, rather than the bot connecting. */
+  private async applyAvatar(changed: boolean): Promise<void> {
+    if (!this.config.getAvatar || !this.isConnected()) return;
+    let avatar: { data: Buffer; md5: string } | null;
+    try {
+      avatar = await this.config.getAvatar();
+    } catch (err: any) {
+      console.error(`[VoiceBot ${this.config.id}] Avatar not applied: ${err.message}`);
+      this.setAvatarStatus('failed', 'missingFile', err.message);
+      return;
+    }
+    await this.waitOwnEntry(OWN_ENTRY_WAIT_MS);
+    try {
+      if (!avatar) {
+        // The flag is cleared on every connect, because the server remembers
+        // it with the identity. The file is deleted only when there was an
+        // avatar to remove.
+        const hadAvatar = changed || this._ownAvatarFlag !== '';
+        await sendConfirmed(this.client, 'clientupdate', { client_flag_avatar: '' });
+        this._ownAvatarFlag = '';
+        if (hadAvatar && this._ownAvatarPath) {
+          // Clients follow the flag, so a refused delete leaves an unused
+          // file behind and nothing visible. TeamSpeak 6 refuses it (see
+          // bot-avatar.ts); the request stays for servers that allow it.
+          await deleteFile(this.client, 0, this._ownAvatarPath).catch((err: Error) => {
+            console.warn(`[VoiceBot ${this.config.id}] Avatar cleared; its file was not deleted: ${err.message}`);
+          });
+        }
+        this.setAvatarStatus('cleared');
+        return;
+      }
+      this.setAvatarStatus('pending');
+      await uploadFile(this.client, this.config.serverHost, 0, AVATAR_UPLOAD_NAME, avatar.data, true);
+      await sendConfirmed(this.client, 'clientupdate', { client_flag_avatar: avatar.md5 });
+      this._ownAvatarFlag = avatar.md5;
+      this.setAvatarStatus('applied');
+      console.log(`[VoiceBot ${this.config.id}] Avatar set (${avatar.data.length} bytes, md5 ${avatar.md5})`);
+    } catch (err: any) {
+      const code = err instanceof FileTransferError ? err.code : 0;
+      const reason: BotAvatarFailure =
+        code === ERROR_NO_PERMISSION ? 'noPermission'
+          : code === ERROR_INVALID_SIZE ? 'tooBig'
+            : err instanceof FileTransferError && code === 0 ? 'transfer'
+              : 'error';
+      const detail = code ? `${err.message} (error ${code})` : err.message;
+      console.warn(`[VoiceBot ${this.config.id}] Avatar not applied: ${detail}`);
+      this.setAvatarStatus('failed', reason, detail);
+    }
+  }
+
+  /** Notes the bot's own entry when the server lists it, and its avatar flag when that changes. */
+  private noteOwnEntry(cmd: { name: string; params: Record<string, string>; groups?: Record<string, string>[] }): void {
+    if (cmd.name !== 'notifycliententerview' && cmd.name !== 'notifyclientupdated') return;
+    const ownClid = this.client.getClientId();
+    if (!ownClid) return;
+    for (const entry of cmd.groups ?? [cmd.params]) {
+      if (parseInt(entry.clid) !== ownClid) continue;
+      if (entry.client_flag_avatar !== undefined) this._ownAvatarFlag = entry.client_flag_avatar;
+      if (cmd.name === 'notifycliententerview') {
+        this._ownAvatarPath = serverAvatarPath(entry.client_base64HashClientUID, entry.client_unique_identifier);
+        this._ownEntrySeen = true;
+        for (const wake of this._ownEntryWaiters.splice(0)) wake();
+      }
+    }
+  }
+
+  private waitOwnEntry(ms: number): Promise<void> {
+    if (this._ownEntrySeen) return Promise.resolve();
+    return new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        this._ownEntryWaiters = this._ownEntryWaiters.filter((w) => w !== wake);
+        resolve();
+      }, ms);
+      this._ownEntryWaiters.push(wake);
+    });
   }
 
   async stop(): Promise<void> {

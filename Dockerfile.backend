@@ -83,6 +83,8 @@ COPY --from=build --chown=node:node /app/packages/backend/generated ./packages/b
 COPY --from=build --chown=node:node /app/packages/backend/prisma ./packages/backend/prisma
 COPY --from=build --chown=node:node /app/packages/backend/prisma.config.ts ./packages/backend/prisma.config.ts
 COPY --from=build --chown=node:node /app/packages/backend/package.json ./packages/backend/package.json
+# The default bot avatar, read at runtime relative to dist/.
+COPY --from=build --chown=node:node /app/packages/backend/assets ./packages/backend/assets
 COPY --from=build /app/packages/backend/node_modules ./packages/backend/node_modules
 
 WORKDIR /app/packages/backend

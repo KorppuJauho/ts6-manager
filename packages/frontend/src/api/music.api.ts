@@ -12,6 +12,18 @@ export const musicBotsApi = {
   stop: (id: number) => api.post(`/music-bots/${id}/stop`).then((r) => r.data),
   restart: (id: number) => api.post(`/music-bots/${id}/restart`).then((r) => r.data),
 
+  // Avatar
+  uploadAvatar: (id: number, file: File) => {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    return api.post(`/music-bots/${id}/avatar`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000, // shrinking a large GIF takes a moment
+    }).then((r) => r.data);
+  },
+  // A blob, because an <img> cannot send the bearer token.
+  avatarImage: (id: number) => api.get(`/music-bots/${id}/avatar`, { responseType: 'blob' }).then((r) => r.data as Blob),
+
   // Playback
   playRadio: (id: number, stationId: number) => api.post(`/music-bots/${id}/play-radio`, { stationId }).then((r) => r.data),
   play: (id: number, songId: number) => api.post(`/music-bots/${id}/play`, { songId }).then((r) => r.data),

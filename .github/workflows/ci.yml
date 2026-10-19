@@ -39,6 +39,11 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # The bot avatar tests shrink real images with FFmpeg, as the backend
+      # image does; without it they are skipped.
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Test
         run: pnpm run test
 

@@ -1202,6 +1202,41 @@
       "volume": "Volume ({{n}} %)",
       "autoStart": "Démarrage automatique au lancement du serveur"
     },
+    "avatar": {
+      "label": "Avatar",
+      "modes": {
+        "upload": "Téléverser",
+        "default": "Utiliser l'avatar par défaut",
+        "none": "Aucun"
+      },
+      "choose": "Choisir une image…",
+      "replace": "Choisir une autre image…",
+      "hint": "PNG, JPEG ou GIF, 200 Ko maximum. Si elle est plus grande, TeamSpeak reçoit une copie réduite à 300×300.",
+      "noAvatar": "Aucun avatar",
+      "cardFailed": "Avatar refusé",
+      "uploadFailed": "L'avatar n'a pas été enregistré.",
+      "state": {
+        "pending": "Envoi de l'avatar à TeamSpeak…",
+        "applied": "TeamSpeak affiche cet avatar.",
+        "cleared": "TeamSpeak n'affiche aucun avatar pour ce bot.",
+        "offline": "Appliqué à la connexion du bot."
+      },
+      "failed": {
+        "noPermission": "TeamSpeak a refusé l'avatar : le groupe de serveur du bot n'a pas le droit de téléverser des fichiers ou des avatars. Accordez la permission, puis enregistrez à nouveau ou redémarrez le bot. Le bot reste connecté sans avatar.",
+        "tooBig": "TeamSpeak a refusé l'avatar : il dépasse ce que le groupe de serveur du bot peut téléverser (permission « taille maximale de l'avatar » ; 0 n'autorise aucun avatar). Augmentez la limite ou téléversez une image plus petite. Le bot reste connecté sans avatar.",
+        "transfer": "L'avatar n'a pas pu être envoyé au port de transfert de fichiers de TeamSpeak. Vérifiez que le backend atteint ce port du serveur (30033 par défaut).",
+        "missingFile": "Le fichier de l'avatar enregistré est introuvable. Téléversez à nouveau l'image.",
+        "error": "TeamSpeak n'a pas accepté l'avatar."
+      },
+      "refused": {
+        "empty": "Le fichier est vide.",
+        "tooBig": "L'avatar ne doit pas dépasser 200 Ko.",
+        "notImage": "L'avatar doit être une image PNG, JPEG ou GIF.",
+        "unreadable": "L'image n'a pas pu être lue.",
+        "tooBigAfterResize": "L'avatar dépasse encore 200 Ko une fois réduit à 300×300. Essayez une image plus petite.",
+        "resizeFailed": "L'avatar n'a pas pu être redimensionné. Essayez une autre image."
+      }
+    },
     "deleteBot": {
       "title": "Supprimer le bot musical ?",
       "description": "Cela supprimera définitivement ce bot musical et le déconnectera du serveur."

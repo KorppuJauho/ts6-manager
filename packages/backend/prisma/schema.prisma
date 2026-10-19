@@ -183,6 +183,15 @@ model MusicBot {
   autoStart       Boolean        @default(false)
   streamPreset    String         @default("1080p")
   sidecarPort     Int            @default(9800)
+  /// "upload", "default" (the bundled app icon) or "none". Bots that existed
+  /// before avatars get "none" from db push; new bots are created with
+  /// "default".
+  avatarMode      String         @default("none")
+  /// The original upload in data/bot-avatars/, as the web UI shows it. What
+  /// TeamSpeak gets (shrunk to fit 300×300 when larger) sits beside it.
+  avatarFile      String?
+  /// MD5 of the file TeamSpeak gets: the bot's client_flag_avatar.
+  avatarMd5       String?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 

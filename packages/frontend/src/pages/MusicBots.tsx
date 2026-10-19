@@ -39,10 +39,11 @@ import {
   Video,
 } from 'lucide-react';
 import { VideoStreamTab } from '@/components/video/VideoStreamTab';
+import { BotAvatarField } from '@/components/music/BotAvatarField';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { formatBytes } from '@/lib/utils';
-import type { MusicBotSummary, PlaybackState, SongInfo, PlaylistSummary, PlaylistDetail, YouTubeSearchResult, RadioStationInfo, RadioPreset } from '@ts6/common';
+import type { BotAvatarMode, BotAvatarStatus, MusicBotSummary, PlaybackState, SongInfo, PlaylistSummary, PlaylistDetail, YouTubeSearchResult, RadioStationInfo, RadioPreset } from '@ts6/common';
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -97,6 +98,7 @@ function BotPlayerCard({ bot, onEdit, onDelete, onPlay }: {
 
   const isRunning = bot.status !== 'stopped' && bot.status !== 'error';
   const isPlaying = state?.status === 'playing';
+  const avatarStatus: BotAvatarStatus | null = state?.avatarStatus ?? bot.avatarStatus;
   const isStreaming = state?.isStreaming ?? false;
 
   return (
@@ -134,6 +136,11 @@ function BotPlayerCard({ bot, onEdit, onDelete, onPlay }: {
           <Badge variant="outline" className="text-[10px]">{bot.nickname}</Badge>
           {bot.serverConfig && (
             <Badge variant="secondary" className="text-[10px]">{bot.serverConfig.name}</Badge>
+          )}
+          {isRunning && avatarStatus?.state === 'failed' && (
+            <Badge variant="destructive" className="text-[10px] cursor-pointer" title={t(`musicBots.avatar.failed.${avatarStatus.reason ?? 'error'}`)} onClick={onEdit}>
+              {t('musicBots.avatar.cardFailed')}
+            </Badge>
           )}
         </div>
 
@@ -523,16 +530,45 @@ function BotsTab() {
   const [editBot, setEditBot] = useState<MusicBotSummary | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [showPlayDialog, setShowPlayDialog] = useState<number | null>(null);
+  const queryClient = useQueryClient();
 
   // Create form
   const [form, setForm] = useState({
     name: '', serverConfigId: '', nickname: 'MusicBot', serverPassword: '', defaultChannel: '', channelPassword: '', voicePort: 9987, volume: 50, autoStart: false,
+    avatarMode: 'default' as BotAvatarMode,
   });
+  // A picked avatar, uploaded once the bot is saved.
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [savingAvatar, setSavingAvatar] = useState(false);
+  const { data: editState } = useMusicBotState(
+    editBot && editBot.status !== 'stopped' ? editBot.id : null,
+  ) as { data: PlaybackState | undefined };
 
   const bots = Array.isArray(data) ? data : [];
   const serverList = Array.isArray(servers) ? servers : [];
 
   if (isLoading) return <PageLoader />;
+
+  /** Uploads the picked avatar; false when the server refused it (a toast says why). */
+  const uploadAvatar = async (botId: number, file: File): Promise<boolean> => {
+    setSavingAvatar(true);
+    try {
+      await musicBotsApi.uploadAvatar(botId, file);
+      return true;
+    } catch (err: unknown) {
+      const reason = (err as { response?: { data?: { reason?: string } } }).response?.data?.reason;
+      toast.error(reason ? t(`musicBots.avatar.refused.${reason}`) : t('musicBots.avatar.uploadFailed'));
+      return false;
+    } finally {
+      setSavingAvatar(false);
+      queryClient.invalidateQueries({ queryKey: ['music-bots'] });
+      queryClient.invalidateQueries({ queryKey: ['music-bot-avatar', botId] });
+      queryClient.invalidateQueries({ queryKey: ['music-bot-state', botId] });
+    }
+  };
+
+  // Upload needs an image: a new pick, or the one the bot already has.
+  const avatarIncomplete = form.avatarMode === 'upload' && !avatarFile && !editBot?.avatarUploaded;
 
   const handleCreate = () => {
     const configId = parseInt(form.serverConfigId);
@@ -547,14 +583,22 @@ function BotsTab() {
       voicePort: form.voicePort,
       volume: form.volume,
       autoStart: form.autoStart,
+      // An upload needs the bot's id: it follows as its own request.
+      avatarMode: form.avatarMode === 'upload' ? 'none' : form.avatarMode,
     }, {
-      onSuccess: () => { toast.success(t('musicBots.toast.botCreated')); setShowCreate(false); resetForm(); },
+      onSuccess: async (created: { id: number }) => {
+        toast.success(t('musicBots.toast.botCreated'));
+        if (form.avatarMode === 'upload' && avatarFile) await uploadAvatar(created.id, avatarFile);
+        setShowCreate(false);
+        resetForm();
+      },
       onError: () => toast.error(t('musicBots.toast.botCreateFailed')),
     });
   };
 
   const handleUpdate = () => {
     if (!editBot) return;
+    const newUpload = form.avatarMode === 'upload' && avatarFile;
     updateBot.mutate({ id: editBot.id, data: {
       name: form.name,
       nickname: form.nickname,
@@ -564,13 +608,23 @@ function BotsTab() {
       voicePort: form.voicePort,
       volume: form.volume,
       autoStart: form.autoStart,
+      // A new upload switches the bot to it by itself.
+      ...(!newUpload && { avatarMode: form.avatarMode }),
     }}, {
-      onSuccess: () => { toast.success(t('musicBots.toast.botUpdated')); setEditBot(null); },
+      onSuccess: async () => {
+        if (newUpload && !(await uploadAvatar(editBot.id, avatarFile))) return;
+        toast.success(t('musicBots.toast.botUpdated'));
+        setEditBot(null);
+        setAvatarFile(null);
+      },
       onError: () => toast.error(t('musicBots.toast.botUpdateFailed')),
     });
   };
 
-  const resetForm = () => setForm({ name: '', serverConfigId: '', nickname: 'MusicBot', serverPassword: '', defaultChannel: '', channelPassword: '', voicePort: 9987, volume: 50, autoStart: false });
+  const resetForm = () => {
+    setForm({ name: '', serverConfigId: '', nickname: 'MusicBot', serverPassword: '', defaultChannel: '', channelPassword: '', voicePort: 9987, volume: 50, autoStart: false, avatarMode: 'default' });
+    setAvatarFile(null);
+  };
 
   return (
     <div className="space-y-4">
@@ -600,7 +654,9 @@ function BotsTab() {
                   voicePort: bot.voicePort ?? 9987,
                   volume: bot.volume,
                   autoStart: bot.autoStart,
+                  avatarMode: bot.avatarMode ?? 'none',
                 });
+                setAvatarFile(null);
                 setEditBot(bot);
               }}
               onDelete={() => setDeleteId(bot.id)}
@@ -660,10 +716,21 @@ function BotsTab() {
               <Switch checked={form.autoStart} onCheckedChange={(v) => setForm({ ...form, autoStart: v })} />
               <Label className="text-xs">{t('musicBots.botForm.autoStart')}</Label>
             </div>
+            <BotAvatarField
+              botId={editBot?.id ?? null}
+              mode={form.avatarMode}
+              onModeChange={(avatarMode) => setForm({ ...form, avatarMode })}
+              file={avatarFile}
+              onFileChange={setAvatarFile}
+              uploaded={!!editBot?.avatarUploaded}
+              savedMode={editBot ? (editBot.avatarMode ?? 'none') : null}
+              status={editState?.avatarStatus ?? editBot?.avatarStatus ?? null}
+              running={!!editBot && editBot.status !== 'stopped' && editBot.status !== 'error'}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowCreate(false); setEditBot(null); }}>{t('musicBots.common.cancel')}</Button>
-            <Button onClick={editBot ? handleUpdate : handleCreate} disabled={!form.name || (!editBot && !form.serverConfigId) || createBot.isPending || updateBot.isPending}>
+            <Button onClick={editBot ? handleUpdate : handleCreate} disabled={!form.name || (!editBot && !form.serverConfigId) || avatarIncomplete || createBot.isPending || updateBot.isPending || savingAvatar}>
               {editBot ? t('musicBots.common.save') : t('musicBots.common.create')}
             </Button>
           </DialogFooter>
