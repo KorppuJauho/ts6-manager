@@ -2,6 +2,21 @@
 
 export type VoiceBotStatus = 'stopped' | 'starting' | 'connected' | 'playing' | 'paused' | 'error';
 
+/** Upload: the bot's own picture. Default: the bundled app icon. None: no avatar. */
+export type BotAvatarMode = 'upload' | 'default' | 'none';
+
+/** Why TeamSpeak did not take the avatar. */
+export type BotAvatarFailure = 'noPermission' | 'tooBig' | 'transfer' | 'missingFile' | 'error';
+
+/** What became of the bot's avatar on its current connection. */
+export interface BotAvatarStatus {
+  state: 'pending' | 'applied' | 'cleared' | 'failed';
+  reason?: BotAvatarFailure;
+  /** The server's or the system's own words, for the log-minded. */
+  detail?: string;
+  at: string;
+}
+
 export interface MusicBotSummary {
   id: number;
   name: string;
@@ -14,6 +29,11 @@ export interface MusicBotSummary {
   voicePort: number;
   volume: number;
   autoStart: boolean;
+  avatarMode: BotAvatarMode;
+  /** Whether an upload is stored, to show or switch back to. */
+  avatarUploaded: boolean;
+  /** Null until the bot has connected since the backend started. */
+  avatarStatus: BotAvatarStatus | null;
   status: VoiceBotStatus;
   nowPlaying: QueueItemInfo | null;
   createdAt: string;
@@ -34,6 +54,8 @@ export interface CreateMusicBotRequest {
   voicePort?: number;
   volume?: number;
   autoStart?: boolean;
+  /** "default" when left out. An upload follows creation as its own request. */
+  avatarMode?: Exclude<BotAvatarMode, 'upload'>;
 }
 
 export interface UpdateMusicBotRequest {
@@ -45,6 +67,8 @@ export interface UpdateMusicBotRequest {
   voicePort?: number;
   volume?: number;
   autoStart?: boolean;
+  /** "upload" only switches back to the bot's stored upload. */
+  avatarMode?: BotAvatarMode;
 }
 
 // === Song Types ===
@@ -84,6 +108,7 @@ export interface PlaybackState {
   shuffle: boolean;
   repeat: RepeatMode;
   isStreaming?: boolean;
+  avatarStatus?: BotAvatarStatus | null;
 }
 
 // === Playlist Types ===

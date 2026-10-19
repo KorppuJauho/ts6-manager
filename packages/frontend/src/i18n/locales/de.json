@@ -1202,6 +1202,41 @@
       "volume": "Lautstärke ({{n}} %)",
       "autoStart": "Automatisch beim Serverstart starten"
     },
+    "avatar": {
+      "label": "Avatar",
+      "modes": {
+        "upload": "Hochladen",
+        "default": "Standard verwenden",
+        "none": "Keiner"
+      },
+      "choose": "Bild auswählen…",
+      "replace": "Anderes Bild auswählen…",
+      "hint": "PNG, JPEG oder GIF, höchstens 200 KB. Ist das Bild größer, erhält TeamSpeak eine auf 300×300 verkleinerte Kopie.",
+      "noAvatar": "Kein Avatar",
+      "cardFailed": "Avatar abgelehnt",
+      "uploadFailed": "Der Avatar wurde nicht gespeichert.",
+      "state": {
+        "pending": "Avatar wird zu TeamSpeak hochgeladen…",
+        "applied": "TeamSpeak zeigt diesen Avatar.",
+        "cleared": "TeamSpeak zeigt für diesen Bot keinen Avatar.",
+        "offline": "Wird übernommen, sobald der Bot verbunden ist."
+      },
+      "failed": {
+        "noPermission": "TeamSpeak hat den Avatar abgelehnt: Die Servergruppe des Bots darf keine Dateien oder Avatare hochladen. Erteilen Sie die Berechtigung und speichern Sie erneut oder starten Sie den Bot neu. Der Bot bleibt ohne Avatar verbunden.",
+        "tooBig": "TeamSpeak hat den Avatar abgelehnt: Er ist größer, als die Servergruppe des Bots hochladen darf (Berechtigung „maximale Avatar-Dateigröße“; 0 erlaubt keinen Avatar). Erhöhen Sie das Limit oder laden Sie ein kleineres Bild hoch. Der Bot bleibt ohne Avatar verbunden.",
+        "transfer": "Der Avatar konnte nicht an den Dateitransfer-Port von TeamSpeak gesendet werden. Prüfen Sie, ob das Backend den Dateitransfer-Port des Servers erreicht (standardmäßig 30033).",
+        "missingFile": "Die gespeicherte Avatar-Datei fehlt. Laden Sie das Bild erneut hoch.",
+        "error": "TeamSpeak hat den Avatar nicht übernommen."
+      },
+      "refused": {
+        "empty": "Die Datei ist leer.",
+        "tooBig": "Der Avatar darf höchstens 200 KB groß sein.",
+        "notImage": "Der Avatar muss ein PNG-, JPEG- oder GIF-Bild sein.",
+        "unreadable": "Das Bild konnte nicht gelesen werden.",
+        "tooBigAfterResize": "Der Avatar ist auch auf 300×300 verkleinert noch größer als 200 KB. Versuchen Sie ein kleineres Bild.",
+        "resizeFailed": "Der Avatar konnte nicht verkleinert werden. Versuchen Sie ein anderes Bild."
+      }
+    },
     "deleteBot": {
       "title": "Musik-Bot löschen?",
       "description": "Dadurch wird dieser Musik-Bot dauerhaft gelöscht und vom Server getrennt."

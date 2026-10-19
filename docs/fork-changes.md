@@ -1128,6 +1128,56 @@ within the same second and runs; a clip with audio is unchanged. The silence
 does not end, so like a source whose video has ended, the stream stays open
 until it is stopped.
 
+### Bot avatars
+
+| | |
+|---|---|
+| Commit | `feat: bot avatars: an upload, the app icon, or none` |
+| Files | `voice/bot-avatar.ts`, `voice/tslib/filetransfer.ts`, `voice/voice-bot.ts`, `voice/voice-bot-manager.ts`, `routes/music-bots.routes.ts`, `schema.prisma` (`MusicBot.avatarMode`, `avatarFile`, `avatarMd5`), `components/music/BotAvatarField.tsx`, `pages/MusicBots.tsx` |
+
+A bot's settings have Avatar → Upload, Use default (the app icon) or None.
+Bots created in the UI start with the app icon; bots that existed before
+start with none (the column's default in `db push`), so an upgrade changes
+nothing anyone sees.
+
+An upload is a PNG, JPEG or GIF of at most 200 KB (the stock "max avatar file
+size"), recognised by its bytes, never by its name or the browser's type. The
+server checks only the size of an avatar, but TeamSpeak 6 clients show one
+larger than about 320×320 as blank, so a larger upload is shrunk to fit inside
+300×300 with the FFmpeg already in the image, shape kept; a GIF keeps its
+frames and timing. The original and the TeamSpeak copy are kept in
+`data/bot-avatars/` (the backend's volume), named by the bot id only; the web
+UI shows the original.
+
+The bot had no file transfer, so `tslib/filetransfer.ts` adds it: the request
+goes over the command connection with a `return_code`, and the bytes over TCP
+to the port the server names. On every connect, and whenever the setting
+changes, the bot uploads the file as `/avatar` in the server's own files and
+sets `client_flag_avatar` to its MD5, then waits for the server to confirm
+both. The connect does not wait for any of it, and a refusal never ends the
+connection: the outcome is the bot's avatar status, which the settings and the
+bot's card show. None clears the flag.
+
+Checked against TeamSpeak 6.0.0-beta13 with the bot's own code and a second
+client:
+
+| Case | What the server does |
+|---|---|
+| Upload as `/avatar`, overwrite | Accepted; stored as `/avatar_<the identity's bytes as letters a-p>`, other clients see the new flag |
+| Group's max avatar file size 0 | 2565 "invalid size", as `notifystatusfiletransfer` |
+| `ftdeletefile` on the bot's own avatar | 1540 "convert error", even with every file transfer permission granted |
+| `client_base64HashClientUID` | Not sent; the file name is worked out from `client_unique_identifier` |
+
+So on TeamSpeak 6 a removed avatar's file stays on the server and None works
+by clearing the flag, which is what clients follow; the bot still asks for the
+delete and logs the refusal.
+
+The file transfer connection goes to the server's host at the port the server
+names (30033 unless the server is configured otherwise). A TeamSpeak container
+that publishes its file transfer port under another number cannot be reached
+that way; publish it unchanged, or let the backend reach the server on their
+shared network.
+
 ## Fixes to coom's changes (fork only)
 
 This fork builds on [coom/ts6-manager](https://github.com/coom/ts6-manager),

@@ -50,6 +50,8 @@ and what to preserve when merging upstream, are in
 - **Bot language:** replies in English, Finnish, French, German, Spanish or
   Italian, chosen separately from the UI language.
 - The bot's nickname shows what it is streaming (`Boten Anna - Streaming 'MTV3'`).
+- **Bot avatars:** upload one (PNG, JPEG or GIF up to 200 KB, shrunk to fit
+  300×300 for TeamSpeak), use the app icon, or none.
 - Radio stations are listed by id, the number `!radio <id>` takes.
 
 **Deployment**
@@ -250,6 +252,12 @@ the query configuration. See
 **Hardware encoding stopped after an upgrade:** from a version that predates
 the streaming settings, it is off until re-enabled in Settings → Streaming.
 See [`docs/deploying.md`](docs/deploying.md).
+
+**A bot's avatar is refused** (its settings say why; the bot stays connected
+without one): the bot's server group needs a "max avatar file size" above 0
+(stock 200 KB), and the backend must reach the server's file transfer port,
+30033 by default, under that same number. See "Bot avatars" in
+[`docs/fork-changes.md`](docs/fork-changes.md).
 
 ## License
 

@@ -1202,6 +1202,41 @@
       "volume": "Volumen ({{n}} %)",
       "autoStart": "Inicio automático al arrancar el servidor"
     },
+    "avatar": {
+      "label": "Avatar",
+      "modes": {
+        "upload": "Subir",
+        "default": "Usar el predeterminado",
+        "none": "Ninguno"
+      },
+      "choose": "Elegir imagen…",
+      "replace": "Elegir otra imagen…",
+      "hint": "PNG, JPEG o GIF, hasta 200 KB. Si es más grande, TeamSpeak recibe una copia reducida a 300×300.",
+      "noAvatar": "Sin avatar",
+      "cardFailed": "Avatar rechazado",
+      "uploadFailed": "El avatar no se guardó.",
+      "state": {
+        "pending": "Subiendo el avatar a TeamSpeak…",
+        "applied": "TeamSpeak muestra este avatar.",
+        "cleared": "TeamSpeak no muestra ningún avatar para este bot.",
+        "offline": "Se aplicará cuando el bot se conecte."
+      },
+      "failed": {
+        "noPermission": "TeamSpeak rechazó el avatar: el grupo de servidor del bot no puede subir archivos ni avatares. Concede el permiso y vuelve a guardar o reinicia el bot. El bot sigue conectado sin avatar.",
+        "tooBig": "TeamSpeak rechazó el avatar: supera lo que el grupo de servidor del bot puede subir (permiso «tamaño máximo del avatar»; 0 no permite ningún avatar). Aumenta el límite o sube una imagen más pequeña. El bot sigue conectado sin avatar.",
+        "transfer": "No se pudo enviar el avatar al puerto de transferencia de archivos de TeamSpeak. Comprueba que el backend llega a ese puerto del servidor (30033 por defecto).",
+        "missingFile": "Falta el archivo del avatar guardado. Vuelve a subir la imagen.",
+        "error": "TeamSpeak no aceptó el avatar."
+      },
+      "refused": {
+        "empty": "El archivo está vacío.",
+        "tooBig": "El avatar debe ocupar como máximo 200 KB.",
+        "notImage": "El avatar debe ser una imagen PNG, JPEG o GIF.",
+        "unreadable": "No se pudo leer la imagen.",
+        "tooBigAfterResize": "El avatar sigue superando los 200 KB tras reducirlo a 300×300. Prueba con una imagen más pequeña.",
+        "resizeFailed": "No se pudo redimensionar el avatar. Prueba con otra imagen."
+      }
+    },
     "deleteBot": {
       "title": "¿Eliminar el bot de música?",
       "description": "Esto eliminará permanentemente este bot de música y lo desconectará del servidor."

@@ -1202,6 +1202,41 @@
       "volume": "Volume ({{n}}%)",
       "autoStart": "Auto-start on server startup"
     },
+    "avatar": {
+      "label": "Avatar",
+      "modes": {
+        "upload": "Upload",
+        "default": "Use default",
+        "none": "None"
+      },
+      "choose": "Choose image…",
+      "replace": "Choose another image…",
+      "hint": "PNG, JPEG or GIF, up to 200 KB. TeamSpeak gets a copy shrunk to fit 300×300 when it is larger.",
+      "noAvatar": "No avatar",
+      "cardFailed": "Avatar refused",
+      "uploadFailed": "The avatar was not saved.",
+      "state": {
+        "pending": "Uploading the avatar to TeamSpeak…",
+        "applied": "TeamSpeak shows this avatar.",
+        "cleared": "TeamSpeak shows no avatar for this bot.",
+        "offline": "Applied when the bot connects."
+      },
+      "failed": {
+        "noPermission": "TeamSpeak refused the avatar: the bot's server group may not upload files or avatars. Grant the permission, then save again or restart the bot. The bot stays connected without an avatar.",
+        "tooBig": "TeamSpeak refused the avatar: it is larger than the bot's server group may upload (the \"max avatar file size\" permission; 0 allows no avatar). Raise the limit or upload a smaller image. The bot stays connected without an avatar.",
+        "transfer": "The avatar could not be sent to TeamSpeak's file transfer port. Check that the backend reaches the server's file transfer port (30033 by default).",
+        "missingFile": "The stored avatar file is missing. Upload the image again.",
+        "error": "TeamSpeak did not take the avatar."
+      },
+      "refused": {
+        "empty": "The file is empty.",
+        "tooBig": "The avatar must be at most 200 KB.",
+        "notImage": "The avatar must be a PNG, JPEG or GIF image.",
+        "unreadable": "The image could not be read.",
+        "tooBigAfterResize": "The avatar is still over 200 KB after shrinking it to 300×300. Try a smaller image.",
+        "resizeFailed": "The avatar could not be resized. Try another image."
+      }
+    },
     "deleteBot": {
       "title": "Delete Music Bot?",
       "description": "This will permanently delete this music bot and disconnect it from the server."
