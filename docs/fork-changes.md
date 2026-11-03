@@ -1283,7 +1283,7 @@ retry loop, and the log names the fix.
 
 | | |
 |---|---|
-| Commit | `perf(voice): drop the native Opus encoder, warm up the WebAssembly one` |
+| Commits | `perf(voice): drop the native Opus encoder, warm up the WebAssembly one`, `fix(deps): move eslint's minimatch to 11` |
 | Files | `voice/audio/pipeline.ts`, `index.ts`, `packages/backend/package.json`, root `package.json` (`pnpm.overrides`), `Dockerfile.backend` |
 
 coom made `@discordjs/opus` an optional dependency and preferred it over
@@ -1313,7 +1313,12 @@ first real frame took 4.5 ms with no warm-up, 0.6–0.8 ms after zeros and
 0.15 ms, the steady-state cost, after the tone.
 
 With the module gone two overrides matched nothing and were removed, `tar`
-and `brace-expansion@1`, both reached only through its tooling.
+and `brace-expansion@1`, both reached only through its tooling. The remaining
+`minimatch`, 10.2.5, came through eslint, `@eslint/config-array` and
+`@typescript-eslint/typescript-estree`, dev only; the advisory is fixed only in
+11, so an override (`"minimatch@10": "^11.0.4"`) moves them to it. eslint 10
+and typescript-eslint 8 run with it: `pnpm lint` reported violations planted in
+a backend and a frontend file, and still skips `dist/` and `generated/`.
 
 The Docker images keep `python3` and `build-essential`, because `ssh2` and
 `cpu-features` still compile at install time. Only the backend build stage's
