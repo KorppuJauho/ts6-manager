@@ -353,7 +353,7 @@ enforced instead.
 |---|---|---|
 | Radio stations ordered by id | `fix(bot): list radio stations…` | `!radio <id>` means ids are what users type; alphabetical order renumbered them on every insert |
 | Uploaded song names read as UTF-8 | `fix(music): read uploaded file names as UTF-8` | multer decodes multipart file names as latin1 unless told otherwise, so a browser's `Björk - Jóga.flac` became artist `BjÃ¶rk`, title `JÃ³ga`. Songs uploaded before the fix keep the names they were saved with |
-| `python3` + `build-essential` in base images | `build(docker): install a native-module toolchain…` | node-gyp builds `@discordjs/opus`, `cpu-features`, `ssh2` at install time |
+| `python3` + `build-essential` in base images | `build(docker): install a native-module toolchain…` | node-gyp builds `cpu-features` and `ssh2`'s crypto binding at install time |
 | `docker-compose.coolify.yml` removed | `chore(compose): remove the Coolify compose file…` | It ran upstream's Docker Hub images with no sidecar and no `SIDECAR_TOKEN`, and pinned one install's Coolify network ID; nobody deploys this fork on Coolify to keep it working |
 | `docker-compose.hub.yml` and `docker-compose.dev.yml` removed | `chore: remove upstream's Docker Hub compose files…` | Both ran clusterzx's Docker Hub images (`clusterzx/ts6-manager:backend`, `:backend-dev`), so a deployment using either ran upstream's code with none of this fork in it. `docker-compose.yml` builds this fork and `docker-compose.ghcr.yml` runs its CI images |
 | Translated READMEs removed | same commit | `README.{fr,de,es,it}.md` described `coom/ts6-manager` and none of this fork, and linked the removed Docker Hub compose file. The web UI keeps its five languages; only the READMEs went |
@@ -1278,6 +1278,47 @@ any SSH credential change, reopens that server's sessions straight away.
 Saving the form with the SSH fields unchanged does not.
 A key that changes on its own is still refused, as a fatal error with no
 retry loop, and the log names the fix.
+
+### The native Opus encoder, removed
+
+| | |
+|---|---|
+| Commit | `perf(voice): drop the native Opus encoder, warm up the WebAssembly one` |
+| Files | `voice/audio/pipeline.ts`, `index.ts`, `packages/backend/package.json`, root `package.json` (`pnpm.overrides`), `Dockerfile.backend` |
+
+coom made `@discordjs/opus` an optional dependency and preferred it over
+opusscript, the WebAssembly build of the same libopus, on the strength of a
+comment that the native binding encodes "~5-10x faster". Measured on
+2026-11-03 (Node 22, a container limited to one CPU, this fork's settings:
+48 kHz stereo, 96 kbps hard CBR, music signal, complexity 5), the gap is about
+1.5×: 0.53–0.64% of one core per playing bot for opusscript against 0.39%
+native. That is not worth what the module costs. Its install step downloads a
+prebuilt binary from outside npm, or compiles libopus where there is none, and
+its install-time tooling (`@discordjs/node-pre-gyp` → `rimraf` 3 → `glob` 7)
+was the only path to `minimatch` 3, which Dependabot reported as a runtime
+dependency (GHSA-g3hv-75wg-m249).
+
+What native did better was the start. opusscript instantiates its WASM module
+once per process and V8 compiles each function the first time it is called.
+In the backend image (Node 22, one CPU) the first encoder in a process took
+5–50 ms to create and its first frame about 4 ms, against 0.13–0.17 ms per
+frame afterwards. The benchmark's single 58–74 ms frame was probably the two
+measured together. `warmUpOpusEncoder()` runs at startup, before any bot is
+created, and encodes 1.5 s on a throwaway encoder, which takes 26–70 ms on one
+CPU. After it, creating an encoder and its first frame each take about
+0.2 ms. The input is a quiet tone, not zeros: libopus recognises digital silence and
+skips most of the encoder, so a warm-up on zeros leaves those functions to
+compile during the first real frame. On a desktop (Node 24, no CPU limit) the
+first real frame took 4.5 ms with no warm-up, 0.6–0.8 ms after zeros and
+0.15 ms, the steady-state cost, after the tone.
+
+With the module gone two overrides matched nothing and were removed, `tar`
+and `brace-expansion@1`, both reached only through its tooling.
+
+The Docker images keep `python3` and `build-essential`, because `ssh2` and
+`cpu-features` still compile at install time. Only the backend build stage's
+second `build-essential` layer, added for libopus and already covered by the
+base stage, went.
 
 ## Open follow-ups
 

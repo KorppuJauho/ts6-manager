@@ -53,6 +53,10 @@ and what to preserve when merging upstream, are in
 - **Bot avatars:** upload one (PNG, JPEG or GIF up to 200 KB, shrunk to fit
   300×300 for TeamSpeak), use the app icon, or none.
 - Radio stations are listed by id, the number `!radio <id>` takes.
+- Audio is encoded by opusscript (libopus as WebAssembly) only; the native
+  Opus module, with its install-time binary download, is gone. opusscript
+  measured about 1.5× its CPU, not the 5–10× once claimed, and is warmed up
+  at start so the first song does not stutter.
 
 **Deployment**
 - **Prebuilt images** on GHCR for every branch and commit

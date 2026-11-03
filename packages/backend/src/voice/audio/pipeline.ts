@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from "child_process";
 import type { Readable } from "stream";
-import { createRequire } from "module";
 import OpusScript from "opusscript";
 import { validateUrl } from "../../utils/url-validator.js";
 
@@ -11,7 +10,7 @@ export const BYTES_PER_FRAME = FRAME_SIZE * CHANNELS * 2; // 16-bit = 2 bytes pe
 export const FRAME_MS = 20;
 const BITRATE = 96000;
 
-// Both encoders wrap libopus, so the CTL constants are shared
+// libopus CTL request codes (opus_defines.h)
 const OPUS_SET_COMPLEXITY = 4010;
 const OPUS_SET_VBR = 4006;
 const OPUS_SET_VBR_CONSTRAINT = 4020;
@@ -35,15 +34,57 @@ const OPUS_COMPLEXITY = ((): number => {
 // ffmpeg. Override with FFMPEG_THREADS only if you have a reason to.
 const FFMPEG_THREADS = process.env.FFMPEG_THREADS || '0';
 
-// Native libopus bindings encode ~5-10x faster than the opusscript WASM
-// build — that matters at one frame every 20ms on a small VM. Optional:
-// platforms without a prebuild fall back to WASM below.
-const require = createRequire(import.meta.url);
-let NativeOpusEncoder: any = null;
-try {
-  NativeOpusEncoder = require("@discordjs/opus").OpusEncoder;
-} catch {
-  NativeOpusEncoder = null;
+// opusscript is libopus compiled to WebAssembly. Measured at complexity 5 it
+// costs about 0.5-0.65% of one core per playing bot, roughly 1.5x a native
+// libopus binding — not enough to justify a native module that downloads a
+// prebuilt binary at install time or compiles from source without one.
+function createOpusEncoder(): OpusScript {
+  const encoder = new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.AUDIO);
+  encoder.setBitrate(BITRATE);
+  // Hard CBR (reduces spikes); constraint harmless under CBR
+  encoder.encoderCTL(OPUS_SET_VBR, 0);
+  encoder.encoderCTL(OPUS_SET_VBR_CONSTRAINT, 1);
+  // Tell encoder it's music (helps tuning)
+  encoder.encoderCTL(OPUS_SET_SIGNAL, OPUS_SIGNAL_MUSIC);
+  // Lower complexity to keep real-time pacing on small/contended VMs
+  encoder.encoderCTL(OPUS_SET_COMPLEXITY, OPUS_COMPLEXITY);
+  return encoder;
+}
+
+// 1.5 s of audio, encoded once and thrown away.
+export const WARMUP_FRAMES = 75;
+let warmedUp = false;
+
+/**
+ * Run the WebAssembly encoder once before any bot plays. opusscript
+ * instantiates one WASM module per process, and V8 compiles its functions as
+ * they are first called. In the backend image on one CPU, the first encoder
+ * in a process took 5-50 ms to create and its first frame ~4 ms, against
+ * ~0.15 ms per frame afterwards; after this warm-up both take ~0.2 ms.
+ *
+ * The input is a quiet 440 Hz tone (about -54 dBFS), not zeros: libopus takes
+ * a shortcut on digital silence that skips most of the encoder, and those
+ * functions would then still compile during the first real frame.
+ */
+export function warmUpOpusEncoder(): void {
+  if (warmedUp) return;
+  warmedUp = true;
+  let encoder: OpusScript | undefined;
+  try {
+    encoder = createOpusEncoder();
+    const pcm = Buffer.alloc(BYTES_PER_FRAME);
+    for (let n = 0; n < WARMUP_FRAMES; n++) {
+      for (let i = 0; i < FRAME_SIZE; i++) {
+        const v = Math.round(64 * Math.sin((2 * Math.PI * 440 * (n * FRAME_SIZE + i)) / SAMPLE_RATE));
+        for (let c = 0; c < CHANNELS; c++) pcm.writeInt16LE(v, (i * CHANNELS + c) * 2);
+      }
+      encoder.encode(pcm, FRAME_SIZE);
+    }
+  } catch (err: any) {
+    console.warn(`[audio] Opus encoder warm-up failed: ${err.message}`);
+  } finally {
+    encoder?.delete();
+  }
 }
 
 export class AudioPipeline {
@@ -56,33 +97,8 @@ export class AudioPipeline {
   }
 
   private createEncoder(): (pcm: Buffer) => Buffer {
-    if (NativeOpusEncoder) {
-      try {
-        const encoder = new NativeOpusEncoder(SAMPLE_RATE, CHANNELS);
-        encoder.setBitrate(BITRATE);
-        // Hard CBR (reduces spikes); constraint harmless under CBR
-        encoder.applyEncoderCTL(OPUS_SET_VBR, 0);
-        encoder.applyEncoderCTL(OPUS_SET_VBR_CONSTRAINT, 1);
-        // Tell encoder it's music (helps tuning)
-        encoder.applyEncoderCTL(OPUS_SET_SIGNAL, OPUS_SIGNAL_MUSIC);
-        // Lower complexity to keep real-time pacing on small/contended VMs
-        encoder.applyEncoderCTL(OPUS_SET_COMPLEXITY, OPUS_COMPLEXITY);
-        console.log(`[audio] Using native opus encoder (@discordjs/opus), complexity=${OPUS_COMPLEXITY}`);
-        return (pcm) => encoder.encode(pcm);
-      } catch (err: any) {
-        console.warn(`[audio] Native opus encoder failed to initialize (${err.message}), falling back to WASM`);
-      }
-    } else {
-      console.warn("[audio] @discordjs/opus unavailable, using opusscript (WASM) — higher CPU usage");
-    }
-
-    const encoder = new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.AUDIO);
-    encoder.setBitrate(BITRATE);
-    encoder.encoderCTL(OPUS_SET_VBR, 0);
-    encoder.encoderCTL(OPUS_SET_VBR_CONSTRAINT, 1);
-    encoder.encoderCTL(OPUS_SET_SIGNAL, OPUS_SIGNAL_MUSIC);
-    encoder.encoderCTL(OPUS_SET_COMPLEXITY, OPUS_COMPLEXITY);
-    console.log(`[audio] Using opusscript (WASM) encoder — higher CPU; complexity=${OPUS_COMPLEXITY}`);
+    const encoder = createOpusEncoder();
+    console.log(`[audio] Using opusscript (WASM) encoder, complexity=${OPUS_COMPLEXITY}`);
     return (pcm) => {
       const encoded = encoder.encode(pcm, FRAME_SIZE);
       return Buffer.isBuffer(encoded) ? encoded : Buffer.from(encoded);
