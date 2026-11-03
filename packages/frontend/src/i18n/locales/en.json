@@ -209,7 +209,19 @@
         "toastSaveFailed": "Failed to save"
       },
       "requireMfa": "Require MFA (enroll at first login)",
-      "mustChangePassword": "Change password at next logon"
+      "mustChangePassword": "Change password at next logon",
+      "colServers": "Servers",
+      "allServers": "All servers",
+      "serverCount_one": "{{count}} server",
+      "serverCount_other": "{{count}} servers",
+      "serverAccessTitle": "Choose which servers this viewer can see",
+      "serverAccess": "Servers this viewer can see",
+      "serverAccessDialogTitle": "Server access for {{user}}",
+      "serverAccessHint": "A viewer sees the music requests of these servers. Admins see every server.",
+      "saveAccess": "Save",
+      "noServers": "No servers yet. Add one under Settings → Servers.",
+      "toastAccessSaved": "Server access saved",
+      "toastAccessFailed": "Could not save server access"
     },
     "youtube": {
       "title": "YouTube Cookies",

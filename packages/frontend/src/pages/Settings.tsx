@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
@@ -451,13 +452,17 @@ function UsersTab() {
   const createUser = useMutation({ mutationFn: (data: any) => usersApi.create(data), onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }) });
   const updateUser = useMutation({ mutationFn: ({ id, data }: { id: number; data: any }) => usersApi.update(id, data), onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }) });
   const deleteUser = useMutation({ mutationFn: (id: number) => usersApi.delete(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }) });
+  const { data: servers } = useQuery({ queryKey: ['servers'], queryFn: serversApi.list });
+  const serverList = useMemo(() => (Array.isArray(servers) ? servers : []), [servers]);
 
   const [showAdd, setShowAdd] = useState(false);
+  const [accessUserId, setAccessUserId] = useState<number | null>(null);
+  const [accessIds, setAccessIds] = useState<number[]>([]);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [resetPwUserId, setResetPwUserId] = useState<number | null>(null);
   const [resetPwValue, setResetPwValue] = useState('');
   const [resetPwMustChange, setResetPwMustChange] = useState(false);
-  const emptyForm = { username: '', password: '', displayName: '', role: 'viewer', mfaRequired: false, mustChangePassword: false };
+  const emptyForm = { username: '', password: '', displayName: '', role: 'viewer', mfaRequired: false, mustChangePassword: false, serverIds: [] as number[] };
   const [form, setForm] = useState(emptyForm);
 
   const userList = useMemo(() => (Array.isArray(users) ? users : []), [users]);
@@ -465,7 +470,7 @@ function UsersTab() {
   if (isLoading) return <PageLoader />;
 
   const handleCreate = () => {
-    createUser.mutate(form, {
+    createUser.mutate({ ...form, serverIds: form.role === 'viewer' ? form.serverIds : [] }, {
       onSuccess: () => { toast.success(t('settings.users.toastCreated')); setShowAdd(false); setForm(emptyForm); },
       onError: () => toast.error(t('settings.users.toastCreateFailed')),
     });
@@ -499,6 +504,19 @@ function UsersTab() {
     });
   };
 
+  const openAccess = (u: any) => {
+    setAccessUserId(u.id);
+    setAccessIds(Array.isArray(u.serverIds) ? u.serverIds : []);
+  };
+
+  const handleSaveAccess = () => {
+    if (!accessUserId) return;
+    updateUser.mutate({ id: accessUserId, data: { serverIds: accessIds } }, {
+      onSuccess: () => { toast.success(t('settings.users.toastAccessSaved')); setAccessUserId(null); },
+      onError: () => toast.error(t('settings.users.toastAccessFailed')),
+    });
+  };
+
   const handleResetPassword = () => {
     if (!resetPwUserId || resetPwValue.length < 6) {
       toast.error(t('settings.users.passwordMinError'));
@@ -528,6 +546,7 @@ function UsersTab() {
               <th className="h-10 px-3 text-left font-medium text-muted-foreground">{t('settings.users.colDisplayName')}</th>
               <th className="h-10 px-3 text-left font-medium text-muted-foreground">{t('settings.users.colRole')}</th>
               <th className="h-10 px-3 text-left font-medium text-muted-foreground">{t('settings.users.colStatus')}</th>
+              <th className="h-10 px-3 text-left font-medium text-muted-foreground">{t('settings.users.colServers')}</th>
               <th className="h-10 px-3 text-left font-medium text-muted-foreground">{t('settings.users.col2fa')}</th>
               <th className="h-10 px-3 text-right font-medium text-muted-foreground">{t('settings.users.colActions')}</th>
             </tr>
@@ -564,6 +583,15 @@ function UsersTab() {
                         checked={u.enabled}
                         onCheckedChange={(v) => handleToggleEnabled(u.id, v)}
                       />
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {u.role === 'admin' ? (
+                      <span className="text-xs text-muted-foreground">{t('settings.users.allServers')}</span>
+                    ) : (
+                      <Button variant="outline" size="sm" className="h-7 text-xs" title={t('settings.users.serverAccessTitle')} onClick={() => openAccess(u)}>
+                        {t('settings.users.serverCount', { count: (u.serverIds ?? []).length })}
+                      </Button>
                     )}
                   </td>
                   <td className="px-3 py-2.5">
@@ -614,6 +642,12 @@ function UsersTab() {
                 </SelectContent>
               </Select>
             </div>
+            {form.role === 'viewer' && (
+              <div>
+                <Label className="text-xs">{t('settings.users.serverAccess')}</Label>
+                <ServerChecklist servers={serverList} value={form.serverIds} onChange={(serverIds) => setForm({ ...form, serverIds })} />
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Switch checked={form.mfaRequired} onCheckedChange={(v) => setForm({ ...form, mfaRequired: v })} />
               <Label className="text-xs font-normal">{t('settings.users.requireMfa')}</Label>
@@ -626,6 +660,21 @@ function UsersTab() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAdd(false)}>{t('settings.users.cancel')}</Button>
             <Button onClick={handleCreate} disabled={!form.username || !form.password}>{t('settings.users.create')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Server Access Dialog */}
+      <Dialog open={accessUserId !== null} onOpenChange={(v) => { if (!v) setAccessUserId(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm">{t('settings.users.serverAccessDialogTitle', { user: userList.find((u: any) => u.id === accessUserId)?.username ?? '' })}</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">{t('settings.users.serverAccessHint')}</p>
+          <ServerChecklist servers={serverList} value={accessIds} onChange={setAccessIds} />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAccessUserId(null)}>{t('settings.users.cancel')}</Button>
+            <Button onClick={handleSaveAccess} disabled={updateUser.isPending}>{t('settings.users.saveAccess')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -666,6 +715,26 @@ function UsersTab() {
         onConfirm={() => { if (deleteId) deleteUser.mutate(deleteId, { onSuccess: () => { toast.success(t('settings.users.toastDeleted')); setDeleteId(null); } }); }}
         destructive
       />
+    </div>
+  );
+}
+
+/** Checkboxes for the servers a viewer may see. */
+function ServerChecklist({ servers, value, onChange }: { servers: any[]; value: number[]; onChange: (ids: number[]) => void }) {
+  const { t } = useTranslation();
+  if (servers.length === 0) return <p className="text-xs text-muted-foreground mt-1">{t('settings.users.noServers')}</p>;
+  return (
+    <div className="space-y-1.5 mt-1">
+      {servers.map((s: any) => (
+        <label key={s.id} className="flex items-center gap-2 text-xs cursor-pointer">
+          <Checkbox
+            checked={value.includes(s.id)}
+            onCheckedChange={(checked) => onChange(checked ? [...value, s.id] : value.filter((id) => id !== s.id))}
+          />
+          <span>{s.name}</span>
+          <span className="text-muted-foreground font-mono-data">{s.host}</span>
+        </label>
+      ))}
     </div>
   );
 }

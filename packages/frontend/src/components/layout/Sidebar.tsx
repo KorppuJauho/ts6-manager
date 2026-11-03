@@ -11,10 +11,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 const navSections = [
   {
     label: 'nav.music',
-    adminOnly: true,
     items: [
       { to: '/music-bots', icon: Music, label: 'nav.musicBots', adminOnly: true },
-      { to: '/music-requests', icon: ListMusic, label: 'nav.musicRequests', adminOnly: true },
+      { to: '/music-requests', icon: ListMusic, label: 'nav.musicRequests' },
     ],
   },
 ];

@@ -12,10 +12,10 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** The landing page: an admin's is the bots, a viewer's their account. */
+/** The landing page: an admin's is the bots, a viewer's the music requests. */
 function Home() {
   const isAdmin = useAuthStore((s) => s.isAdmin());
-  return <Navigate to={isAdmin ? '/music-bots' : '/settings'} replace />;
+  return <Navigate to={isAdmin ? '/music-bots' : '/music-requests'} replace />;
 }
 
 const queryClient = new QueryClient({
@@ -55,7 +55,7 @@ export function App() {
 
             <Route element={<AppLayout />}>
               <Route path="/" element={<Home />} />
-              <Route path="/music-requests" element={<AdminRoute><MusicRequests /></AdminRoute>} />
+              <Route path="/music-requests" element={<MusicRequests />} />
               <Route path="/music-bots" element={<AdminRoute><MusicBots /></AdminRoute>} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<NotFound />} />
