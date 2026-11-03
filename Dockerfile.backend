@@ -4,7 +4,7 @@ FROM node:22-slim AS base
 # The npm bundled with the Node image lags behind and prints upgrade notices
 # on every npx invocation at container start.
 RUN npm install -g npm@11 && corepack enable && corepack prepare pnpm@9 --activate
-# node-gyp builds native deps (@discordjs/opus, cpu-features, ssh2) during
+# node-gyp builds native deps (ssh2's crypto binding, cpu-features) during
 # pnpm install and needs a toolchain and python3 present in the base stage.
 RUN apt-get update && apt-get install -y --no-install-recommends python3 build-essential && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -28,17 +28,12 @@ ENV PATH="/opt/yt-dlp/bin:$PATH"
 WORKDIR /app
 
 FROM base AS build
-# Toolchain for native modules (@discordjs/opus compiles from source);
-# build stage only — the production stage copies the compiled node_modules.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Dependency layer: copy ONLY the workspace manifests + lockfile, then install.
-# This layer — which includes the slow native compilation of @discordjs/opus —
-# is cached by BuildKit and only re-runs when a package.json or the lockfile
-# changes, NOT on every source edit. (Previously a single `COPY . .` before the
-# install invalidated this on any file change, recompiling opus every build.)
+# This layer — which includes compiling the native modules — is cached by
+# BuildKit and only re-runs when a package.json or the lockfile changes, NOT on
+# every source edit. (Previously a single `COPY . .` before the install
+# invalidated this on any file change, recompiling them every build.)
 # Trailing-slash destinations are the BuildKit-safe form for copying a single
 # file into a nested path; node_modules is excluded via .dockerignore so the
 # later `COPY . .` never clobbers the installed (Linux-compiled) modules.

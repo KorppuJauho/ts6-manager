@@ -14,6 +14,7 @@ import { applyTrustProxy, loadTrustProxy } from './routes/settings.routes.js';
 import { loadSamlRuntime } from './auth/saml/saml-config.js';
 import { config } from './config.js';
 import { setYtCookieFile } from './voice/audio/youtube.js';
+import { warmUpOpusEncoder } from './voice/audio/pipeline.js';
 import { PlaylistImporter } from './voice/playlist-import.js';
 import jwt from 'jsonwebtoken';
 import fs from 'fs';
@@ -138,7 +139,9 @@ async function main() {
   app.locals.botEngine = botEngine;
   await botEngine.start();
 
-  // Initialize Voice Bot Manager (Music Bots)
+  // Initialize Voice Bot Manager (Music Bots). Warm the Opus encoder first, so
+  // the first song after a restart does not pay for compiling it.
+  warmUpOpusEncoder();
   const voiceBotManager = new VoiceBotManager(prisma, wss);
   app.locals.voiceBotManager = voiceBotManager;
   await voiceBotManager.start();

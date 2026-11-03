@@ -11,9 +11,6 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
-  "optionalDependencies": {
-    "@discordjs/opus": "^0.10.0"
-  },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
     "@node-saml/node-saml": "^5.1.0",
