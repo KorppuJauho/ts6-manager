@@ -27,7 +27,6 @@ import { musicLibraryRoutes } from './routes/music-library.routes.js';
 import { playlistRoutes } from './routes/playlists.routes.js';
 import { radioStationRoutes } from './routes/radio-stations.routes.js';
 import { musicRequestRoutes } from './routes/music-requests.routes.js';
-import { playerWidgetRoutes } from './routes/player-widget.routes.js';
 import { setupRoutes } from './routes/setup.routes.js';
 import { samlAuthRoutes } from './routes/saml-auth.routes.js';
 import { settingsRoutes } from './routes/settings.routes.js';
@@ -81,23 +80,10 @@ export function createApp(): Express {
   });
   app.use('/api', apiLimiter);
 
-  // Stricter limit on the unauthenticated player widget (slows token brute force)
-  const widgetLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many requests, please slow down' },
-  });
-  app.use('/api/widget', widgetLimiter);
-
   // Public routes
   app.use('/api/setup', setupRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/auth/saml', samlAuthRoutes);
-
-  // Public player widget (unauthenticated — embeddable on external sites)
-  app.use('/api/widget', playerWidgetRoutes);
 
   // Protected routes
   app.use('/api', authMiddleware);

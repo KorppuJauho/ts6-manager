@@ -4,7 +4,6 @@ import { requireRole } from '../middleware/rbac.js';
 import { AppError } from '../middleware/error-handler.js';
 import type { VoiceBotManager } from '../voice/voice-bot-manager.js';
 import { downloadYouTube } from '../voice/audio/youtube.js';
-import { playerWidgetToken } from './player-widget.routes.js';
 import {
   AVATAR_MAX_BYTES,
   IMAGE_MIME,
@@ -793,19 +792,5 @@ musicBotRoutes.post('/:id/stream/webrtc/ice', async (req: Request, res: Response
     const { candidate, sdpMid, sdpMLineIndex } = req.body;
     await bot.addWebRtcIceCandidate(candidate, sdpMid, sdpMLineIndex ?? 0);
     res.json({ success: true });
-  } catch (err) { next(err); }
-});
-
-// GET /:id/player-widget-token — Get the public player widget token for this bot
-musicBotRoutes.get('/:id/player-widget-token', async (req: Request, res: Response, next) => {
-  try {
-    const id = parseInt(req.params.id as string);
-    const token = playerWidgetToken(id);
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    res.json({
-      token,
-      jsonUrl: `${baseUrl}/api/widget/player/${id}/data?token=${token}`,
-      bbcodeUrl: `${baseUrl}/api/widget/player/${id}/bbcode?token=${token}`,
-    });
   } catch (err) { next(err); }
 });

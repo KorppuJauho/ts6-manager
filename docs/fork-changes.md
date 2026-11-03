@@ -1184,8 +1184,8 @@ shared network.
 | | |
 |---|---|
 | Commit | `refactor!: remove bot flows, SSH ServerQuery, Discord, the connection journal and server widgets` |
-| Backend | `bot-engine/`, `discord/`, `widget/`, `connection-journal.ts`, `utils/geo.ts`; routes `bots`, `discord`, `journal`, `widget`, `files`; `widget-public.routes.ts` is now `player-widget.routes.ts` |
-| Frontend | pages `BotList`, `BotEditor`, `Journal`, `WidgetPage`, `Files`; `components/bots`, `components/widget`, `data/bot-templates.ts`; the Discord settings tab, the journal-retention card, the Dashboard's widget button, the SSH fields under Settings → Connections |
+| Backend | `bot-engine/`, `discord/`, `widget/`, `connection-journal.ts`, `utils/geo.ts`; routes `bots`, `discord`, `journal`, `widget`, `widget-public`, `files` |
+| Frontend | pages `BotList`, `BotEditor`, `Journal`, `WidgetPage`, `Files`; `components/bots`, `components/widget`, `data/bot-templates.ts`; the Discord settings tab, the journal-retention card, the Dashboard's widget button, a bot card's player-widget button, the SSH fields under Settings → Connections |
 
 This fork is run for its music and video bot only. The manager's other half,
 administering the TeamSpeak server itself, is not used, and every part of it
@@ -1196,10 +1196,8 @@ The voice bot never depended on any of it. It receives chat commands on its
 own TS3 voice connection (`MusicCommandHandler.registerBot`), so `!play`,
 `!stream` and the rest work as before without SSH credentials.
 
-**Kept:** the music bot's player widget (`/api/widget/player/:botId/data`
-and `/bbcode`, the link button on a bot card). It reads the bot's own queue,
-needs no extra package, and keeps its URL and HMAC token, so links already
-pasted into channel descriptions still work.
+The music bot's player widget (now playing as JSON/BBCode under
+`/api/widget/player/`) went with the server widgets.
 
 **The Files page went in this step** rather than with the other server pages,
 because it listed files over the shared SSH session (`ft*` commands are not
