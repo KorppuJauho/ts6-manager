@@ -30,7 +30,6 @@ describe('bot message catalogues', () => {
       expect(m.nowPlaying('Artist', 'Title'), lang).toContain('Artist');
       expect(m.nowPlaying('Artist', 'Title'), lang).toContain('Title');
       expect(m.queued('Artist', 'Title', 3), lang).toContain('3');
-      expect(m.permissionDenied('DJ'), lang).toContain('DJ');
       expect(m.tvStarting('MTV 3'), lang).toContain('MTV 3');
     }
   });

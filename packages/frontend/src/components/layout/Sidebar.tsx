@@ -1,9 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import {
-  LayoutDashboard, Server, Hash, Users, Shield, ShieldCheck,
-  Lock, Ban, KeyRound, MessageSquareWarning, Mail,
-  ScrollText, Settings, Cpu, ChevronLeft, ChevronRight, Music, ListMusic,
-} from 'lucide-react';
+import { Settings, ChevronLeft, ChevronRight, Music, ListMusic } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui.store';
@@ -14,52 +10,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 
 const navSections = [
   {
-    label: 'nav.overview',
-    items: [
-      { to: '/dashboard', icon: LayoutDashboard, label: 'nav.dashboard' },
-      { to: '/servers', icon: Server, label: 'nav.virtualServers', adminOnly: true },
-    ],
-  },
-  {
-    label: 'nav.management',
-    items: [
-      { to: '/channels', icon: Hash, label: 'nav.channels' },
-      { to: '/clients', icon: Users, label: 'nav.clients' },
-      { to: '/server-groups', icon: Shield, label: 'nav.serverGroups', adminOnly: true },
-      { to: '/channel-groups', icon: ShieldCheck, label: 'nav.channelGroups', adminOnly: true },
-      { to: '/permissions', icon: Lock, label: 'nav.permissions', adminOnly: true },
-    ],
-  },
-  {
-    label: 'nav.security',
-    adminOnly: true,
-    items: [
-      { to: '/bans', icon: Ban, label: 'nav.bans', adminOnly: true },
-      { to: '/tokens', icon: KeyRound, label: 'nav.tokens', adminOnly: true },
-    ],
-  },
-  {
-    label: 'nav.content',
-    adminOnly: true,
-    items: [
-      { to: '/complaints', icon: MessageSquareWarning, label: 'nav.complaints', adminOnly: true },
-      { to: '/messages', icon: Mail, label: 'nav.messages', adminOnly: true },
-    ],
-  },
-  {
-    label: 'nav.system',
-    adminOnly: true,
-    items: [
-      { to: '/logs', icon: ScrollText, label: 'nav.serverLogs', adminOnly: true },
-      { to: '/instance', icon: Cpu, label: 'nav.instance', adminOnly: true },
-      { to: '/music-requests', icon: ListMusic, label: 'nav.musicRequests', adminOnly: true },
-    ],
-  },
-  {
-    label: 'nav.automation',
+    label: 'nav.music',
     adminOnly: true,
     items: [
       { to: '/music-bots', icon: Music, label: 'nav.musicBots', adminOnly: true },
+      { to: '/music-requests', icon: ListMusic, label: 'nav.musicRequests', adminOnly: true },
     ],
   },
 ];

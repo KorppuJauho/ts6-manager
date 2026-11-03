@@ -43,7 +43,7 @@ export default function Login() {
   const finish = (data: any) => {
     setAuth(data.accessToken, data.refreshToken, data.user);
     applyUserLanguage(data.user);
-    navigate('/dashboard');
+    navigate('/');
   };
 
   // Route any auth response to the right step: forced password change first,
@@ -102,7 +102,7 @@ export default function Login() {
     if (mfaState) navigate(location.pathname, { replace: true, state: null });
   }, [mfaState, navigate, location.pathname]);
 
-  if (isAuthenticated) return <Navigate to="/dashboard" replace />;
+  if (isAuthenticated) return <Navigate to="/" replace />;
 
   // Absolute backend URL for the SSO redirect (same origin/base as the axios instance).
   const ssoLoginUrl = `${api.defaults.baseURL?.replace(/\/$/, '')}/auth/saml/login`;

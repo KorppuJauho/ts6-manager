@@ -24,7 +24,7 @@ export default function SsoCallback() {
         if (res.accessToken) {
           setAuth(res.accessToken, res.refreshToken, res.user);
           applyUserLanguage(res.user);
-          navigate('/dashboard', { replace: true });
+          navigate('/', { replace: true });
         } else {
           // MFA required: hand off to the login page's MFA step via router state.
           navigate('/login', { replace: true, state: { mfa: res } });

@@ -1,33 +1,14 @@
 import type { PrismaClient } from '../../generated/prisma/index.js';
-import { VoiceBotManager } from './voice-bot-manager.js';
 import type { VoiceBot } from './voice-bot.js';
 import type { QueueItem } from './playlist/queue.js';
 import { downloadAndEnqueue, isSpotifyUrl, loadSpotifyConfig, enqueueSpotify, saveMusicRequest } from './music-ops.js';
 import { isYouTubePlaylistUrl } from './playlist-import-plan.js';
-import type { ConnectionPool } from '../ts-client/connection-pool.js';
-import type { WebQueryClient } from '../ts-client/webquery-client.js';
-import { requiredSgid, parseServerGroupIds, type MusicCommandAccessSettings } from './music-command-access.js';
 import { fetchLyrics, chunkLyrics, lyricsInputFromTrack } from './lyrics.js';
 import { loadTvChannels, matchChannel, sortChannelNames, type TvChannelMap, type TvSort } from './iptv.js';
 import { getStreamSettings, parseChannelFilter } from '../utils/stream-settings.js';
 import { messages, type BotMessages } from './bot-i18n/index.js';
 
 const CMD_PREFIX = '!';
-
-/**
- * Splits a command argument string into tokens, honouring single and double
- * quotes so channel/user names containing spaces can be passed as one token
- * (e.g. `!move "John Doe" "Salon de jeu"`). Unquoted runs split on whitespace.
- */
-function tokenizeArgs(input: string): string[] {
-  const tokens: string[] = [];
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(input)) !== null) {
-    tokens.push(m[1] ?? m[2] ?? m[3] ?? '');
-  }
-  return tokens;
-}
 
 /** Formats a number of seconds as m:ss (or h:mm:ss past an hour). */
 function formatTime(totalSeconds: number): string {
@@ -47,11 +28,10 @@ const MUSIC_COMMANDS = new Set([
   'vol', 'volume', 'np', 'nowplaying', 'queue', 'add',
   'stream', 'tv', 'stopstream', 'viewers',
   'lyrics',
-  'move', 'moveall', 'channels', 'notif',
   'help', 'info',
 ]);
 
-interface MusicCommandSettingsRow extends MusicCommandAccessSettings {
+interface MusicCommandSettingsRow {
   notifyNowPlaying: boolean;
   /** Language the bot replies in; see voice/bot-i18n. */
   language: string;
@@ -67,11 +47,8 @@ export class MusicCommandHandler {
   private registeredBots = new Set<number>();
   /** Bots with a "flood protection has cleared" message already scheduled. */
   private floodNotices = new Set<VoiceBot>();
-  // Maps a music bot to the virtual server id (sid) of the TS server it sits
-  // on, resolved once from its voice port via serveridgetbyport.
-  private sidCache = new Map<number, number>();
   // Short-lived cache of the global MusicCommandSettings row. WebUI edits are
-  // picked up within the TTL; !notif invalidates it immediately.
+  // picked up within the TTL.
   private settingsCache: { at: number; value: MusicCommandSettingsRow } | null = null;
   private static readonly SETTINGS_TTL_MS = 5000;
   // nowPlaying listeners, kept so they can be detached in unregisterBot.
@@ -82,11 +59,7 @@ export class MusicCommandHandler {
   /** Parsed IPTV playlist, loaded on first !tv and kept until `!tv reload`. */
   private tvChannels: TvChannelMap | null = null;
 
-  constructor(
-    private prisma: PrismaClient,
-    private voiceBotManager: VoiceBotManager,
-    private connectionPool: ConnectionPool,
-  ) {}
+  constructor(private prisma: PrismaClient) {}
 
   setPlaylistImporter(importer: import('./playlist-import.js').PlaylistImporter): void {
     this.playlistImporter = importer;
@@ -174,8 +147,9 @@ export class MusicCommandHandler {
       return;
     }
 
-    // Access control: music vs admin tier, gated by configured server groups.
-    if (!(await this.checkAccess(botId, command, userClid, reply))) return;
+    // Replies are built in the configured language, read from the settings
+    // cache (see `m`); load it before dispatching.
+    await this.getSettings();
 
     try {
       switch (command) {
@@ -227,18 +201,6 @@ export class MusicCommandHandler {
           break;
         case 'viewers':
           this.handleViewers(bot, reply);
-          break;
-        case 'channels':
-          await this.handleChannels(botId, reply);
-          break;
-        case 'move':
-          await this.handleMove(botId, reply, args);
-          break;
-        case 'moveall':
-          await this.handleMoveAll(botId, bot, reply, args);
-          break;
-        case 'notif':
-          await this.handleNotif(reply);
           break;
         case 'help':
           this.handleHelp(reply);
@@ -725,41 +687,10 @@ export class MusicCommandHandler {
     }
 
     const header = `🎤 ${result.artist ? `${result.artist} — ` : ''}${result.title}`;
-    // Same per-message budget as !channels (~1KB TS limit).
+    // Each chunk stays under TeamSpeak's ~1KB per-message limit.
     for (const chunk of chunkLyrics(header, result.lyrics, 900)) {
       reply(chunk);
     }
-  }
-
-  // ─── Channel / Client Management ──────────────────────────
-
-  /**
-   * Resolve the WebQuery client + virtual server id (sid) for a music bot.
-   * The bot only knows its UDP voice port; serveridgetbyport maps that to the
-   * sid. Result is cached per bot. Falls back to sid=1 if the lookup fails.
-   */
-  private async getServer(botId: number): Promise<{ client: WebQueryClient; sid: number }> {
-    const dbBot = await this.prisma.musicBot.findUnique({
-      where: { id: botId },
-      select: { serverConfigId: true, voicePort: true },
-    });
-    if (!dbBot) throw new Error('Configuration du bot introuvable.');
-
-    const client = await this.connectionPool.getOrLoad(dbBot.serverConfigId);
-
-    let sid = this.sidCache.get(botId);
-    if (!sid) {
-      try {
-        const res = await client.execute(0, 'serveridgetbyport', { virtualserver_port: dbBot.voicePort });
-        const entry = Array.isArray(res) ? res[0] : res;
-        sid = parseInt(entry?.server_id) || 1;
-      } catch {
-        sid = 1; // single-server fallback
-      }
-      this.sidCache.set(botId, sid);
-    }
-
-    return { client, sid };
   }
 
   /** Load the global command settings, cached for SETTINGS_TTL_MS. */
@@ -769,8 +700,6 @@ export class MusicCommandHandler {
     }
     const row = await this.prisma.musicCommandSettings.findFirst();
     const value: MusicCommandSettingsRow = {
-      musicCommandSgid: row?.musicCommandSgid ?? null,
-      adminCommandSgid: row?.adminCommandSgid ?? null,
       notifyNowPlaying: row?.notifyNowPlaying ?? false,
       language: row?.language ?? 'en',
     };
@@ -778,15 +707,11 @@ export class MusicCommandHandler {
     return value;
   }
 
-  private invalidateSettings(): void {
-    this.settingsCache = null;
-  }
-
   /**
    * The reply catalogue for the configured language.
    *
    * Read from the settings cache rather than threaded through every handler:
-   * getSettings() runs in checkAccess before any command dispatches, so the
+   * getSettings() runs before any command dispatches, so the
    * cache is populated and at most SETTINGS_TTL_MS stale by the time a reply
    * is built. Falls back to English when the cache is cold.
    */
@@ -802,258 +727,6 @@ export class MusicCommandHandler {
     if (bot.floodCooldownMs > 0) return;
     const artist = item.artist ? `${item.artist} - ` : '';
     bot.sendChannelMessage(`♪ Now playing : ${artist}${item.title}`);
-  }
-
-  /** Resolve a server group's display name (best-effort, for messages). */
-  private async groupName(client: WebQueryClient, sid: number, sgid: number): Promise<string> {
-    try {
-      const res = await client.execute(sid, 'servergrouplist');
-      const arr = Array.isArray(res) ? res : res ? [res] : [];
-      const g = arr.find((x: any) => Number(x.sgid) === sgid);
-      return g?.name ? String(g.name) : `#${sgid}`;
-    } catch {
-      return `#${sgid}`;
-    }
-  }
-
-  /**
-   * Returns true if the invoker may run `command`. On denial it replies with a
-   * message and returns false. Open/unconfigured tiers always pass.
-   */
-  private async checkAccess(botId: number, command: string, userClid: number, reply: ReplyFn): Promise<boolean> {
-    const settings = await this.getSettings();
-    const required = requiredSgid(command, settings);
-    if (required == null) return true;
-
-    const { client, sid } = await this.getServer(botId);
-
-    let entry: any;
-    try {
-      const info = await client.execute(sid, 'clientinfo', { clid: String(userClid) });
-      entry = Array.isArray(info) ? info[0] : info;
-    } catch {
-      // Could not resolve the invoker (e.g. just disconnected): fail closed.
-      reply(this.m.permissionCheckFailed);
-      return false;
-    }
-
-    const groups = parseServerGroupIds(entry?.client_servergroups);
-    if (groups.includes(required)) return true;
-
-    const name = await this.groupName(client, sid, required);
-    reply(this.m.permissionDenied(name));
-    return false;
-  }
-
-  /** Fetch the live channel list (array form) for a virtual server. */
-  private async fetchChannels(client: WebQueryClient, sid: number): Promise<any[]> {
-    const res = await client.execute(sid, 'channellist');
-    return Array.isArray(res) ? res : res ? [res] : [];
-  }
-
-  /** Fetch the live client list (array form) for a virtual server. */
-  private async fetchClients(client: WebQueryClient, sid: number): Promise<any[]> {
-    const res = await client.execute(sid, 'clientlist');
-    return Array.isArray(res) ? res : res ? [res] : [];
-  }
-
-  /** True for the spacer pseudo-channels used purely for visual separation. */
-  private isSpacer(name: string): boolean {
-    return name.startsWith('[spacer') || name.startsWith('[*spacer');
-  }
-
-  /**
-   * Resolve a channel reference — either a numeric cid or a (possibly
-   * space-containing) channel name — to a channel entry. Name matching is
-   * case-insensitive: exact match first, then a unique substring match.
-   * Throws a user-facing message on no/ambiguous match.
-   */
-  private resolveChannel(channels: any[], ref: string): any {
-    const query = ref.trim();
-
-    // Numeric → channel id
-    if (/^\d+$/.test(query)) {
-      const cid = Number(query);
-      const byId = channels.find((c) => Number(c.cid) === cid);
-      if (!byId) throw new Error(this.m.channelNotFoundById(cid));
-      return byId;
-    }
-
-    const lower = query.toLowerCase();
-    const named = channels.filter((c) => !this.isSpacer(String(c.channel_name)));
-
-    const exact = named.filter((c) => String(c.channel_name).toLowerCase() === lower);
-    if (exact.length === 1) return exact[0];
-    if (exact.length > 1) {
-      throw new Error(this.m.channelAmbiguous(query));
-    }
-
-    const partial = named.filter((c) => String(c.channel_name).toLowerCase().includes(lower));
-    if (partial.length === 1) return partial[0];
-    if (partial.length > 1) {
-      const ids = partial.slice(0, 6).map((c) => `[${c.cid}] ${c.channel_name}`).join(', ');
-      throw new Error(this.m.channelAmbiguousList(query, ids));
-    }
-
-    throw new Error(this.m.channelNotFound(query));
-  }
-
-  private async handleChannels(botId: number, reply: ReplyFn): Promise<void> {
-    const { client, sid } = await this.getServer(botId);
-    const channels = await this.fetchChannels(client, sid);
-    if (channels.length === 0) {
-      reply(this.m.channelsNone);
-      return;
-    }
-
-    // Build a tree (cid → children) so the list mirrors the channel hierarchy.
-    const norm = channels.map((c) => ({
-      cid: Number(c.cid),
-      pid: Number(c.pid),
-      order: Number(c.channel_order) || 0,
-      name: String(c.channel_name),
-    }));
-    const childrenOf = new Map<number, typeof norm>();
-    for (const c of norm) {
-      if (!childrenOf.has(c.pid)) childrenOf.set(c.pid, []);
-      childrenOf.get(c.pid)!.push(c);
-    }
-    for (const list of childrenOf.values()) list.sort((a, b) => a.order - b.order);
-
-    const lines: string[] = [];
-    const MAX = 60;
-    const walk = (pid: number, depth: number): void => {
-      for (const c of childrenOf.get(pid) ?? []) {
-        if (lines.length < MAX && !this.isSpacer(c.name)) {
-          lines.push(`${'  '.repeat(depth)}[${c.cid}] ${c.name}`);
-        }
-        walk(c.cid, depth + 1);
-      }
-    };
-    walk(0, 0);
-
-    if (norm.length > MAX) lines.push(this.m.channelsMore(norm.length - MAX));
-
-    // Send in chunks to stay under the ~1KB per-message limit on long lists.
-    const header = this.m.channelsHeader(norm.length);
-    let buf = header;
-    for (const line of lines) {
-      if (buf.length + 1 + line.length > 900) {
-        reply(buf);
-        buf = line;
-      } else {
-        buf += '\n' + line;
-      }
-    }
-    if (buf) reply(buf);
-  }
-
-  private async handleMove(botId: number, reply: ReplyFn, args: string): Promise<void> {
-    const tokens = tokenizeArgs(args);
-    if (tokens.length < 2) {
-      reply(this.m.moveUsage);
-      return;
-    }
-
-    const userQuery = tokens[0];
-    const channelRef = tokens.slice(1).join(' ');
-
-    const { client, sid } = await this.getServer(botId);
-    const [channels, clients] = await Promise.all([
-      this.fetchChannels(client, sid),
-      this.fetchClients(client, sid),
-    ]);
-
-    const channel = this.resolveChannel(channels, channelRef);
-    const target = this.resolveClient(clients, userQuery);
-
-    await client.execute(sid, 'clientmove', { clid: target.clid, cid: channel.cid });
-    reply(this.m.moved(String(target.client_nickname), String(channel.channel_name)));
-  }
-
-  private async handleMoveAll(botId: number, bot: VoiceBot, reply: ReplyFn, args: string): Promise<void> {
-    const channelRef = tokenizeArgs(args).join(' ').trim();
-    if (!channelRef) {
-      reply(this.m.moveAllUsage);
-      return;
-    }
-
-    const { client, sid } = await this.getServer(botId);
-    const [channels, clients] = await Promise.all([
-      this.fetchChannels(client, sid),
-      this.fetchClients(client, sid),
-    ]);
-
-    const channel = this.resolveChannel(channels, channelRef);
-    const cid = Number(channel.cid);
-
-    // Real users only (client_type 0), excluding the bot itself and anyone
-    // already in the destination channel.
-    const toMove = clients.filter((c) =>
-      String(c.client_type) === '0' &&
-      Number(c.clid) !== bot.ts3ClientId &&
-      Number(c.cid) !== cid,
-    );
-
-    if (toMove.length === 0) {
-      reply(this.m.moveAllNobody(String(channel.channel_name)));
-      return;
-    }
-
-    let moved = 0;
-    const failed: string[] = [];
-    // Sequential to stay friendly with the server's flood protection.
-    for (const c of toMove) {
-      try {
-        await client.execute(sid, 'clientmove', { clid: c.clid, cid });
-        moved++;
-      } catch (err: any) {
-        failed.push(String(c.client_nickname || c.clid));
-      }
-    }
-
-    let msg = this.m.moveAllDone(moved, String(channel.channel_name));
-    if (failed.length) msg += this.m.moveAllFailed(failed.join(', '));
-    reply(msg);
-  }
-
-  private async handleNotif(reply: ReplyFn): Promise<void> {
-    const row = await this.prisma.musicCommandSettings.findFirst();
-    const next = !(row?.notifyNowPlaying ?? false);
-    if (row) {
-      await this.prisma.musicCommandSettings.update({ where: { id: row.id }, data: { notifyNowPlaying: next } });
-    } else {
-      await this.prisma.musicCommandSettings.create({ data: { notifyNowPlaying: next } });
-    }
-    this.invalidateSettings();
-    reply(next
-      ? this.m.notifEnabled
-      : this.m.notifDisabled);
-  }
-
-  /**
-   * Resolve a user reference (pseudo) to a connected client. Matches only real
-   * clients (client_type 0), case-insensitively: exact first, then a unique
-   * substring match. Throws a user-facing message on no/ambiguous match.
-   */
-  private resolveClient(clients: any[], ref: string): any {
-    const lower = ref.trim().toLowerCase();
-    const real = clients.filter((c) => String(c.client_type) === '0');
-
-    const exact = real.filter((c) => String(c.client_nickname).toLowerCase() === lower);
-    if (exact.length === 1) return exact[0];
-    if (exact.length > 1) {
-      throw new Error(this.m.userAmbiguous(ref));
-    }
-
-    const partial = real.filter((c) => String(c.client_nickname).toLowerCase().includes(lower));
-    if (partial.length === 1) return partial[0];
-    if (partial.length > 1) {
-      const names = partial.slice(0, 6).map((c) => c.client_nickname).join(', ');
-      throw new Error(this.m.userAmbiguousList(ref, names));
-    }
-
-    throw new Error(this.m.userNotFound(ref));
   }
 
   private handleHelp(reply: ReplyFn): void {

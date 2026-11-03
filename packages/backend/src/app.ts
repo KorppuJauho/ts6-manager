@@ -8,19 +8,6 @@ import { errorHandler } from './middleware/error-handler.js';
 import { authMiddleware } from './middleware/auth.js';
 import { authRoutes } from './routes/auth.routes.js';
 import { serverRoutes } from './routes/servers.routes.js';
-import { virtualServerRoutes } from './routes/virtual-servers.routes.js';
-import { channelRoutes } from './routes/channels.routes.js';
-import { clientRoutes } from './routes/clients.routes.js';
-import { serverGroupRoutes } from './routes/server-groups.routes.js';
-import { channelGroupRoutes } from './routes/channel-groups.routes.js';
-import { permissionRoutes } from './routes/permissions.routes.js';
-import { banRoutes } from './routes/bans.routes.js';
-import { tokenRoutes } from './routes/tokens.routes.js';
-import { complaintRoutes } from './routes/complaints.routes.js';
-import { messageRoutes } from './routes/messages.routes.js';
-import { logRoutes } from './routes/logs.routes.js';
-import { instanceRoutes } from './routes/instance.routes.js';
-import { dashboardRoutes } from './routes/dashboard.routes.js';
 import { userRoutes } from './routes/users.routes.js';
 import { musicBotRoutes } from './routes/music-bots.routes.js';
 import { musicLibraryRoutes } from './routes/music-library.routes.js';
@@ -37,7 +24,6 @@ import { samlRoutes } from './routes/saml.routes.js';
 import { requireRole } from './middleware/rbac.js';
 import { requireServerAccess } from './middleware/server-access.js';
 import { requireIntParams } from './middleware/validate-params.js';
-import { ensureConnection } from './middleware/ensure-connection.js';
 
 export function createApp(): Express {
   const app = express();
@@ -90,21 +76,8 @@ export function createApp(): Express {
   app.use('/api/servers', serverRoutes);
 
   // H9: Server access control on all :configId routes
-  // (NaN guard first: parseInt would otherwise forward NaN to Prisma/ServerQuery)
-  const serverAccess = [requireIntParams('configId', 'sid'), requireServerAccess(), ensureConnection()];
-  app.use('/api/servers/:configId/virtual-servers', serverAccess, virtualServerRoutes);
-  app.use('/api/servers/:configId/vs/:sid/channels', serverAccess, channelRoutes);
-  app.use('/api/servers/:configId/vs/:sid/clients', serverAccess, clientRoutes);
-  app.use('/api/servers/:configId/vs/:sid/server-groups', serverAccess, serverGroupRoutes);
-  app.use('/api/servers/:configId/vs/:sid/channel-groups', serverAccess, channelGroupRoutes);
-  app.use('/api/servers/:configId/vs/:sid/permissions', serverAccess, permissionRoutes);
-  app.use('/api/servers/:configId/vs/:sid/bans', serverAccess, banRoutes);
-  app.use('/api/servers/:configId/vs/:sid/tokens', serverAccess, tokenRoutes);
-  app.use('/api/servers/:configId/vs/:sid/complaints', serverAccess, complaintRoutes);
-  app.use('/api/servers/:configId/vs/:sid/messages', serverAccess, messageRoutes);
-  app.use('/api/servers/:configId/vs/:sid/logs', serverAccess, logRoutes);
-  app.use('/api/servers/:configId/instance', serverAccess, instanceRoutes);
-  app.use('/api/servers/:configId/vs/:sid/dashboard', serverAccess, dashboardRoutes);
+  // (NaN guard first: parseInt would otherwise forward NaN to Prisma)
+  const serverAccess = [requireIntParams('configId'), requireServerAccess()];
   app.use('/api/users', userRoutes);
   app.use('/api/music-bots', musicBotRoutes);
   app.use('/api/servers/:configId/music-library', serverAccess, musicLibraryRoutes);

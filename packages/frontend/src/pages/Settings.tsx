@@ -8,7 +8,6 @@ import { spotifyApi } from '@/api/spotify.api';
 import { musicCommandSettingsApi } from '@/api/music-command-settings.api';
 import { streamSettingsApi, type StreamSettings } from '@/api/stream-settings.api';
 import { samlApi, type SamlSettings } from '@/api/saml.api';
-import { useServerGroups } from '@/hooks/use-groups';
 import { useAuthStore } from '@/stores/auth.store';
 import { PageLoader } from '@/components/shared/LoadingSpinner';
 import { Button } from '@/components/ui/button';
@@ -21,7 +20,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
-import { Users, Server, Plus, Trash2, Pencil, TestTube, Check, Lock, KeyRound, Youtube, Upload, FileText, Music, Bot, ShieldCheck, Copy, Video } from 'lucide-react';
+import { Users, Server, Plus, Trash2, Pencil, Check, Lock, KeyRound, Youtube, Upload, FileText, Music, Bot, ShieldCheck, Copy, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { LANGUAGES, setLanguage } from '@/i18n';
@@ -340,45 +339,45 @@ function ConnectionsTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { data: servers, isLoading } = useQuery({ queryKey: ['servers'], queryFn: serversApi.list });
-  const createServer = useMutation({ mutationFn: (data: any) => serversApi.create(data), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
-  const updateServer = useMutation({ mutationFn: ({ id, data }: any) => serversApi.update(id, data), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
-  const deleteServer = useMutation({ mutationFn: (id: number) => serversApi.delete(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
-  const testServer = useMutation({ mutationFn: (id: number) => serversApi.test(id) });
+  const createServer = useMutation({ mutationFn: (data: { name: string; host: string }) => serversApi.create(data), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
+  const updateServer = useMutation({ mutationFn: ({ id, data }: { id: number; data: { name: string; host: string } }) => serversApi.update(id, data), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
+  const deleteServer = useMutation({
+    mutationFn: (id: number) => serversApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['servers'] });
+      qc.invalidateQueries({ queryKey: ['music-bots'] });
+    },
+  });
 
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
-  const [form, setForm] = useState({ name: '', host: '', webqueryPort: '10080', apiKey: '', useHttps: false });
+  const [form, setForm] = useState({ name: '', host: '' });
 
   const serverList = useMemo(() => (Array.isArray(servers) ? servers : []), [servers]);
 
   if (isLoading) return <PageLoader />;
 
-  const resetForm = () => setForm({ name: '', host: '', webqueryPort: '10080', apiKey: '', useHttps: false });
+  const resetForm = () => setForm({ name: '', host: '' });
+  const closeDialog = () => { setShowAdd(false); setEditId(null); resetForm(); };
 
   const handleSave = () => {
-    const payload = { ...form, webqueryPort: parseInt(form.webqueryPort) };
+    const payload = { name: form.name.trim(), host: form.host.trim() };
     if (editId) {
       updateServer.mutate({ id: editId, data: payload }, {
-        onSuccess: () => { toast.success(t('settings.connections.toastUpdated')); setEditId(null); setShowAdd(false); resetForm(); },
+        onSuccess: () => { toast.success(t('settings.connections.toastUpdated')); closeDialog(); },
         onError: () => toast.error(t('settings.connections.toastUpdateFailed')),
       });
     } else {
       createServer.mutate(payload, {
-        onSuccess: () => { toast.success(t('settings.connections.toastAdded')); setShowAdd(false); resetForm(); },
+        onSuccess: () => { toast.success(t('settings.connections.toastAdded')); closeDialog(); },
         onError: () => toast.error(t('settings.connections.toastCreateFailed')),
       });
     }
   };
 
   const openEdit = (server: any) => {
-    setForm({
-      name: server.name || '',
-      host: server.host || '',
-      webqueryPort: String(server.webqueryPort || 10080),
-      apiKey: server.apiKey || '',
-      useHttps: server.useHttps || false,
-    });
+    setForm({ name: server.name || '', host: server.host || '' });
     setEditId(server.id);
     setShowAdd(true);
   };
@@ -394,27 +393,14 @@ function ConnectionsTab() {
         {serverList.map((server: any) => (
           <Card key={server.id}>
             <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-medium">{server.name}</CardTitle>
-                <Badge variant={server.enabled ? 'default' : 'secondary'} className="text-[10px]">
-                  {server.enabled ? t('settings.connections.enabled') : t('settings.connections.disabled')}
-                </Badge>
-              </div>
+              <CardTitle className="text-sm font-medium">{server.name}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <span className="text-muted-foreground">{t('settings.connections.host')}</span>
-                <span className="font-mono-data">{server.host}:{server.webqueryPort}</span>
-                <span className="text-muted-foreground">{t('settings.connections.protocol')}</span>
-                <span>{server.useHttps ? 'HTTPS' : 'HTTP'}</span>
+                <span className="font-mono-data">{server.host}</span>
               </div>
               <div className="flex items-center gap-1 pt-2">
-                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => testServer.mutate(server.id, {
-                  onSuccess: () => toast.success(t('settings.connections.toastTestSuccess')),
-                  onError: () => toast.error(t('settings.connections.toastTestFailed')),
-                })}>
-                  <TestTube className="h-3 w-3 mr-1" /> {t('settings.connections.test')}
-                </Button>
                 <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openEdit(server)}>
                   <Pencil className="h-3 w-3 mr-1" /> {t('settings.connections.edit')}
                 </Button>
@@ -428,27 +414,20 @@ function ConnectionsTab() {
       </div>
 
       {/* Add/Edit Dialog */}
-      <Dialog open={showAdd} onOpenChange={(v) => { if (!v) { setShowAdd(false); setEditId(null); resetForm(); } else setShowAdd(true); }}>
+      <Dialog open={showAdd} onOpenChange={(v) => { if (!v) closeDialog(); else setShowAdd(true); }}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>{editId ? t('settings.connections.dialogEditTitle') : t('settings.connections.dialogAddTitle')}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label className="text-xs">{t('settings.connections.name')}</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t('settings.connections.namePlaceholder')} /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">{t('settings.connections.host')}</Label><Input value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} placeholder="127.0.0.1" /></div>
-              <div><Label className="text-xs">{t('settings.connections.webqueryPort')}</Label><Input type="number" value={form.webqueryPort} onChange={(e) => setForm({ ...form, webqueryPort: e.target.value })} /></div>
-            </div>
             <div>
-              <Label className="text-xs">{t('settings.connections.apiKey')}</Label>
-              <Input value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} placeholder={editId ? t('settings.connections.apiKeyPlaceholderEdit') : t('settings.connections.apiKeyPlaceholder')} type="password" />
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch checked={form.useHttps} onCheckedChange={(v) => setForm({ ...form, useHttps: v })} />
-              <Label className="text-xs">{t('settings.connections.useHttps')}</Label>
+              <Label className="text-xs">{t('settings.connections.host')}</Label>
+              <Input value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} placeholder="ts.example.com" />
+              <p className="text-[10px] text-muted-foreground mt-1">{t('settings.connections.hostHint')}</p>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowAdd(false); setEditId(null); resetForm(); }}>{t('settings.connections.cancel')}</Button>
-            <Button onClick={handleSave} disabled={!form.name || !form.host || (!editId && !form.apiKey)}>{editId ? t('settings.connections.update') : t('settings.connections.addShort')}</Button>
+            <Button variant="outline" onClick={closeDialog}>{t('settings.connections.cancel')}</Button>
+            <Button onClick={handleSave} disabled={!form.name.trim() || !form.host.trim()}>{editId ? t('settings.connections.update') : t('settings.connections.addShort')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1114,7 +1093,6 @@ const BOT_LANGUAGE_LABELS: Record<string, { label: string; country: string }> = 
   it: { label: 'Italiano', country: 'it' },
 };
 
-const NO_GROUP = 'none';
 
 function MusicCommandsTab() {
   const { t } = useTranslation();
@@ -1123,19 +1101,15 @@ function MusicCommandsTab() {
     queryKey: ['music-command-settings'],
     queryFn: musicCommandSettingsApi.get,
   });
-  const { data: groupsData } = useServerGroups();
-  const groups = Array.isArray(groupsData) ? groupsData : [];
 
-  const [form, setForm] = useState<{ musicCommandSgid: string; adminCommandSgid: string; notifyNowPlaying: boolean; language: string }>({
-    musicCommandSgid: NO_GROUP, adminCommandSgid: NO_GROUP, notifyNowPlaying: false, language: 'en',
+  const [form, setForm] = useState<{ notifyNowPlaying: boolean; language: string }>({
+    notifyNowPlaying: false, language: 'en',
   });
 
   const [seededSettings, setSeededSettings] = useState<typeof settings>(undefined);
   if (settings && settings !== seededSettings) {
     setSeededSettings(settings);
     setForm({
-      musicCommandSgid: settings.musicCommandSgid ? String(settings.musicCommandSgid) : NO_GROUP,
-      adminCommandSgid: settings.adminCommandSgid ? String(settings.adminCommandSgid) : NO_GROUP,
       notifyNowPlaying: settings.notifyNowPlaying,
       language: settings.language || 'en',
     });
@@ -1143,8 +1117,6 @@ function MusicCommandsTab() {
 
   const save = useMutation({
     mutationFn: () => musicCommandSettingsApi.update({
-      musicCommandSgid: form.musicCommandSgid === NO_GROUP ? null : parseInt(form.musicCommandSgid),
-      adminCommandSgid: form.adminCommandSgid === NO_GROUP ? null : parseInt(form.adminCommandSgid),
       notifyNowPlaying: form.notifyNowPlaying,
       language: form.language,
     }),
@@ -1157,18 +1129,6 @@ function MusicCommandsTab() {
 
   if (isLoading || !settings) return <PageLoader />;
 
-  const groupSelect = (value: string, onChange: (v: string) => void) => (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value={NO_GROUP}>{t('settings.musicCommands.openToAll')}</SelectItem>
-        {groups.map((g: any) => (
-          <SelectItem key={g.sgid} value={String(g.sgid)}>{g.name} (#{g.sgid})</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-
   return (
     <Card>
       <CardHeader>
@@ -1176,10 +1136,6 @@ function MusicCommandsTab() {
       </CardHeader>
       <CardContent className="space-y-4 max-w-xl">
         <p className="text-[11px] text-muted-foreground">{t('settings.musicCommands.description')}</p>
-
-        {groups.length === 0 && (
-          <p className="text-[11px] text-amber-500">{t('settings.musicCommands.noServerHint')}</p>
-        )}
 
         <div className="space-y-1.5">
           <Label className="text-xs">{t('settings.musicCommands.botLanguage')}</Label>
@@ -1200,16 +1156,6 @@ function MusicCommandsTab() {
             </SelectContent>
           </Select>
           <p className="text-[10px] text-muted-foreground">{t('settings.musicCommands.botLanguageHint')}</p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t('settings.musicCommands.musicGroup')}</Label>
-          {groupSelect(form.musicCommandSgid, (v) => setForm((f) => ({ ...f, musicCommandSgid: v }))) }
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t('settings.musicCommands.adminGroup')}</Label>
-          {groupSelect(form.adminCommandSgid, (v) => setForm((f) => ({ ...f, adminCommandSgid: v }))) }
         </div>
 
         <div className="flex items-center gap-2">
