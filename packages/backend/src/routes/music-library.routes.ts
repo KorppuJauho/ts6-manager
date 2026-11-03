@@ -27,6 +27,9 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
+  // Browsers send the file name as UTF-8 with no charset; multer's latin1
+  // default turned "Björk" into "BjÃ¶rk" in the song's title and artist.
+  defParamCharset: 'utf8',
   limits: { fileSize: MAX_FILE_SIZE },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
