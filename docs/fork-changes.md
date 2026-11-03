@@ -353,7 +353,7 @@ enforced instead.
 |---|---|---|
 | Radio stations ordered by id | `fix(bot): list radio stations…` | `!radio <id>` means ids are what users type; alphabetical order renumbered them on every insert |
 | Uploaded song names read as UTF-8 | `fix(music): read uploaded file names as UTF-8` | multer decodes multipart file names as latin1 unless told otherwise, so a browser's `Björk - Jóga.flac` became artist `BjÃ¶rk`, title `JÃ³ga`. Songs uploaded before the fix keep the names they were saved with |
-| `python3` + `build-essential` in base images | `build(docker): install a native-module toolchain…` | node-gyp builds `cpu-features` and `ssh2`'s crypto binding at install time |
+| `python3` + `build-essential` in base images | `build(docker): install a native-module toolchain…` | node-gyp built `cpu-features` and `ssh2`'s crypto binding at install time. Removed with ssh2; see *Bot only* below |
 | `docker-compose.coolify.yml` removed | `chore(compose): remove the Coolify compose file…` | It ran upstream's Docker Hub images with no sidecar and no `SIDECAR_TOKEN`, and pinned one install's Coolify network ID; nobody deploys this fork on Coolify to keep it working |
 | `docker-compose.hub.yml` and `docker-compose.dev.yml` removed | `chore: remove upstream's Docker Hub compose files…` | Both ran clusterzx's Docker Hub images (`clusterzx/ts6-manager:backend`, `:backend-dev`), so a deployment using either ran upstream's code with none of this fork in it. `docker-compose.yml` builds this fork and `docker-compose.ghcr.yml` runs its CI images |
 | Translated READMEs removed | same commit | `README.{fr,de,es,it}.md` described `coom/ts6-manager` and none of this fork, and linked the removed Docker Hub compose file. The web UI keeps its five languages; only the READMEs went |
@@ -1179,6 +1179,50 @@ that publishes its file transfer port under another number cannot be reached
 that way; publish it unchanged, or let the backend reach the server on their
 shared network.
 
+### Bot only: flows, SSH, Discord, journal and server widget removed
+
+| | |
+|---|---|
+| Commit | `refactor!: remove bot flows, SSH ServerQuery, Discord, the connection journal and server widgets` |
+| Backend | `bot-engine/`, `discord/`, `widget/`, `connection-journal.ts`, `utils/geo.ts`; routes `bots`, `discord`, `journal`, `widget`, `files`; `widget-public.routes.ts` is now `player-widget.routes.ts` |
+| Frontend | pages `BotList`, `BotEditor`, `Journal`, `WidgetPage`, `Files`; `components/bots`, `components/widget`, `data/bot-templates.ts`; the Discord settings tab, the journal-retention card, the Dashboard's widget button, the SSH fields under Settings → Connections |
+
+This fork is run for its music and video bot only. The manager's other half,
+administering the TeamSpeak server itself, is not used, and every part of it
+is code to keep patched. This is the first of several removals; it takes out
+everything that needed an SSH ServerQuery session or an outside service.
+
+The voice bot never depended on any of it. It receives chat commands on its
+own TS3 voice connection (`MusicCommandHandler.registerBot`), so `!play`,
+`!stream` and the rest work as before without SSH credentials.
+
+**Kept:** the music bot's player widget (`/api/widget/player/:botId/data`
+and `/bbcode`, the link button on a bot card). It reads the bot's own queue,
+needs no extra package, and keeps its URL and HMAC token, so links already
+pasted into channel descriptions still work.
+
+**The Files page went in this step** rather than with the other server pages,
+because it listed files over the shared SSH session (`ft*` commands are not
+available over WebQuery).
+
+**Database:** nothing is dropped yet. The `BotFlow`, `Widget`,
+`DiscordSettings` and `ConnectionLog` tables and the server record's SSH
+columns stay until the schema cleanup, which comes with its own backup and
+upgrade steps. The backend simply stops reading them.
+
+`utils/geo.ts` existed for the journal's country lookup (`geoip-lite`, about
+110 MB of data). Web bans only needed its `normalizeIp`, now `utils/ip.ts`.
+
+Packages removed: `ssh2`, `@types/ssh2`, `node-cron`, `discord.js`,
+`@discordjs/voice`, `@snazzah/davey`, `geoip-lite`, `@types/geoip-lite`,
+`@resvg/resvg-js`, and, already unused before this change, `pino`,
+`pino-pretty`, `@xyflow/react`, `react-hook-form`, `@hookform/resolvers` and
+five Radix packages (`accordion`, `context-menu`, `popover`, `progress`,
+`avatar`). The `undici` and `ip-address` overrides matched only packages
+reached through discord.js and ssh2, so they went too. No native module is
+left to compile, so `python3` and `build-essential` left both Dockerfiles'
+base stage. The backend image keeps `python3` for yt-dlp.
+
 ## Fixes to coom's changes (fork only)
 
 This fork builds on [coom/ts6-manager](https://github.com/coom/ts6-manager),
@@ -1187,6 +1231,8 @@ changes introduced. Upstream clusterzx does not have them, and they are not
 suggestions for other forks.
 
 ### One ServerQuery session per server, shared
+
+*Removed along with the SSH sessions; see* Bot only *above. Kept as a record.*
 
 Flows with event or command triggers stopped firing after coom's changes.
 Webhook and cron triggers kept working. The cause was the number of SSH
@@ -1269,6 +1315,8 @@ deaf until the backend restarted.
 
 ### Resetting the SSH host-key pin
 
+*Removed along with SSH; see* Bot only *above.*
+
 coom 91a483f pins the server's SSH host key on first use, and nothing ever
 cleared the pin. A server reinstalled at the same address, or a connection
 edited to point elsewhere, was refused for good. Now the pin is cleared when
@@ -1323,7 +1371,8 @@ a backend and a frontend file, and still skips `dist/` and `generated/`.
 The Docker images keep `python3` and `build-essential`, because `ssh2` and
 `cpu-features` still compile at install time. Only the backend build stage's
 second `build-essential` layer, added for libopus and already covered by the
-base stage, went.
+base stage, went. (Both went later, with ssh2: see *Bot only: flows, SSH, Discord,
+journal and server widget removed*.)
 
 ## Open follow-ups
 

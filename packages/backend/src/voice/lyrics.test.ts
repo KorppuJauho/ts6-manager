@@ -50,7 +50,7 @@ describe('chunkLyrics', () => {
     expect(chunkLyrics('', '\n\n\n', 50)).toEqual([]);
   });
 
-  it('works with an empty header (Discord mode)', () => {
+  it('works with an empty header', () => {
     expect(chunkLyrics('', 'hello', 50)).toEqual(['hello']);
   });
 });

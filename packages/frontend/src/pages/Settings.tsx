@@ -1,17 +1,14 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { usersApi } from '@/api/bots.api';
+import { usersApi } from '@/api/users.api';
 import { authApi } from '@/api/auth.api';
 import { serversApi } from '@/api/servers.api';
 import { settingsApi, proxyApi, limitsApi } from '@/api/settings.api';
-import { discordApi, type DiscordSettings } from '@/api/discord.api';
 import { spotifyApi } from '@/api/spotify.api';
 import { musicCommandSettingsApi } from '@/api/music-command-settings.api';
 import { streamSettingsApi, type StreamSettings } from '@/api/stream-settings.api';
 import { samlApi, type SamlSettings } from '@/api/saml.api';
 import { useServerGroups } from '@/hooks/use-groups';
-import { journalApi } from '@/api/journal.api';
-import { musicBotsApi } from '@/api/music.api';
 import { useAuthStore } from '@/stores/auth.store';
 import { PageLoader } from '@/components/shared/LoadingSpinner';
 import { Button } from '@/components/ui/button';
@@ -21,11 +18,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
-import { Users, Server, Plus, Trash2, Pencil, TestTube, Check, Lock, KeyRound, Youtube, Upload, FileText, MessagesSquare, Music, Bot, ShieldCheck, Copy, Video } from 'lucide-react';
+import { Users, Server, Plus, Trash2, Pencil, TestTube, Check, Lock, KeyRound, Youtube, Upload, FileText, Music, Bot, ShieldCheck, Copy, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { LANGUAGES, setLanguage } from '@/i18n';
@@ -46,7 +42,6 @@ export default function Settings() {
           <TabsTrigger value="account"><Lock className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.account')}</TabsTrigger>
           {isAdmin && <TabsTrigger value="users"><Users className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.users')}</TabsTrigger>}
           {isAdmin && <TabsTrigger value="youtube"><Youtube className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.youtube')}</TabsTrigger>}
-          {isAdmin && <TabsTrigger value="discord"><MessagesSquare className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.discord')}</TabsTrigger>}
           {isAdmin && <TabsTrigger value="saml"><ShieldCheck className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.saml')}</TabsTrigger>}
           {isAdmin && <TabsTrigger value="spotify"><Music className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.spotify')}</TabsTrigger>}
           {isAdmin && <TabsTrigger value="musicCommands"><Bot className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.musicCommands')}</TabsTrigger>}
@@ -72,12 +67,6 @@ export default function Settings() {
         {isAdmin && (
           <TabsContent value="youtube" className="mt-4">
             <YouTubeTab />
-          </TabsContent>
-        )}
-
-        {isAdmin && (
-          <TabsContent value="discord" className="mt-4">
-            <DiscordTab />
           </TabsContent>
         )}
 
@@ -355,22 +344,20 @@ function ConnectionsTab() {
   const updateServer = useMutation({ mutationFn: ({ id, data }: any) => serversApi.update(id, data), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
   const deleteServer = useMutation({ mutationFn: (id: number) => serversApi.delete(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
   const testServer = useMutation({ mutationFn: (id: number) => serversApi.test(id) });
-  const forgetHostKey = useMutation({ mutationFn: (id: number) => serversApi.forgetSshHostKey(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['servers'] }) });
 
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
-  const [form, setForm] = useState({ name: '', host: '', webqueryPort: '10080', apiKey: '', useHttps: false, sshPort: '10022', sshUsername: '', sshPassword: '' });
+  const [form, setForm] = useState({ name: '', host: '', webqueryPort: '10080', apiKey: '', useHttps: false });
 
   const serverList = useMemo(() => (Array.isArray(servers) ? servers : []), [servers]);
-  const editServer = serverList.find((s: any) => s.id === editId);
 
   if (isLoading) return <PageLoader />;
 
-  const resetForm = () => setForm({ name: '', host: '', webqueryPort: '10080', apiKey: '', useHttps: false, sshPort: '10022', sshUsername: '', sshPassword: '' });
+  const resetForm = () => setForm({ name: '', host: '', webqueryPort: '10080', apiKey: '', useHttps: false });
 
   const handleSave = () => {
-    const payload = { ...form, webqueryPort: parseInt(form.webqueryPort), sshPort: parseInt(form.sshPort) };
+    const payload = { ...form, webqueryPort: parseInt(form.webqueryPort) };
     if (editId) {
       updateServer.mutate({ id: editId, data: payload }, {
         onSuccess: () => { toast.success(t('settings.connections.toastUpdated')); setEditId(null); setShowAdd(false); resetForm(); },
@@ -391,9 +378,6 @@ function ConnectionsTab() {
       webqueryPort: String(server.webqueryPort || 10080),
       apiKey: server.apiKey || '',
       useHttps: server.useHttps || false,
-      sshPort: String(server.sshPort || 10022),
-      sshUsername: server.sshUsername || '',
-      sshPassword: server.sshPassword || '',
     });
     setEditId(server.id);
     setShowAdd(true);
@@ -423,8 +407,6 @@ function ConnectionsTab() {
                 <span className="font-mono-data">{server.host}:{server.webqueryPort}</span>
                 <span className="text-muted-foreground">{t('settings.connections.protocol')}</span>
                 <span>{server.useHttps ? 'HTTPS' : 'HTTP'}</span>
-                <span className="text-muted-foreground">SSH</span>
-                <span className="font-mono-data">{server.sshPort || '-'}</span>
               </div>
               <div className="flex items-center gap-1 pt-2">
                 <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => testServer.mutate(server.id, {
@@ -463,28 +445,6 @@ function ConnectionsTab() {
               <Switch checked={form.useHttps} onCheckedChange={(v) => setForm({ ...form, useHttps: v })} />
               <Label className="text-xs">{t('settings.connections.useHttps')}</Label>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label className="text-xs">{t('settings.connections.sshPort')}</Label><Input type="number" value={form.sshPort} onChange={(e) => setForm({ ...form, sshPort: e.target.value })} /></div>
-              <div><Label className="text-xs">{t('settings.connections.sshUser')}</Label><Input value={form.sshUsername} onChange={(e) => setForm({ ...form, sshUsername: e.target.value })} placeholder={editId ? t('settings.connections.unchanged') : 'serveradmin'} /></div>
-              <div><Label className="text-xs">{t('settings.connections.sshPassword')}</Label><Input type="password" value={form.sshPassword} onChange={(e) => setForm({ ...form, sshPassword: e.target.value })} placeholder={editId ? t('settings.connections.unchanged') : ''} /></div>
-            </div>
-            {editId && (
-              <div className="flex items-center justify-between gap-3 rounded-md border p-2">
-                <p className="text-xs text-muted-foreground">
-                  {editServer?.hasSshHostKey ? t('settings.connections.sshHostKeyPinned') : t('settings.connections.sshHostKeyNotPinned')}
-                </p>
-                <Button
-                  variant="outline" size="sm" className="h-7 text-xs shrink-0"
-                  disabled={!editServer?.hasSshHostKey || forgetHostKey.isPending}
-                  onClick={() => forgetHostKey.mutate(editId, {
-                    onSuccess: () => toast.success(t('settings.connections.toastHostKeyForgotten')),
-                    onError: () => toast.error(t('settings.connections.toastHostKeyForgetFailed')),
-                  })}
-                >
-                  <KeyRound className="h-3 w-3 mr-1" /> {t('settings.connections.forgetSshHostKey')}
-                </Button>
-              </div>
-            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setShowAdd(false); setEditId(null); resetForm(); }}>{t('settings.connections.cancel')}</Button>
@@ -575,7 +535,6 @@ function UsersTab() {
     <div className="space-y-4">
       <PasswordPolicyCard />
       <ReverseProxyCard />
-      <JournalRetentionCard />
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{t('settings.users.subtitle')}</p>
@@ -914,317 +873,6 @@ function PlaylistImportLimitCard() {
         <p className="text-[10px] text-muted-foreground">{t('settings.youtube.playlistLimit.hint')}</p>
         <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? t('settings.youtube.playlistLimit.saving') : t('settings.youtube.playlistLimit.save')}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ─── Discord Tab ─────────────────────────────────────────────
-
-function DiscordTab() {
-  const { t } = useTranslation();
-  const qc = useQueryClient();
-  const { data: settings, isLoading } = useQuery({ queryKey: ['discord-settings'], queryFn: discordApi.settings });
-  const { data: status } = useQuery({
-    queryKey: ['discord-status'],
-    queryFn: discordApi.status,
-    // Poll fast while the bridge is connecting so the badge reacts promptly
-    refetchInterval: (q) => (q.state.data?.running ? 15000 : 3000),
-  });
-  const { data: channels } = useQuery({
-    queryKey: ['discord-channels'],
-    queryFn: discordApi.channels,
-    enabled: !!status?.running,
-  });
-  const { data: guilds = [] } = useQuery({
-    queryKey: ['discord-guilds'],
-    queryFn: discordApi.guilds,
-    enabled: !!status?.running,
-  });
-  const { data: roles = [] } = useQuery({
-    queryKey: ['discord-roles'],
-    queryFn: discordApi.roles,
-    enabled: !!status?.running,
-  });
-  const { data: bots } = useQuery({ queryKey: ['music-bots'], queryFn: musicBotsApi.list });
-  const { data: servers } = useQuery({ queryKey: ['servers'], queryFn: serversApi.list });
-  const { data: tsChannels = [] } = useQuery({
-    queryKey: ['discord-ts-channels'],
-    queryFn: discordApi.tsChannels,
-    enabled: !!status?.running,
-  });
-
-  const [form, setForm] = useState<Partial<DiscordSettings> & { botToken?: string }>({});
-
-  const [seededSettings, setSeededSettings] = useState<typeof settings>(undefined);
-  if (settings && settings !== seededSettings) {
-    setSeededSettings(settings);
-    setForm({ ...settings, botToken: '' });
-  }
-
-  const save = useMutation({
-    mutationFn: () => discordApi.updateSettings({ ...form, botToken: form.botToken || undefined }),
-    onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ['discord-settings'] });
-      qc.invalidateQueries({ queryKey: ['discord-status'] });
-      qc.invalidateQueries({ queryKey: ['discord-channels'] });
-      qc.invalidateQueries({ queryKey: ['discord-roles'] });
-      if (result?.status?.error) toast.error(t('settings.discord.toastSavedButError', { error: result.status.error }));
-      else toast.success(t('settings.discord.toastSaved'));
-    },
-    onError: (err: any) => toast.error(err.response?.data?.error || t('settings.discord.toastSaveFailed')),
-  });
-
-  if (isLoading || !settings) return <PageLoader />;
-
-  const botList = Array.isArray(bots) ? bots : [];
-  const serverList = Array.isArray(servers) ? servers : [];
-  const textChannels = channels?.text ?? [];
-  const voiceChannels = channels?.voice ?? [];
-
-  const channelField = (label: string, key: 'notificationsChannelId' | 'statsChannelId' | 'voiceChannelId', hint: string, channelOptions: Array<{ id: string; name: string }>) => (
-    <div className="space-y-1.5">
-      <Label className="text-xs">{label}</Label>
-      {channelOptions.length > 0 ? (
-        <Select value={form[key] || 'none'} onValueChange={(v) => setForm((f) => ({ ...f, [key]: v === 'none' ? null : v }))}>
-          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder={t('settings.discord.none')} /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">{t('settings.discord.disabledOption')}</SelectItem>
-            {channelOptions.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      ) : (
-        <Input className="h-8 text-xs" placeholder={t('settings.discord.channelIdPlaceholder')}
-          value={form[key] || ''} onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value || null }))} />
-      )}
-      <p className="text-[10px] text-muted-foreground">{hint}</p>
-    </div>
-  );
-
-  const toggleRole = (id: string) =>
-    setForm((f) => {
-      const cur = f.commandRoleIds ?? [];
-      return { ...f, commandRoleIds: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] };
-    });
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-sm">{t('settings.discord.title')}</CardTitle>
-        <div className="flex items-center gap-2">
-          {status?.running
-            ? <Badge className="bg-emerald-600">{status.guildName ? t('settings.discord.connectedTo', { guild: status.guildName }) : t('settings.discord.connected')}</Badge>
-            : status?.enabled
-              ? <Badge variant="destructive">{status?.error ? t('settings.discord.error') : t('settings.discord.connecting')}</Badge>
-              : <Badge variant="outline">{t('settings.discord.disabled')}</Badge>}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4 max-w-xl">
-        {status?.error && <p className="text-xs text-destructive">{status.error}</p>}
-        {(status?.warnings ?? []).map((w) => <p key={w} className="text-xs text-amber-500">⚠ {w}</p>)}
-
-        <div className="flex items-center gap-2">
-          <Switch checked={!!form.enabled} onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))} />
-          <Label className="text-xs">{t('settings.discord.enableBot')}</Label>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t('settings.discord.botToken')}</Label>
-          <Input className="h-8 text-xs" type="password"
-            placeholder={settings.hasToken ? t('settings.discord.botTokenPlaceholderSet') : t('settings.discord.botTokenPlaceholder')}
-            value={form.botToken || ''} onChange={(e) => setForm((f) => ({ ...f, botToken: e.target.value }))} />
-          <p className="text-[10px] text-muted-foreground">
-            {t('settings.discord.botTokenHint')}
-          </p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t('settings.discord.server')}</Label>
-          {guilds.length > 0 ? (
-            <Select value={form.guildId || 'none'} onValueChange={(v) => setForm((f) => ({ ...f, guildId: v === 'none' ? null : v }))}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder={t('settings.discord.selectServer')} /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">{t('settings.discord.noneOption')}</SelectItem>
-                {guilds.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Input className="h-8 text-xs" placeholder={t('settings.discord.guildIdPlaceholder')}
-              value={form.guildId || ''} onChange={(e) => setForm((f) => ({ ...f, guildId: e.target.value || null }))} />
-          )}
-          <p className="text-[10px] text-muted-foreground">{t('settings.discord.serverHint')}</p>
-        </div>
-
-        {channelField(t('settings.discord.notificationsChannel'), 'notificationsChannelId', t('settings.discord.notificationsChannelHint'), textChannels)}
-        {channelField(t('settings.discord.statsChannel'), 'statsChannelId', t('settings.discord.statsChannelHint'), textChannels)}
-        {channelField(t('settings.discord.voiceChannel'), 'voiceChannelId', t('settings.discord.voiceChannelHint'), voiceChannels)}
-
-        <div className="space-y-1.5 pt-1">
-          <Label className="text-xs font-medium">{t('settings.discord.commandRoles')}</Label>
-          <p className="text-[10px] text-muted-foreground">{t('settings.discord.commandRolesHint')}</p>
-          {roles.length > 0 ? (
-            <div className="space-y-1.5 max-h-48 overflow-y-auto rounded-md border border-border/50 p-2">
-              {roles.map((r) => (
-                <label key={r.id} className="flex items-center gap-2 cursor-pointer select-none">
-                  <Checkbox
-                    checked={(form.commandRoleIds ?? []).includes(r.id)}
-                    onCheckedChange={() => toggleRole(r.id)}
-                  />
-                  <span
-                    className="inline-block h-2.5 w-2.5 rounded-full shrink-0 border border-border/50"
-                    style={{ backgroundColor: r.color ? `#${r.color.toString(16).padStart(6, '0')}` : 'transparent' }}
-                  />
-                  <span className="text-xs truncate">{r.name}</span>
-                </label>
-              ))}
-            </div>
-          ) : (
-            <p className="text-[10px] text-muted-foreground italic">{t('settings.discord.commandRolesOffline')}</p>
-          )}
-        </div>
-
-        <div className="space-y-2 pt-1">
-          <Label className="text-xs font-medium">{t('settings.discord.notifications')}</Label>
-
-          {/* Watched channel drives notifications AND the member-count nickname — always visible */}
-          <div className="space-y-1.5">
-            <Label className="text-[11px]">{t('settings.discord.watchChannel')}</Label>
-            {tsChannels.length > 0 ? (
-              <Select value={form.notifyChannelId || 'server'} onValueChange={(v) => setForm((f) => ({ ...f, notifyChannelId: v === 'server' ? null : v }))}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="server">{t('settings.discord.wholeServer')}</SelectItem>
-                  {tsChannels.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input className="h-8 text-xs" placeholder={t('settings.discord.watchChannelPlaceholder')}
-                value={form.notifyChannelId || ''} onChange={(e) => setForm((f) => ({ ...f, notifyChannelId: e.target.value || null }))} />
-            )}
-            <p className="text-[10px] text-muted-foreground">
-              {t('settings.discord.watchChannelHint')}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Switch checked={!!form.notifyConnections} onCheckedChange={(v) => setForm((f) => ({ ...f, notifyConnections: v }))} />
-            <Label className="text-xs font-normal">{t('settings.discord.tsPresence')}</Label>
-          </div>
-
-          {form.notifyConnections && (
-            <div className="ml-9 space-y-2 border-l border-border pl-3">
-              {form.notifyChannelId && (
-                <div className="grid grid-cols-1 gap-2">
-                  <div className="flex items-center gap-2">
-                    <Switch checked={!!form.notifyEmbed} onCheckedChange={(v) => setForm((f) => ({ ...f, notifyEmbed: v }))} />
-                    <Label className="text-xs font-normal">{t('settings.discord.embedStyle')}</Label>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">{t('settings.discord.joinMessage')}</Label>
-                    <Input className="h-8 text-xs" placeholder="{action} {user} a rejoint le canal {channel} du TeamSpeak ({TotalMembersOfChannel} connectés)"
-                      value={form.notifyJoinTemplate || ''} onChange={(e) => setForm((f) => ({ ...f, notifyJoinTemplate: e.target.value || null }))} />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px]">{t('settings.discord.leaveMessage')}</Label>
-                    <Input className="h-8 text-xs" placeholder="{action} {user} a quitté le canal {channel} du TeamSpeak ({TotalMembersOfChannel} connectés)"
-                      value={form.notifyLeaveTemplate || ''} onChange={(e) => setForm((f) => ({ ...f, notifyLeaveTemplate: e.target.value || null }))} />
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">{t('settings.discord.templateVariables')} <span className="font-mono">{'{action}'}</span>, <span className="font-mono">{'{user}'}</span>, <span className="font-mono">{'{channel}'}</span> {t('settings.discord.and')} <span className="font-mono">{'{TotalMembersOfChannel}'}</span>.</p>
-                </div>
-              )}
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <Switch checked={!!form.notifyNowPlaying} onCheckedChange={(v) => setForm((f) => ({ ...f, notifyNowPlaying: v }))} />
-            <Label className="text-xs font-normal">{t('settings.discord.nowPlaying')}</Label>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={!!form.notifyAway}
-              onCheckedChange={(v) => setForm((f) => ({ ...f, notifyAway: v }))}
-            />
-            <Label className="text-xs font-normal">{t('settings.discord.awayStatus')}</Label>
-          </div>
-
-          {form.notifyAway && (
-            <div className="ml-9 space-y-2 border-l border-border pl-3">
-              <div className="space-y-1.5">
-                <Label className="text-[11px]">{t('settings.discord.awayTemplate')}</Label>
-                <Input
-                  className="h-8 text-xs"
-                  placeholder="💤 {user} est passé AFK"
-                  value={form.notifyAwayTemplate || ''}
-                  onChange={(e) => setForm((f) => ({ ...f, notifyAwayTemplate: e.target.value || null }))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[11px]">{t('settings.discord.backTemplate')}</Label>
-                <Input
-                  className="h-8 text-xs"
-                  placeholder="✅ {user} est de retour"
-                  value={form.notifyBackTemplate || ''}
-                  onChange={(e) => setForm((f) => ({ ...f, notifyBackTemplate: e.target.value || null }))}
-                />
-              </div>
-              <p className="text-[10px] text-muted-foreground">{t('settings.discord.awayHint')}</p>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2">
-            <Switch checked={!!form.statsLiveEnabled} onCheckedChange={(v) => setForm((f) => ({ ...f, statsLiveEnabled: v }))} />
-            <Label className="text-xs font-normal">{t('settings.discord.liveStatsPanel')}</Label>
-          </div>
-          <p className="text-[10px] text-muted-foreground">{t('settings.discord.statsCommandHint')}</p>
-          <div className="flex items-center gap-3 pt-1">
-            <Label className="text-xs font-normal w-56">{t('settings.discord.autoDelete')}</Label>
-            <Input className="h-8 text-xs w-24" type="number" min={0} max={86400}
-              value={form.notifAutoDeleteSeconds ?? 0}
-              onChange={(e) => setForm((f) => ({ ...f, notifAutoDeleteSeconds: parseInt(e.target.value) || 0 }))} />
-          </div>
-          <p className="text-[10px] text-muted-foreground">{t('settings.discord.autoDeleteHint')}</p>
-        </div>
-
-        <div className="space-y-2 pt-1">
-          <Label className="text-xs font-medium">{t('settings.discord.botFlows')}</Label>
-          <div className="flex items-center gap-2">
-            <Switch checked={!!form.flowMessageTrigger} onCheckedChange={(v) => setForm((f) => ({ ...f, flowMessageTrigger: v }))} />
-            <Label className="text-xs font-normal">{t('settings.discord.enableFlowTriggers')}</Label>
-          </div>
-          <p className="text-[10px] text-muted-foreground">
-            {t('settings.discord.flowTriggersHintPre')}
-            <span className="font-mono"> Message Content </span> {t('settings.discord.flowTriggersHintPost')}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t('settings.discord.tsServer')}</Label>
-            <Select value={form.serverConfigId ? String(form.serverConfigId) : 'none'}
-              onValueChange={(v) => setForm((f) => ({ ...f, serverConfigId: v === 'none' ? null : parseInt(v) }))}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">{t('settings.discord.noneOption')}</SelectItem>
-                {serverList.map((s: any) => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t('settings.discord.defaultMusicBot')}</Label>
-            <Select value={form.defaultMusicBotId ? String(form.defaultMusicBotId) : 'none'}
-              onValueChange={(v) => setForm((f) => ({ ...f, defaultMusicBotId: v === 'none' ? null : parseInt(v) }))}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">{t('settings.discord.noneOption')}</SelectItem>
-                {botList.map((b: any) => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
-          {save.isPending ? t('settings.discord.savingReconnecting') : t('settings.discord.save')}
         </Button>
       </CardContent>
     </Card>
@@ -1622,46 +1270,6 @@ function PasswordPolicyCard() {
         </p>
         <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? t('settings.users.passwordPolicy.saving') : t('settings.users.passwordPolicy.savePolicy')}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ─── Journal Retention Card ──────────────────────────────────
-
-function JournalRetentionCard() {
-  const { t } = useTranslation();
-  const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ['journal-retention'], queryFn: journalApi.retention });
-  const [days, setDays] = useState(90);
-
-  const [seededData, setSeededData] = useState<typeof data>(undefined);
-  if (data && data !== seededData) {
-    setSeededData(data);
-    setDays(data.retentionDays);
-  }
-
-  const save = useMutation({
-    mutationFn: () => journalApi.updateRetention(days),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['journal-retention'] }); toast.success(t('settings.users.journalRetention.toastSaved')); },
-    onError: (err: any) => toast.error(err.response?.data?.error || t('settings.users.journalRetention.toastSaveFailed')),
-  });
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm">{t('settings.users.journalRetention.title')}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 max-w-xl">
-        <div className="flex items-center gap-3">
-          <Label className="text-xs w-40">{t('settings.users.journalRetention.retentionDays')}</Label>
-          <Input className="h-8 text-xs w-24" type="number" min={0} max={3650} value={days}
-            onChange={(e) => setDays(parseInt(e.target.value) || 0)} />
-        </div>
-        <p className="text-[10px] text-muted-foreground">{t('settings.users.journalRetention.hint')}</p>
-        <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
-          {save.isPending ? t('settings.users.journalRetention.saving') : t('settings.users.journalRetention.save')}
         </Button>
       </CardContent>
     </Card>

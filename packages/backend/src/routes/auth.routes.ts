@@ -70,7 +70,6 @@ async function trustedLoginAllowed(prisma: any, user: any, ip: string): Promise<
 }
 
 authRoutes.post('/login', async (req: Request, res: Response, next) => {
-  const journal = req.app.locals.connectionJournal;
   try {
     const { username, password } = req.body;
     if (!username || !password) throw new AppError(400, 'Username and password required');
@@ -84,17 +83,13 @@ authRoutes.post('/login', async (req: Request, res: Response, next) => {
     const user = await prisma.user.findUnique({ where: { username } });
 
     if (!canLocalLogin(user)) {
-      journal?.recordWebLogin(String(username), req.ip || '', false);
       throw new AppError(401, 'Invalid credentials');
     }
 
     const valid = await bcrypt.compare(password, user.passwordHash as string);
     if (!valid) {
-      journal?.recordWebLogin(user.username, req.ip || '', false);
       throw new AppError(401, 'Invalid credentials');
     }
-
-    journal?.recordWebLogin(user.username, req.ip || '', true);
 
     // Forced password change comes first — before MFA enrollment.
     if (user.mustChangePassword) {
@@ -199,7 +194,6 @@ authRoutes.get('/trusted/peek', async (req: Request, res: Response, next) => {
 
 // Exchange a valid trusted-device cookie for a full session (bypasses password + MFA).
 authRoutes.post('/trusted/session', async (req: Request, res: Response, next) => {
-  const journal = req.app.locals.connectionJournal;
   try {
     const prisma = req.app.locals.prisma;
     const user = await resolveTrustedCookie(prisma, req.cookies?.[TRUSTED_COOKIE_NAME]);
@@ -207,7 +201,6 @@ authRoutes.post('/trusted/session', async (req: Request, res: Response, next) =>
       clearTrustedCookie(res);
       throw new AppError(401, 'Trusted device not recognized');
     }
-    journal?.recordWebLogin(user.username, req.ip || '', true);
     res.json(await issueSession(prisma, user));
   } catch (err) { next(err); }
 });

@@ -5,11 +5,8 @@ import { bindIdentity, type WsIdentity } from './ws/ws-broadcast.js';
 import type { JwtPayload } from '@ts6/common';
 import { PrismaClient } from '../generated/prisma/index.js';
 import { ConnectionPool } from './ts-client/connection-pool.js';
-import { BotEngine } from './bot-engine/engine.js';
 import { VoiceBotManager } from './voice/voice-bot-manager.js';
 import { MusicCommandHandler } from './voice/music-command-handler.js';
-import { DiscordBridge } from './discord/discord-bridge.js';
-import { ConnectionJournal } from './connection-journal.js';
 import { applyTrustProxy, loadTrustProxy } from './routes/settings.routes.js';
 import { loadSamlRuntime } from './auth/saml/saml-config.js';
 import { config } from './config.js';
@@ -134,11 +131,6 @@ async function main() {
   // Load the SAML SP config/instance from the DB (no-op if SAML is unconfigured/disabled)
   await loadSamlRuntime(prisma);
 
-  // Initialize Bot Engine
-  const botEngine = new BotEngine(prisma, connectionPool, wss, app);
-  app.locals.botEngine = botEngine;
-  await botEngine.start();
-
   // Initialize Voice Bot Manager (Music Bots). Warm the Opus encoder first, so
   // the first song after a restart does not pay for compiling it.
   warmUpOpusEncoder();
@@ -149,32 +141,11 @@ async function main() {
   const playlistImporter = new PlaylistImporter(prisma);
   app.locals.playlistImporter = playlistImporter;
 
-  // Wire VoiceBotManager into BotEngine for voice action nodes in flows
-  botEngine.setVoiceBotManager(voiceBotManager);
-
   // Wire Music Command Handler for text-based music bot control (!radio, !play, etc.)
-  // Listens directly on each VoiceBot's TS3 connection (no SSH needed)
+  // Listens directly on each VoiceBot's own TS3 connection
   const musicCommandHandler = new MusicCommandHandler(prisma, voiceBotManager, connectionPool);
   musicCommandHandler.setPlaylistImporter(playlistImporter);
   voiceBotManager.setMusicCommandHandler(musicCommandHandler);
-
-  // Discord bridge: slash commands, TS notifications, stats (non-blocking)
-  const discordBridge = new DiscordBridge(prisma, connectionPool, voiceBotManager, botEngine.getEventBridge());
-  app.locals.discordBridge = discordBridge;
-  discordBridge.start().catch((err) => {
-    console.error(`[Discord] Failed to start: ${err.message}`);
-  });
-
-  // Wire Discord ↔ bot flows: Discord message triggers + send-message action
-  botEngine.setDiscordBridge(discordBridge);
-  discordBridge.setMessageHandler((msg) => botEngine.handleDiscordMessage(msg));
-
-  // Connection journal: web + TS connection logging (non-blocking)
-  const connectionJournal = new ConnectionJournal(prisma, connectionPool, voiceBotManager, botEngine.getEventBridge());
-  app.locals.connectionJournal = connectionJournal;
-  connectionJournal.start().catch((err) => {
-    console.error(`[Journal] Failed to start: ${err.message}`);
-  });
 
   server.listen(config.port, () => {
     console.log(`[TS6 WebUI] Backend running on http://localhost:${config.port}`);
@@ -185,10 +156,7 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     console.log('\n[TS6 WebUI] Shutting down...');
-    await discordBridge.stop();
-    await connectionJournal.stop();
     await voiceBotManager.stopAll();
-    botEngine.destroy();
     connectionPool.destroy();
     wss.close();
     server.close();

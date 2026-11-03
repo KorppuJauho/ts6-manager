@@ -1,9 +1,9 @@
 name: Publish images
 
 # Builds the three images and pushes them to GHCR so a deployment can pull a
-# branch instead of compiling it. Building on the target host is slow (the
-# backend compiles ssh2 and cpu-features from source) and fails in
-# ways CI never sees, because the host's toolchain is not the one CI tested.
+# branch instead of compiling it. Building on the target host is slow and
+# fails in ways CI never sees, because the host's toolchain is not the one CI
+# tested.
 on:
   push:
     branches: ['**']

@@ -4,7 +4,7 @@ import { requireRole } from '../middleware/rbac.js';
 import { AppError } from '../middleware/error-handler.js';
 import type { VoiceBotManager } from '../voice/voice-bot-manager.js';
 import { downloadYouTube } from '../voice/audio/youtube.js';
-import { playerWidgetToken } from './widget-public.routes.js';
+import { playerWidgetToken } from './player-widget.routes.js';
 import {
   AVATAR_MAX_BYTES,
   IMAGE_MIME,

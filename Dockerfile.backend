@@ -4,10 +4,6 @@ FROM node:22-slim AS base
 # The npm bundled with the Node image lags behind and prints upgrade notices
 # on every npx invocation at container start.
 RUN npm install -g npm@11 && corepack enable && corepack prepare pnpm@9 --activate
-# node-gyp builds native deps (ssh2's crypto binding, cpu-features) during
-# pnpm install and needs a toolchain and python3 present in the base stage.
-RUN apt-get update && apt-get install -y --no-install-recommends python3 build-essential && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install system deps: openssl (Prisma), ffmpeg (audio), python3 (yt-dlp)
 # yt-dlp lives in its own venv instead of polluting the system Python
@@ -30,13 +26,12 @@ WORKDIR /app
 FROM base AS build
 
 # Dependency layer: copy ONLY the workspace manifests + lockfile, then install.
-# This layer — which includes compiling the native modules — is cached by
-# BuildKit and only re-runs when a package.json or the lockfile changes, NOT on
-# every source edit. (Previously a single `COPY . .` before the install
-# invalidated this on any file change, recompiling them every build.)
+# This layer is cached by BuildKit and only re-runs when a package.json or the
+# lockfile changes, NOT on every source edit. (Previously a single `COPY . .`
+# before the install invalidated this on any file change.)
 # Trailing-slash destinations are the BuildKit-safe form for copying a single
 # file into a nested path; node_modules is excluded via .dockerignore so the
-# later `COPY . .` never clobbers the installed (Linux-compiled) modules.
+# later `COPY . .` never clobbers the modules installed for Linux.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/common/package.json   ./packages/common/
 COPY packages/backend/package.json  ./packages/backend/

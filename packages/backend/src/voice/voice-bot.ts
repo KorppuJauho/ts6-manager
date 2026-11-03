@@ -204,10 +204,6 @@ export class VoiceBot extends EventEmitter {
   // Reconnect: distinguishes manual stop from unexpected disconnect
   private _manuallyStopped: boolean = false;
 
-  // Optional tap on encoded opus frames (e.g. Discord voice relay). The bot
-  // itself knows nothing about the consumer.
-  private frameSink: ((opusFrame: Buffer) => void) | null = null;
-
   // Video streaming state
   private signaling: StreamSignaling | null = null;
   private sidecarProc: SidecarProcess | null = null;
@@ -972,14 +968,6 @@ export class VoiceBot extends EventEmitter {
     }
 
     this.client.sendVoice(opusFrame);
-
-    if (this.frameSink) {
-      try { this.frameSink(opusFrame); } catch { /* relay must never break TS playback */ }
-    }
-  }
-
-  setFrameSink(sink: ((opusFrame: Buffer) => void) | null): void {
-    this.frameSink = sink;
   }
 
   /**

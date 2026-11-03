@@ -127,9 +127,9 @@ git checkout <commit>
 
 ## Deploying a branch from CI-built images
 
-Building on the NAS compiles `ssh2` and `cpu-features` from source every time
-the dependency layer changes. It is slow, and it fails in ways CI
-never sees — the host toolchain is not the one CI tested. The **Publish
+Building on the NAS reinstalls every dependency each time the dependency layer
+changes. It is slow, and it fails in ways CI never sees — the host toolchain is
+not the one CI tested. The **Publish
 images** workflow builds all three images on every push and pushes them to
 GHCR, so the host pulls a build that has already been tested instead of
 repeating it.

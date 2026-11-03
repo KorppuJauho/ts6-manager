@@ -1,5 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma/index.js';
-import { normalizeIp } from './geo.js';
+import { normalizeIp } from './ip.js';
 
 /**
  * True if the IP has an active (non-expired) web ban. Best-effort purges

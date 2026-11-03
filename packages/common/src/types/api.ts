@@ -35,10 +35,6 @@ export interface ServerConfig {
   host: string;
   webqueryPort: number;
   useHttps: boolean;
-  sshPort: number;
-  hasSshCredentials: boolean;
-  /** Whether an SSH host key is pinned (list endpoint only). */
-  hasSshHostKey?: boolean;
   enabled: boolean;
   createdAt: string;
 }
@@ -49,9 +45,6 @@ export interface CreateServerConfig {
   webqueryPort: number;
   apiKey: string;
   useHttps: boolean;
-  sshPort: number;
-  sshUsername?: string;
-  sshPassword?: string;
 }
 
 export interface UpdateServerConfig {
@@ -60,9 +53,6 @@ export interface UpdateServerConfig {
   webqueryPort?: number;
   apiKey?: string;
   useHttps?: boolean;
-  sshPort?: number;
-  sshUsername?: string;
-  sshPassword?: string;
   enabled?: boolean;
 }
 
@@ -201,77 +191,4 @@ export interface PaginatedResponse<T> {
   total: number;
   offset: number;
   limit: number;
-}
-
-// === Server Widget / Banner ===
-
-export type WidgetTheme = 'dark' | 'light' | 'transparent' | 'neon' | 'military' | 'minimal';
-
-export interface WidgetConfig {
-  id: number;
-  name: string;
-  token: string;
-  serverConfigId: number;
-  virtualServerId: number;
-  theme: WidgetTheme;
-  showChannelTree: boolean;
-  showClients: boolean;
-  hideEmptyChannels: boolean;
-  maxChannelDepth: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateWidgetRequest {
-  name: string;
-  serverConfigId: number;
-  virtualServerId?: number;
-  theme?: WidgetTheme;
-  showChannelTree?: boolean;
-  showClients?: boolean;
-  hideEmptyChannels?: boolean;
-  maxChannelDepth?: number;
-}
-
-export interface UpdateWidgetRequest {
-  name?: string;
-  theme?: WidgetTheme;
-  showChannelTree?: boolean;
-  showClients?: boolean;
-  hideEmptyChannels?: boolean;
-  maxChannelDepth?: number;
-}
-
-export interface WidgetData {
-  serverName: string;
-  serverHost: string;
-  serverPort: number;
-  onlineUsers: number;
-  maxClients: number;
-  uptime: number;
-  platform: string;
-  version: string;
-  theme: WidgetTheme;
-  showChannelTree: boolean;
-  showClients: boolean;
-  channelTree: WidgetChannelNode[];
-  fetchedAt: string;
-}
-
-export interface WidgetChannelNode {
-  cid: number;
-  name: string;
-  hasPassword: boolean;
-  isspacer: boolean;
-  spacerType: 'line' | 'dotline' | 'dashline' | 'center' | 'left' | 'right' | 'none';
-  spacerText: string;
-  clients: WidgetClient[];
-  children: WidgetChannelNode[];
-}
-
-export interface WidgetClient {
-  clid: number;
-  nickname: string;
-  isAway: boolean;
-  isMuted: boolean;
 }
