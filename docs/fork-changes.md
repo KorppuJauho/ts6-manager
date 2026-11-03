@@ -352,6 +352,7 @@ enforced instead.
 | Change | Commit | Why |
 |---|---|---|
 | Radio stations ordered by id | `fix(bot): list radio stations…` | `!radio <id>` means ids are what users type; alphabetical order renumbered them on every insert |
+| Uploaded song names read as UTF-8 | `fix(music): read uploaded file names as UTF-8` | multer decodes multipart file names as latin1 unless told otherwise, so a browser's `Björk - Jóga.flac` became artist `BjÃ¶rk`, title `JÃ³ga`. Songs uploaded before the fix keep the names they were saved with |
 | `python3` + `build-essential` in base images | `build(docker): install a native-module toolchain…` | node-gyp builds `@discordjs/opus`, `cpu-features`, `ssh2` at install time |
 | `docker-compose.coolify.yml` removed | `chore(compose): remove the Coolify compose file…` | It ran upstream's Docker Hub images with no sidecar and no `SIDECAR_TOKEN`, and pinned one install's Coolify network ID; nobody deploys this fork on Coolify to keep it working |
 | `docker-compose.hub.yml` and `docker-compose.dev.yml` removed | `chore: remove upstream's Docker Hub compose files…` | Both ran clusterzx's Docker Hub images (`clusterzx/ts6-manager:backend`, `:backend-dev`), so a deployment using either ran upstream's code with none of this fork in it. `docker-compose.yml` builds this fork and `docker-compose.ghcr.yml` runs its CI images |

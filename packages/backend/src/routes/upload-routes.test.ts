@@ -118,6 +118,15 @@ describe('POST /api/servers/:configId/music-library/upload', () => {
     expect(fs.readFileSync(data.filePath)).toEqual(bytes);
   });
 
+  it('reads a UTF-8 file name as UTF-8', async () => {
+    prisma.song.create.mockImplementation(async ({ data }) => ({ id: 1, ...data }));
+    const res = await post('/api/servers/3/music-library/upload', [
+      { field: 'file', name: 'Björk - Jóga.flac', bytes: Buffer.from('x') },
+    ]);
+    expect(res.status).toBe(201);
+    expect(prisma.song.create.mock.calls[0][0].data).toMatchObject({ title: 'Jóga', artist: 'Björk' });
+  });
+
   it('refuses a disallowed extension without writing anything', async () => {
     const res = await post('/api/servers/3/music-library/upload', [
       { field: 'file', name: 'tool.exe', bytes: Buffer.from('MZ') },
