@@ -19,22 +19,10 @@ model User {
   updatedAt    DateTime  @updatedAt
   lastLoginAt  DateTime?
 
-  mfaEnabled         Boolean @default(false)
-  mfaSecret          String? // encrypted TOTP secret
-  mfaPendingSecret   String? // encrypted, during enrollment
-  mfaRecoveryCodes   String? // encrypted JSON array of hashed one-time codes
-  mfaRequired        Boolean @default(false) // admin-forced enrollment
   mustChangePassword Boolean @default(false) // force a password change at next login
-  language           String? // UI language (en/fr/de/es/it); null = browser default
 
-  authProvider String  @default("local") // "local" | "saml"
-  externalId   String? // SAML nameID (stable key)
-
-  serverAccess   UserServerAccess[]
-  refreshTokens  RefreshToken[]
-  trustedDevices TrustedDevice[]
-
-  @@unique([authProvider, externalId])
+  serverAccess  UserServerAccess[]
+  refreshTokens RefreshToken[]
 }
 
 model RefreshToken {
@@ -48,19 +36,6 @@ model RefreshToken {
   replacedBy String?
 }
 
-model TrustedDevice {
-  id           Int      @id @default(autoincrement())
-  userId       Int
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  selector     String   @unique
-  verifierHash String
-  expiresAt    DateTime
-  createdAt    DateTime @default(now())
-  lastUsedAt   DateTime @default(now())
-  userAgent    String?
-  ipAddress    String?
-}
-
 model UserServerAccess {
   id             Int            @id @default(autoincrement())
   userId         Int
@@ -71,94 +46,20 @@ model UserServerAccess {
   @@unique([userId, serverConfigId])
 }
 
+/// A TeamSpeak server the bots connect to. The voice port is per bot.
 model TsServerConfig {
-  id           Int      @id @default(autoincrement())
-  name         String
-  host         String
-  webqueryPort Int      @default(10080)
-  /// Unused since WebQuery was removed; dropped by the schema cleanup.
-  apiKey       String   @default("")
-  useHttps     Boolean  @default(false)
-  sshPort      Int      @default(10022)
-  sshUsername  String?
-  sshPassword  String?
-  /// SHA-256 fingerprint of the server's SSH host key, pinned on first connect
-  /// (trust on first use). A later mismatch aborts the connection instead of
-  /// handing the ServerQuery password to whoever answered.
-  sshHostKeyFp String?
-  enabled      Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  name      String
+  host      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   userAccess    UserServerAccess[]
-  botFlows      BotFlow[]
-  botLogs       BotExecutionLog[]
   musicBots     MusicBot[]
   songs         Song[]
   playlists     Playlist[]
   radioStations RadioStation[]
-  widgets       Widget[]
   musicRequests MusicRequest[]
-}
-
-model BotFlow {
-  id              Int            @id @default(autoincrement())
-  name            String
-  description     String?
-  flowData        String         @default("{\"nodes\":[],\"edges\":[]}")
-  serverConfigId  Int
-  virtualServerId Int            @default(1)
-  serverConfig    TsServerConfig @relation(fields: [serverConfigId], references: [id], onDelete: Cascade)
-  enabled         Boolean        @default(false)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-
-  executions BotExecution[]
-  variables  BotVariable[]
-}
-
-model BotVariable {
-  id     Int     @id @default(autoincrement())
-  flowId Int
-  flow   BotFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
-  name   String
-  value  String  @default("")
-  scope  String  @default("flow")
-
-  @@unique([flowId, name, scope])
-}
-
-model BotExecution {
-  id          Int       @id @default(autoincrement())
-  flowId      Int
-  flow        BotFlow   @relation(fields: [flowId], references: [id], onDelete: Cascade)
-  triggeredBy String
-  triggerData String?
-  status      String    @default("running")
-  startedAt   DateTime  @default(now())
-  endedAt     DateTime?
-  error       String?
-
-  logs BotExecutionLog[]
-}
-
-model BotExecutionLog {
-  id             Int            @id @default(autoincrement())
-  executionId    Int?
-  execution      BotExecution?  @relation(fields: [executionId], references: [id], onDelete: Cascade)
-  serverConfigId Int
-  serverConfig   TsServerConfig @relation(fields: [serverConfigId], references: [id])
-  flowId         Int?
-  nodeId         String?
-  nodeName       String?
-  level          String         @default("info")
-  message        String
-  data           String?
-  timestamp      DateTime       @default(now())
-
-  @@index([executionId])
-  @@index([flowId])
-  @@index([timestamp])
 }
 
 model AppSetting {
@@ -256,24 +157,6 @@ model RadioStation {
   createdAt      DateTime       @default(now())
 }
 
-// === Server Widget / Banner ===
-
-model Widget {
-  id                Int            @id @default(autoincrement())
-  name              String
-  token             String         @unique
-  serverConfigId    Int
-  serverConfig      TsServerConfig @relation(fields: [serverConfigId], references: [id], onDelete: Cascade)
-  virtualServerId   Int            @default(1)
-  theme             String         @default("dark")
-  showChannelTree   Boolean        @default(true)
-  showClients       Boolean        @default(true)
-  hideEmptyChannels Boolean        @default(false)
-  maxChannelDepth   Int            @default(5)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-}
-
 model MusicRequest {
   id             Int            @id @default(autoincrement())
   title          String
@@ -283,44 +166,6 @@ model MusicRequest {
   requestedAt    DateTime       @default(now())
 
   @@unique([serverConfigId, url])
-}
-
-model StreamSession {
-  id          Int       @id @default(autoincrement())
-  musicBotId  Int
-  source      String
-  preset      String    @default("720p")
-  startedAt   DateTime  @default(now())
-  endedAt     DateTime?
-  peakViewers Int       @default(0)
-}
-
-model DiscordSettings {
-  id                     Int      @id @default(autoincrement())
-  enabled                Boolean  @default(false)
-  botToken               String?
-  guildId                String?
-  notificationsChannelId String?
-  statsChannelId         String?
-  statsLiveEnabled       Boolean  @default(false)
-  notifyConnections      Boolean  @default(true)
-  notifyNowPlaying       Boolean  @default(true)
-  notifyChannelId        String?
-  notifyJoinTemplate     String?
-  notifyLeaveTemplate    String?
-  notifyEmbed            Boolean  @default(false)
-  notifAutoDeleteSeconds Int      @default(0) // 0 = keep messages
-  notifyAway             Boolean  @default(false)
-  notifyAwayTemplate     String?
-  notifyBackTemplate     String?
-  flowMessageTrigger     Boolean  @default(false)
-  commandRoleIds         String? // JSON array of Discord role IDs; null/empty = open to everyone
-  statsMessageId         String?
-  voiceChannelId         String?
-  defaultMusicBotId      Int?
-  serverConfigId         Int?
-  virtualServerId        Int      @default(1)
-  updatedAt              DateTime @updatedAt
 }
 
 model SpotifySettings {
@@ -334,52 +179,8 @@ model SpotifySettings {
 
 model MusicCommandSettings {
   id               Int      @id @default(autoincrement())
-  language         String   @default("en") // language the bot replies in on TeamSpeak
-  musicCommandSgid Int? // server group allowed to run music commands (null = open to all)
-  adminCommandSgid Int? // server group allowed to run move/moveall/notif (null = open to all)
   notifyNowPlaying Boolean  @default(false) // post "now playing" in the bot's TS channel
   updatedAt        DateTime @updatedAt
-}
-
-model WebBan {
-  id        Int       @id @default(autoincrement())
-  ip        String    @unique
-  reason    String?
-  expiresAt DateTime? // null = permanent
-  createdAt DateTime  @default(now())
-}
-
-model ConnectionLog {
-  id             Int      @id @default(autoincrement())
-  source         String // 'web' | 'teamspeak'
-  login          String
-  ip             String
-  country        String? // ISO code, null for LAN/unknown
-  success        Boolean  @default(true)
-  isBot          Boolean  @default(false)
-  serverConfigId Int?
-  createdAt      DateTime @default(now())
-
-  @@index([source, createdAt])
-}
-
-model SAMLSettings {
-  id              Int      @id @default(autoincrement())
-  enabled         Boolean  @default(false)
-  idpMetadataUrl  String?
-  idpMetadataXml  String? // encrypted
-  idpEntityId     String?
-  idpSsoUrl       String?
-  idpCertificate  String? // encrypted (PEM/base64)
-  spEntityId      String?
-  autoProvision   Boolean  @default(true)
-  defaultRole     String   @default("viewer")
-  attrUsername    String   @default("http://schemas.goauthentik.io/2021/02/saml/username")
-  attrEmail       String   @default("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")
-  attrDisplayName String   @default("http://schemas.goauthentik.io/2021/02/saml/displayname")
-  attrRole        String?
-  roleAdminValue  String?
-  updatedAt       DateTime @updatedAt
 }
 
 /// Video streaming configuration. A single row: these are host-level
@@ -398,12 +199,6 @@ model StreamSettings {
 
   // The largest preset "auto" may choose; a named preset ignores it.
   autoMaxPreset String @default("2160p")
-
-  /// No longer read: streams are always created public. The column stays
-  /// because the container applies the schema with a plain `prisma db push`,
-  /// which refuses to drop a column that holds data — and a failed push
-  /// would leave every later schema change unapplied too.
-  streamPublic Boolean @default(true)
 
   // IPTV (!tv). channelFilter is comma-separated substrings; empty offers
   // every channel in the playlist.

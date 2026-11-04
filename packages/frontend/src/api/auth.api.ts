@@ -15,9 +15,6 @@ export const authApi = {
   changePassword: (currentPassword: string, newPassword: string) =>
     api.put('/auth/password', { currentPassword, newPassword }),
 
-  setLanguage: (language: string) =>
-    api.put('/auth/language', { language }).then((r) => r.data),
-
   // Forced password change at login
   loginChangePassword: (changeToken: string, currentPassword: string, newPassword: string) =>
     api.post('/auth/login/change-password', { changeToken, currentPassword, newPassword }).then((r) => r.data),

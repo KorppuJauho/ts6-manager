@@ -18,6 +18,6 @@ export async function issueSession(prisma: any, user: any) {
   return {
     accessToken,
     refreshToken,
-    user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role, language: user.language },
+    user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
   };
 }

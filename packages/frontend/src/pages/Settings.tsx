@@ -23,8 +23,6 @@ import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
 import { Users, Server, Plus, Trash2, Pencil, Check, Lock, KeyRound, Youtube, Upload, FileText, Music, Bot, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { LANGUAGES, setLanguage } from '@/i18n';
-import { Flag } from '@/components/shared/Flag';
 
 export default function Settings() {
   const { user } = useAuthStore();
@@ -125,7 +123,6 @@ function AccountTab() {
 
   return (
     <div className="max-w-md space-y-4">
-      <LanguageCard />
 
       <Card>
         <CardHeader>
@@ -155,41 +152,6 @@ function AccountTab() {
       </Card>
 
     </div>
-  );
-}
-
-function LanguageCard() {
-  const { t, i18n } = useTranslation();
-  const { user, setAuth, accessToken, refreshToken } = useAuthStore();
-  const current = LANGUAGES.find((l) => i18n.resolvedLanguage === l.code)?.code ?? 'en';
-
-  const choose = (code: string) => {
-    setLanguage(code);
-    if (accessToken) {
-      authApi.setLanguage(code).then(() => {
-        if (user) setAuth(accessToken, refreshToken!, { ...user, language: code });
-        toast.success(t('common.save'));
-      }).catch(() => { /* ignore */ });
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-medium">{t('settings.account.language')}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        <Select value={current} onValueChange={choose}>
-          <SelectTrigger className="h-8 text-xs w-56"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {LANGUAGES.map((l) => (
-              <SelectItem key={l.code} value={l.code}><Flag code={l.country} className="mr-2" />{l.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[10px] text-muted-foreground">{t('settings.account.languageHint')}</p>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -838,21 +800,6 @@ function SpotifyTab() {
 
 // ─── Music Bot Commands Tab ──────────────────────────────────
 
-/**
- * Display names for the languages the *bot* can speak. Separate from the web
- * UI's LANGUAGES list: the bot has a Finnish catalogue but the interface is
- * not translated into Finnish, so the two sets are not the same.
- */
-const BOT_LANGUAGE_LABELS: Record<string, { label: string; country: string }> = {
-  en: { label: 'English', country: 'gb' },
-  fi: { label: 'Suomi', country: 'fi' },
-  fr: { label: 'Français', country: 'fr' },
-  de: { label: 'Deutsch', country: 'de' },
-  es: { label: 'Español', country: 'es' },
-  it: { label: 'Italiano', country: 'it' },
-};
-
-
 function MusicCommandsTab() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -861,23 +808,19 @@ function MusicCommandsTab() {
     queryFn: musicCommandSettingsApi.get,
   });
 
-  const [form, setForm] = useState<{ notifyNowPlaying: boolean; language: string }>({
-    notifyNowPlaying: false, language: 'en',
-  });
+  const [form, setForm] = useState<{ notifyNowPlaying: boolean }>({ notifyNowPlaying: false });
 
   const [seededSettings, setSeededSettings] = useState<typeof settings>(undefined);
   if (settings && settings !== seededSettings) {
     setSeededSettings(settings);
     setForm({
       notifyNowPlaying: settings.notifyNowPlaying,
-      language: settings.language || 'en',
     });
   }
 
   const save = useMutation({
     mutationFn: () => musicCommandSettingsApi.update({
       notifyNowPlaying: form.notifyNowPlaying,
-      language: form.language,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['music-command-settings'] });
@@ -895,27 +838,6 @@ function MusicCommandsTab() {
       </CardHeader>
       <CardContent className="space-y-4 max-w-xl">
         <p className="text-[11px] text-muted-foreground">{t('settings.musicCommands.description')}</p>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t('settings.musicCommands.botLanguage')}</Label>
-          <Select value={form.language} onValueChange={(v) => setForm((f) => ({ ...f, language: v }))}>
-            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {(settings.availableLanguages ?? ['en']).map((code) => {
-                const lang = BOT_LANGUAGE_LABELS[code];
-                return (
-                  <SelectItem key={code} value={code}>
-                    <span className="flex items-center gap-2">
-                      <Flag code={lang?.country} className="h-3 w-4" />
-                      {lang?.label ?? code}
-                    </span>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-          <p className="text-[10px] text-muted-foreground">{t('settings.musicCommands.botLanguageHint')}</p>
-        </div>
 
         <div className="flex items-center gap-2">
           <Switch checked={form.notifyNowPlaying} onCheckedChange={(v) => setForm((f) => ({ ...f, notifyNowPlaying: v }))} />

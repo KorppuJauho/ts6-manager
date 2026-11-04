@@ -1,13 +1,9 @@
 /**
  * Message catalogue for the bot's TeamSpeak replies.
  *
- * The keys are declared once here as a type. Every language file is typed
- * `BotMessages`, so a key added to English and forgotten elsewhere is a
- * compile error rather than a missing string discovered in production.
- *
  * Values that vary are functions rather than templates with placeholders:
  * the arguments are then typed too, so a call site cannot pass the wrong
- * ones, and a translator cannot silently drop an interpolation.
+ * ones.
  */
 export interface BotMessages {
   // Playback
@@ -113,12 +109,4 @@ export interface BotMessages {
   // Help
   helpHeader: string;
   helpLines: string[];
-}
-
-/** Language codes the bot can speak; mirrors the web UI's language list. */
-export const BOT_LANGUAGES = ['en', 'fi', 'fr', 'de', 'es', 'it'] as const;
-export type BotLanguage = (typeof BOT_LANGUAGES)[number];
-
-export function isBotLanguage(value: unknown): value is BotLanguage {
-  return typeof value === 'string' && (BOT_LANGUAGES as readonly string[]).includes(value);
 }

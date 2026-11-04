@@ -2,7 +2,6 @@ import { LogOut, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ThemeToggle } from '@/components/shared/ThemeToggle';
-import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 import { ServerSelector } from './ServerSelector';
 import { useAuthStore } from '@/stores/auth.store';
 import { useLogout } from '@/hooks/use-auth';
@@ -18,7 +17,6 @@ export function Header() {
       <ServerSelector />
 
       <div className="flex items-center gap-2">
-        <LanguageSwitcher />
         <ThemeToggle />
 
         <DropdownMenu>

@@ -16,6 +16,9 @@ async function main() {
     create: { key: 'max_playlist_import', value: '50' },
   });
 
+  // Settings of features that no longer exist (the connection journal).
+  await prisma.appSetting.deleteMany({ where: { key: { in: ['journal.retentionDays'] } } });
+
   console.log('Seed completed: app settings created. Visit /setup to create your admin account.');
 }
 

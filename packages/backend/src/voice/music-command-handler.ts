@@ -6,7 +6,7 @@ import { isYouTubePlaylistUrl } from './playlist-import-plan.js';
 import { fetchLyrics, chunkLyrics, lyricsInputFromTrack } from './lyrics.js';
 import { loadTvChannels, matchChannel, sortChannelNames, type TvChannelMap, type TvSort } from './iptv.js';
 import { getStreamSettings, parseChannelFilter } from '../utils/stream-settings.js';
-import { messages, type BotMessages } from './bot-i18n/index.js';
+import { en, type BotMessages } from './bot-i18n/index.js';
 
 const CMD_PREFIX = '!';
 
@@ -33,8 +33,6 @@ const MUSIC_COMMANDS = new Set([
 
 interface MusicCommandSettingsRow {
   notifyNowPlaying: boolean;
-  /** Language the bot replies in; see voice/bot-i18n. */
-  language: string;
 }
 
 /**
@@ -146,10 +144,6 @@ export class MusicCommandHandler {
       this.replyWhenFloodClears(bot, send);
       return;
     }
-
-    // Replies are built in the configured language, read from the settings
-    // cache (see `m`); load it before dispatching.
-    await this.getSettings();
 
     try {
       switch (command) {
@@ -621,7 +615,7 @@ export class MusicCommandHandler {
 
     // Live stream / unknown duration — just the elapsed time.
     if (!p.duration || p.duration <= 0) {
-      return `⏱ ${formatTime(pos)} (en direct)`;
+      return `⏱ ${formatTime(pos)} (live)`;
     }
 
     const dur = Math.floor(p.duration);
@@ -701,23 +695,13 @@ export class MusicCommandHandler {
     const row = await this.prisma.musicCommandSettings.findFirst();
     const value: MusicCommandSettingsRow = {
       notifyNowPlaying: row?.notifyNowPlaying ?? false,
-      language: row?.language ?? 'en',
     };
     this.settingsCache = { at: Date.now(), value };
     return value;
   }
 
-  /**
-   * The reply catalogue for the configured language.
-   *
-   * Read from the settings cache rather than threaded through every handler:
-   * getSettings() runs before any command dispatches, so the
-   * cache is populated and at most SETTINGS_TTL_MS stale by the time a reply
-   * is built. Falls back to English when the cache is cold.
-   */
-  private get m(): BotMessages {
-    return messages(this.settingsCache?.value.language);
-  }
+  /** The reply catalogue. */
+  private readonly m: BotMessages = en;
 
   /** Post a "now playing" line in the bot's current TS channel when enabled. */
   private async onNowPlaying(bot: VoiceBot, item: QueueItem): Promise<void> {
@@ -726,7 +710,7 @@ export class MusicCommandHandler {
     // Unasked-for, so simply skipped while the flood protection holds the bot.
     if (bot.floodCooldownMs > 0) return;
     const artist = item.artist ? `${item.artist} - ` : '';
-    bot.sendChannelMessage(`♪ Now playing : ${artist}${item.title}`);
+    bot.sendChannelMessage(`♪ Now playing: ${artist}${item.title}`);
   }
 
   private handleHelp(reply: ReplyFn): void {
