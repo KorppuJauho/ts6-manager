@@ -27,6 +27,11 @@ A local TeamSpeak server to test against, and what a local rig can and cannot
 verify (VAAPI cannot be tested under WSL2): `docs/local-testing.md`.
 Moving a deployment onto a git checkout, backing up before an upgrade, and the
 one-off procedure for a schema change that drops data: `docs/deploying.md`.
+Setting up from source: `docs/development.md`. Environment variables,
+hardware encoding and requirements: `docs/configuration.md`. The Docker quick
+start is `docs/quick-start.md`; the bot's chat commands are
+`docs/chat-commands.md` (update it when a command changes). Keep `README.md`
+short: it says what the project is and links to these.
 
 **`@ts6/common` must be built before typechecking.** Skipping it produces a
 cascade of `Cannot find module '@ts6/common'` errors that look like broken
