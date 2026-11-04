@@ -63,7 +63,7 @@
       "dialogAddTitle": "Add server",
       "dialogEditTitle": "Edit server",
       "deleteTitle": "Delete server?",
-      "deleteDescription": "This removes the server together with every bot, song, playlist, radio station and music request that belongs to it.",
+      "deleteDescription": "This removes the server together with its bots, playlists, radio stations, music requests and library entries. Song files already downloaded stay in the music folder.",
       "toastAdded": "Server added",
       "toastUpdated": "Server updated",
       "toastDeleted": "Server deleted",
