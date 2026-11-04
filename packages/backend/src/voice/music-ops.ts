@@ -120,8 +120,8 @@ export interface PlayResult {
  * playback unless something is already playing.
  */
 export async function downloadAndEnqueue(prisma: PrismaClient, bot: VoiceBot, url: string): Promise<PlayResult> {
-  // !play / !queue are reachable by any TS user when no command
-  // server-group is configured, so the URL is untrusted: block private ranges
+  // !play / !queue are reachable by any TS user who can message the bot, so
+  // the URL is untrusted: block private ranges
   // and cloud-metadata endpoints before yt-dlp fetches it.
   const check = await validateUrl(url, { allowedProtocols: ['http:', 'https:'] });
   if (!check.valid) {

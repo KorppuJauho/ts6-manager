@@ -5,10 +5,10 @@ import { authMiddleware } from './auth.js';
 import { config } from '../config.js';
 
 /**
- * Regression cover for the token-class confusion: access, MFA-challenge and
- * password-change tokens are all HS256 over the same secret, so verifying the
- * signature alone let a caller who knew only a password present the challenge
- * token as a session and skip the second factor entirely.
+ * Regression cover for the token-class confusion: access and password-change
+ * tokens are both HS256 over the same secret, so verifying the signature alone
+ * would let a caller who knew only a password present the change token as a
+ * session and skip the forced password change.
  */
 
 const ADMIN = { enabled: true, role: 'admin' };
@@ -42,7 +42,7 @@ describe('authMiddleware token class', () => {
     expect(req.user?.id).toBe(42);
   });
 
-  it('rejects an MFA challenge token presented as a session', async () => {
+  it('rejects a token of any other class presented as a session', async () => {
     const { next, status } = await run(sign({ typ: 'mfa', mfa: true, id: 42 }));
     expect(next).not.toHaveBeenCalled();
     expect(status).toHaveBeenCalledWith(401);

@@ -12,7 +12,7 @@ function getKey(): Buffer {
 
   // config.encryptionKey is mandatory and validated at startup, so there is no
   // fallback to JWT_SECRET: deriving the at-rest key from the signing key made
-  // one leak decrypt every stored ServerQuery key, SSH password and TOTP secret.
+  // one leak decrypt every stored bot identity and the Spotify client secret.
   //
   // SALT stays a fixed constant on purpose — changing it would make existing
   // ciphertext undecryptable. Its job was to stop cross-install precomputation,

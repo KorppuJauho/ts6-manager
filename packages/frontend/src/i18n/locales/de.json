@@ -1,7 +1,6 @@
 {
   "common": {
     "save": "Speichern",
-    "loading": "Wird geladen...",
     "saving": "Wird gespeichert..."
   },
   "nav": {
@@ -19,17 +18,6 @@
     "signIn": "Anmelden",
     "signingIn": "Anmeldung...",
     "invalidCredentials": "Ungültige Anmeldedaten. Bitte erneut versuchen.",
-    "twoFactorTitle": "Zwei-Faktor-Authentifizierung",
-    "twoFactorSetupTitle": "Zwei-Faktor-Authentifizierung einrichten",
-    "setupPrompt": "Ihr Administrator verlangt eine Zwei-Faktor-Authentifizierung. Scannen Sie diesen QR-Code mit einer Authenticator-App und geben Sie dann den 6-stelligen Code ein.",
-    "verifyAndContinue": "Überprüfen & fortfahren",
-    "saveRecoveryCodes": "Speichern Sie Ihre Wiederherstellungscodes",
-    "recoveryCodesHint": "Jeder ist einmalig verwendbar, falls Sie Ihr Gerät verlieren. Sie werden nicht erneut angezeigt.",
-    "enterCode": "Geben Sie den 6-stelligen Code aus Ihrer Authenticator-App ein.",
-    "enterCodeToFinish": "Geben Sie den 6-stelligen Code aus Ihrer Authenticator-App ein, um die Anmeldung abzuschließen.",
-    "verify": "Überprüfen",
-    "verifying": "Überprüfung...",
-    "invalidCode": "Ungültiger Code. Erneut versuchen.",
     "changePasswordTitle": "Passwort ändern",
     "changePasswordPrompt": "Sie müssen ein neues Passwort festlegen, bevor Sie fortfahren.",
     "currentPassword": "Aktuelles Passwort",
@@ -38,22 +26,7 @@
     "changeAndContinue": "Ändern & fortfahren",
     "changingPassword": "Wird geändert...",
     "passwordsDoNotMatch": "Die Passwörter stimmen nicht überein",
-    "changeFailed": "Passwort konnte nicht geändert werden",
-    "trustDevice": "Dies ist ein vertrauenswürdiger Computer",
-    "trustDeviceInfo": "30 Tage lang meldet dich dieses Gerät automatisch an – ohne Passwort und ohne Zwei-Faktor-Code. Nutze dies nur auf einem privaten Gerät, das du kontrollierst. Du kannst es jederzeit unter Einstellungen → Konto widerrufen.",
-    "continueAs": "Als {{name}} fortfahren",
-    "useAnotherAccount": "Mit einem anderen Konto anmelden",
-    "or": "oder",
-    "sso": "Über SSO anmelden",
-    "ssoProcessing": "Anmeldung läuft…",
-    "backToLogin": "Zurück zur Anmeldung",
-    "ssoError": {
-      "generic": "SSO-Anmeldung fehlgeschlagen",
-      "not_provisioned": "Konto nicht bereitgestellt. Bitte einen Administrator kontaktieren.",
-      "saml_failed": "SAML-Authentifizierung fehlgeschlagen",
-      "exchange_failed": "SSO-Sitzung ungültig oder abgelaufen",
-      "missing_code": "Ungültige SSO-Antwort"
-    }
+    "changeFailed": "Passwort konnte nicht geändert werden"
   },
   "settings": {
     "title": "Einstellungen",
@@ -64,7 +37,6 @@
       "youtube": "YouTube",
       "spotify": "Spotify",
       "musicCommands": "Music-Bot",
-      "saml": "SSO / SAML",
       "streaming": "Streaming"
     },
     "account": {
@@ -77,42 +49,7 @@
       "passwordsDoNotMatch": "Die Passwörter stimmen nicht überein",
       "language": "Sprache der Oberfläche",
       "languageHint": "Gilt für Ihr Konto auf allen Geräten.",
-      "passwordTooShort": "Das neue Passwort muss mindestens 6 Zeichen lang sein",
-      "mfa": {
-        "title": "Zwei-Faktor-Authentifizierung (TOTP)",
-        "on": "Aktiviert",
-        "off": "Deaktiviert",
-        "recoveryTitle": "Wiederherstellungscodes (einmalig angezeigt)",
-        "recoveryHint": "Jeder ist einmal verwendbar, falls Sie Ihr Gerät verlieren. Bewahren Sie sie sicher auf.",
-        "intro": "Schützen Sie Ihr Konto mit einer Authenticator-App (Google Authenticator, Authy, Bitwarden...).",
-        "starting": "Wird gestartet...",
-        "enable": "2FA aktivieren",
-        "scanPrompt": "Mit Ihrer Authenticator-App scannen und dann den 6-stelligen Code eingeben.",
-        "verifying": "Überprüfung...",
-        "verifyEnable": "Überprüfen & aktivieren",
-        "requiredNote": "2FA wird von einem Administrator verlangt und kann nicht deaktiviert werden.",
-        "disablePrompt": "Geben Sie Ihr Passwort ein, um 2FA zu deaktivieren.",
-        "passwordPlaceholder": "Passwort",
-        "disable": "Deaktivieren",
-        "setupFailed": "MFA-Einrichtung konnte nicht gestartet werden",
-        "enabledToast": "MFA aktiviert",
-        "invalidCode": "Ungültiger Code",
-        "disabledToast": "MFA deaktiviert",
-        "disableFailed": "MFA konnte nicht deaktiviert werden"
-      },
-      "trustedDevices": {
-        "title": "Vertrauenswürdige Geräte",
-        "description": "Geräte, die sich 30 Tage lang automatisch ohne Passwort oder Zwei-Faktor-Code anmelden.",
-        "empty": "Keine vertrauenswürdigen Geräte.",
-        "thisDevice": "Dieses Gerät",
-        "added": "Hinzugefügt",
-        "expires": "Läuft ab",
-        "revoke": "Widerrufen",
-        "revokeAll": "Alle widerrufen",
-        "revoked": "Vertrauenswürdiges Gerät widerrufen",
-        "revokedAll": "Alle vertrauenswürdigen Geräte widerrufen",
-        "revokeError": "Gerät konnte nicht widerrufen werden"
-      }
+      "passwordTooShort": "Das neue Passwort muss mindestens 6 Zeichen lang sein"
     },
     "connections": {
       "subtitle": "TeamSpeak-Serververbindungen verwalten",
@@ -150,15 +87,8 @@
       "colDisplayName": "Anzeigename",
       "colRole": "Rolle",
       "colStatus": "Status",
-      "col2fa": "2FA",
       "colActions": "Aktionen",
       "active": "Aktiv",
-      "require2faTitle": "2FA für diesen Benutzer erforderlich",
-      "mfaOn": "ein",
-      "mfaPending": "ausstehend",
-      "mfaOff": "aus",
-      "reset": "Zurücksetzen",
-      "resetLostDeviceTitle": "Zurücksetzen (Gerät verloren)",
       "resetPasswordTitle": "Passwort zurücksetzen",
       "resetPasswordDialogTitle": "Passwort zurücksetzen",
       "setNewPasswordFor": "Neues Passwort festlegen für",
@@ -176,11 +106,6 @@
       "toastEnabled": "Benutzer aktiviert",
       "toastDisabled": "Benutzer deaktiviert",
       "toastStatusFailed": "Status konnte nicht aktualisiert werden",
-      "toastMfaRequired": "2FA für Benutzer erforderlich",
-      "toastMfaNotRequired": "2FA nicht mehr erforderlich",
-      "toastMfaRequireFailed": "2FA-Anforderung konnte nicht aktualisiert werden",
-      "toastMfaReset": "2FA zurückgesetzt — der Benutzer muss sich neu registrieren",
-      "toastMfaResetFailed": "2FA konnte nicht zurückgesetzt werden",
       "toastPasswordReset": "Passwort erfolgreich zurückgesetzt",
       "toastPasswordResetFailed": "Passwort konnte nicht zurückgesetzt werden",
       "toastDeleted": "Benutzer gelöscht",
@@ -206,7 +131,6 @@
         "toastSaved": "Proxy-Einstellung gespeichert",
         "toastSaveFailed": "Speichern fehlgeschlagen"
       },
-      "requireMfa": "MFA erforderlich (Einrichtung bei der ersten Anmeldung)",
       "mustChangePassword": "Passwort bei der nächsten Anmeldung ändern"
     },
     "youtube": {
@@ -269,24 +193,6 @@
       "botLanguage": "Bot-Sprache",
       "botLanguageHint": "Die Sprache, in der der Bot auf TeamSpeak antwortet. Unabhängig von der Sprache dieser Oberfläche."
     },
-    "saml": {
-      "enable": "SSO-Authentifizierung (SAML) aktivieren",
-      "autoProvision": "Über SSO authentifizierte Konten automatisch bereitstellen",
-      "defaultRole": "Standardrolle für SSO-Konten",
-      "idpSsoUrl": "IdP-SSO-URL",
-      "idpCertificate": "Signaturzertifikat des IdP",
-      "idpEntityId": "IdP-Entity-ID",
-      "attrUsername": "Attribut: Benutzername",
-      "attrEmail": "Attribut: E-Mail",
-      "attrDisplayName": "Attribut: Anzeigename",
-      "attrRole": "Attribut: Rolle / Gruppe",
-      "roleAdminValue": "Wert, der die Admin-Rolle gewährt",
-      "spInfo": "Auf der IdP-Seite anzugeben (Authentik):",
-      "spMetadataUrl": "SP-Metadaten-URL",
-      "acsUrl": "ACS-URL (Assertion Consumer Service)",
-      "saved": "SSO-Einstellungen gespeichert",
-      "saveError": "Speichern der SSO-Einstellungen fehlgeschlagen"
-    },
     "streaming": {
       "encodingTitle": "Videokodierung",
       "encodingDescription": "Wie der Bot Video kodiert, bevor er es an TeamSpeak sendet. Hardwarekodierung verlagert das auf die GPU, was einen CPU-Kern freigibt und höhere Auflösungen ermöglicht.",
@@ -318,9 +224,6 @@
       "noHardwareForCodec": "keine GPU-Unterstützung",
       "hardwareUnavailableForCodec": "Diese GPU kann den gewählten Codec nicht kodieren — Streams fallen auf den Software-Encoder zurück."
     }
-  },
-  "tokens": {
-    "copied": "Kopiert"
   },
   "musicRequests": {
     "noServerSelected": "Kein Server ausgewählt",

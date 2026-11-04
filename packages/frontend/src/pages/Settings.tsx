@@ -7,7 +7,6 @@ import { settingsApi, proxyApi, limitsApi } from '@/api/settings.api';
 import { spotifyApi } from '@/api/spotify.api';
 import { musicCommandSettingsApi } from '@/api/music-command-settings.api';
 import { streamSettingsApi, type StreamSettings } from '@/api/stream-settings.api';
-import { samlApi, type SamlSettings } from '@/api/saml.api';
 import { useAuthStore } from '@/stores/auth.store';
 import { PageLoader } from '@/components/shared/LoadingSpinner';
 import { Button } from '@/components/ui/button';
@@ -21,7 +20,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/shared/ConfirmDialog';
-import { Users, Server, Plus, Trash2, Pencil, Check, Lock, KeyRound, Youtube, Upload, FileText, Music, Bot, ShieldCheck, Copy, Video } from 'lucide-react';
+import { Users, Server, Plus, Trash2, Pencil, Check, Lock, KeyRound, Youtube, Upload, FileText, Music, Bot, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { LANGUAGES, setLanguage } from '@/i18n';
@@ -42,7 +41,6 @@ export default function Settings() {
           <TabsTrigger value="account"><Lock className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.account')}</TabsTrigger>
           {isAdmin && <TabsTrigger value="users"><Users className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.users')}</TabsTrigger>}
           {isAdmin && <TabsTrigger value="youtube"><Youtube className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.youtube')}</TabsTrigger>}
-          {isAdmin && <TabsTrigger value="saml"><ShieldCheck className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.saml')}</TabsTrigger>}
           {isAdmin && <TabsTrigger value="spotify"><Music className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.spotify')}</TabsTrigger>}
           {isAdmin && <TabsTrigger value="musicCommands"><Bot className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.musicCommands')}</TabsTrigger>}
           {isAdmin && <TabsTrigger value="streaming"><Video className="h-3.5 w-3.5 mr-1" /> {t('settings.tabs.streaming')}</TabsTrigger>}
@@ -67,12 +65,6 @@ export default function Settings() {
         {isAdmin && (
           <TabsContent value="youtube" className="mt-4">
             <YouTubeTab />
-          </TabsContent>
-        )}
-
-        {isAdmin && (
-          <TabsContent value="saml" className="mt-4">
-            <SamlTab />
           </TabsContent>
         )}
 
@@ -162,65 +154,7 @@ function AccountTab() {
         </CardContent>
       </Card>
 
-      <MfaCard />
-      <TrustedDevicesCard />
     </div>
-  );
-}
-
-function TrustedDevicesCard() {
-  const { t, i18n } = useTranslation();
-  const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ['trusted-devices'], queryFn: () => authApi.trustedList() });
-  const devices: any[] = data?.devices ?? [];
-
-  const fmt = (d: string) => new Date(d).toLocaleDateString(i18n.resolvedLanguage);
-
-  const revoke = useMutation({
-    mutationFn: (id: number) => authApi.trustedRevoke(id),
-    onSuccess: () => { toast.success(t('settings.account.trustedDevices.revoked')); qc.invalidateQueries({ queryKey: ['trusted-devices'] }); },
-    onError: () => toast.error(t('settings.account.trustedDevices.revokeError')),
-  });
-  const revokeAll = useMutation({
-    mutationFn: () => authApi.trustedRevokeAll(),
-    onSuccess: () => { toast.success(t('settings.account.trustedDevices.revokedAll')); qc.invalidateQueries({ queryKey: ['trusted-devices'] }); },
-    onError: () => toast.error(t('settings.account.trustedDevices.revokeError')),
-  });
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-medium">{t('settings.account.trustedDevices.title')}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-xs text-muted-foreground">{t('settings.account.trustedDevices.description')}</p>
-        {devices.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t('settings.account.trustedDevices.empty')}</p>
-        ) : (
-          <div className="space-y-2">
-            {devices.map((d) => (
-              <div key={d.id} className="flex items-center justify-between gap-2 rounded-md border border-border/50 px-3 py-2">
-                <div className="min-w-0">
-                  <div className="text-xs font-medium truncate">
-                    {d.userAgent || '—'}{d.current && <span className="ml-2 text-[10px] text-primary">({t('settings.account.trustedDevices.thisDevice')})</span>}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground">
-                    {t('settings.account.trustedDevices.added')}: {fmt(d.createdAt)} · {t('settings.account.trustedDevices.expires')}: {fmt(d.expiresAt)}
-                    {d.ipAddress ? ` · ${d.ipAddress}` : ''}
-                  </div>
-                </div>
-                <Button variant="outline" size="sm" disabled={revoke.isPending} onClick={() => revoke.mutate(d.id)}>
-                  {t('settings.account.trustedDevices.revoke')}
-                </Button>
-              </div>
-            ))}
-            <Button variant="outline" size="sm" disabled={revokeAll.isPending} onClick={() => revokeAll.mutate()}>
-              {t('settings.account.trustedDevices.revokeAll')}
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
   );
 }
 
@@ -254,83 +188,6 @@ function LanguageCard() {
           </SelectContent>
         </Select>
         <p className="text-[10px] text-muted-foreground">{t('settings.account.languageHint')}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function MfaCard() {
-  const { t } = useTranslation();
-  const qc = useQueryClient();
-  const { data: me } = useQuery({ queryKey: ['me'], queryFn: authApi.me });
-  const enabled = !!me?.user?.mfaEnabled;
-  const required = !!me?.user?.mfaRequired;
-
-  const [qr, setQr] = useState<string | null>(null);
-  const [code, setCode] = useState('');
-  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
-  const [disablePw, setDisablePw] = useState('');
-
-  const setup = useMutation({
-    mutationFn: () => authApi.mfaSetup(),
-    onSuccess: (d) => setQr(d.qrDataUrl),
-    onError: () => toast.error(t('settings.account.mfa.setupFailed')),
-  });
-  const enable = useMutation({
-    mutationFn: () => authApi.mfaEnable(code),
-    onSuccess: (d) => { setRecoveryCodes(d.recoveryCodes); setQr(null); setCode(''); qc.invalidateQueries({ queryKey: ['me'] }); toast.success(t('settings.account.mfa.enabledToast')); },
-    onError: () => toast.error(t('settings.account.mfa.invalidCode')),
-  });
-  const disable = useMutation({
-    mutationFn: () => authApi.mfaDisable(disablePw),
-    onSuccess: () => { setDisablePw(''); setRecoveryCodes(null); qc.invalidateQueries({ queryKey: ['me'] }); toast.success(t('settings.account.mfa.disabledToast')); },
-    onError: (err: any) => toast.error(err.response?.data?.error || t('settings.account.mfa.disableFailed')),
-  });
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-sm font-medium">{t('settings.account.mfa.title')}</CardTitle>
-        <Badge variant={enabled ? 'default' : 'outline'} className={enabled ? 'bg-emerald-600' : ''}>{enabled ? t('settings.account.mfa.on') : t('settings.account.mfa.off')}</Badge>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {recoveryCodes && (
-          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 space-y-2">
-            <div className="flex items-center gap-2 text-amber-500 text-xs font-medium"><KeyRound className="h-3.5 w-3.5" /> {t('settings.account.mfa.recoveryTitle')}</div>
-            <p className="text-[10px] text-muted-foreground">{t('settings.account.mfa.recoveryHint')}</p>
-            <div className="grid grid-cols-2 gap-1 font-mono-data text-[11px]">{recoveryCodes.map((c) => <span key={c}>{c}</span>)}</div>
-          </div>
-        )}
-
-        {!enabled && !qr && (
-          <>
-            <p className="text-xs text-muted-foreground">{t('settings.account.mfa.intro')}</p>
-            <Button size="sm" onClick={() => setup.mutate()} disabled={setup.isPending}>{setup.isPending ? t('settings.account.mfa.starting') : t('settings.account.mfa.enable')}</Button>
-          </>
-        )}
-
-        {!enabled && qr && (
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">{t('settings.account.mfa.scanPrompt')}</p>
-            <img src={qr} alt="TOTP QR code" className="h-44 w-44 rounded bg-white p-2" />
-            <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" inputMode="numeric" className="h-8 text-xs w-40 text-center tracking-widest" />
-            <Button size="sm" onClick={() => enable.mutate()} disabled={enable.isPending || code.length < 6}>{enable.isPending ? t('settings.account.mfa.verifying') : t('settings.account.mfa.verifyEnable')}</Button>
-          </div>
-        )}
-
-        {enabled && (
-          <div className="space-y-2">
-            {required
-              ? <p className="text-xs text-muted-foreground">{t('settings.account.mfa.requiredNote')}</p>
-              : <>
-                  <p className="text-xs text-muted-foreground">{t('settings.account.mfa.disablePrompt')}</p>
-                  <div className="flex items-center gap-2">
-                    <Input type="password" value={disablePw} onChange={(e) => setDisablePw(e.target.value)} placeholder={t('settings.account.mfa.passwordPlaceholder')} className="h-8 text-xs w-48" />
-                    <Button size="sm" variant="destructive" onClick={() => disable.mutate()} disabled={disable.isPending || !disablePw}>{t('settings.account.mfa.disable')}</Button>
-                  </div>
-                </>}
-          </div>
-        )}
       </CardContent>
     </Card>
   );
@@ -462,7 +319,7 @@ function UsersTab() {
   const [resetPwUserId, setResetPwUserId] = useState<number | null>(null);
   const [resetPwValue, setResetPwValue] = useState('');
   const [resetPwMustChange, setResetPwMustChange] = useState(false);
-  const emptyForm = { username: '', password: '', displayName: '', role: 'viewer', mfaRequired: false, mustChangePassword: false, serverIds: [] as number[] };
+  const emptyForm = { username: '', password: '', displayName: '', role: 'viewer', mustChangePassword: false, serverIds: [] as number[] };
   const [form, setForm] = useState(emptyForm);
 
   const userList = useMemo(() => (Array.isArray(users) ? users : []), [users]);
@@ -487,20 +344,6 @@ function UsersTab() {
     updateUser.mutate({ id: userId, data: { enabled } }, {
       onSuccess: () => toast.success(enabled ? t('settings.users.toastEnabled') : t('settings.users.toastDisabled')),
       onError: () => toast.error(t('settings.users.toastStatusFailed')),
-    });
-  };
-
-  const handleRequireMfa = (userId: number, mfaRequired: boolean) => {
-    updateUser.mutate({ id: userId, data: { mfaRequired } }, {
-      onSuccess: () => toast.success(mfaRequired ? t('settings.users.toastMfaRequired') : t('settings.users.toastMfaNotRequired')),
-      onError: () => toast.error(t('settings.users.toastMfaRequireFailed')),
-    });
-  };
-
-  const handleResetMfa = (userId: number) => {
-    updateUser.mutate({ id: userId, data: { resetMfa: true } }, {
-      onSuccess: () => toast.success(t('settings.users.toastMfaReset')),
-      onError: () => toast.error(t('settings.users.toastMfaResetFailed')),
     });
   };
 
@@ -547,7 +390,6 @@ function UsersTab() {
               <th className="h-10 px-3 text-left font-medium text-muted-foreground">{t('settings.users.colRole')}</th>
               <th className="h-10 px-3 text-left font-medium text-muted-foreground">{t('settings.users.colStatus')}</th>
               <th className="h-10 px-3 text-left font-medium text-muted-foreground">{t('settings.users.colServers')}</th>
-              <th className="h-10 px-3 text-left font-medium text-muted-foreground">{t('settings.users.col2fa')}</th>
               <th className="h-10 px-3 text-right font-medium text-muted-foreground">{t('settings.users.colActions')}</th>
             </tr>
           </thead>
@@ -594,19 +436,6 @@ function UsersTab() {
                       </Button>
                     )}
                   </td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <span title={t('settings.users.require2faTitle')} className="inline-flex items-center gap-1">
-                        <Switch checked={!!u.mfaRequired} onCheckedChange={(v) => handleRequireMfa(u.id, v)} />
-                        <span className="text-[10px] text-muted-foreground">{u.mfaEnabled ? t('settings.users.mfaOn') : (u.mfaRequired ? t('settings.users.mfaPending') : t('settings.users.mfaOff'))}</span>
-                      </span>
-                      {u.mfaEnabled && (
-                        <Button variant="ghost" size="sm" className="h-6 text-[10px] px-1.5" title={t('settings.users.resetLostDeviceTitle')} onClick={() => handleResetMfa(u.id)}>
-                          {t('settings.users.reset')}
-                        </Button>
-                      )}
-                    </div>
-                  </td>
                   <td className="px-3 py-2.5 text-right">
                     <div className="inline-flex items-center gap-0.5">
                       <Button variant="ghost" size="icon" className="h-7 w-7" title={t('settings.users.resetPasswordTitle')} onClick={() => { setResetPwUserId(u.id); setResetPwValue(''); }}>
@@ -648,10 +477,6 @@ function UsersTab() {
                 <ServerChecklist servers={serverList} value={form.serverIds} onChange={(serverIds) => setForm({ ...form, serverIds })} />
               </div>
             )}
-            <div className="flex items-center gap-2">
-              <Switch checked={form.mfaRequired} onCheckedChange={(v) => setForm({ ...form, mfaRequired: v })} />
-              <Label className="text-xs font-normal">{t('settings.users.requireMfa')}</Label>
-            </div>
             <div className="flex items-center gap-2">
               <Switch checked={form.mustChangePassword} onCheckedChange={(v) => setForm({ ...form, mustChangePassword: v })} />
               <Label className="text-xs font-normal">{t('settings.users.mustChangePassword')}</Label>
@@ -921,141 +746,6 @@ function PlaylistImportLimitCard() {
         <p className="text-[10px] text-muted-foreground">{t('settings.youtube.playlistLimit.hint')}</p>
         <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? t('settings.youtube.playlistLimit.saving') : t('settings.youtube.playlistLimit.save')}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ─── SAML / SSO Tab ──────────────────────────────────────────
-
-function SamlTab() {
-  const { t } = useTranslation();
-  const qc = useQueryClient();
-  const { data: settings, isLoading } = useQuery({ queryKey: ['saml-settings'], queryFn: samlApi.settings });
-  const [form, setForm] = useState<Partial<SamlSettings> & { idpCertificate?: string }>({});
-
-  const [seededSettings, setSeededSettings] = useState<typeof settings>(undefined);
-  if (settings && settings !== seededSettings) {
-    setSeededSettings(settings);
-    setForm({ ...settings, idpCertificate: '' });
-  }
-
-  const save = useMutation({
-    mutationFn: () => samlApi.updateSettings({ ...form, idpCertificate: form.idpCertificate || undefined }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['saml-settings'] });
-      toast.success(t('settings.saml.saved'));
-    },
-    onError: (err: any) => toast.error(err?.response?.data?.error || t('settings.saml.saveError')),
-  });
-
-  if (isLoading || !settings) return <PageLoader />;
-
-  const copy = (value?: string | null) => {
-    if (!value) return;
-    navigator.clipboard?.writeText(value);
-    toast.success(t('tokens.copied'));
-  };
-
-  const readOnlyField = (label: string, value: string) => (
-    <div className="space-y-1.5">
-      <Label className="text-xs">{label}</Label>
-      <div className="flex items-center gap-1">
-        <Input className="h-8 text-xs font-mono-data" value={value} readOnly onFocus={(e) => e.target.select()} />
-        <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => copy(value)}>
-          <Copy className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-    </div>
-  );
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm">{t('settings.tabs.saml')}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 max-w-xl">
-        <div className="flex items-center gap-2">
-          <Switch checked={!!form.enabled} onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))} />
-          <Label className="text-xs">{t('settings.saml.enable')}</Label>
-        </div>
-
-        <div className="space-y-2 rounded-md border border-border/50 p-3">
-          <p className="text-[10px] text-muted-foreground">{t('settings.saml.spInfo')}</p>
-          {readOnlyField(t('settings.saml.spMetadataUrl'), settings.spMetadataUrl)}
-          {readOnlyField(t('settings.saml.acsUrl'), settings.acsUrl)}
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t('settings.saml.idpEntityId')}</Label>
-          <Input className="h-8 text-xs" value={form.idpEntityId || ''}
-            onChange={(e) => setForm((f) => ({ ...f, idpEntityId: e.target.value }))} />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t('settings.saml.idpSsoUrl')}</Label>
-          <Input className="h-8 text-xs" value={form.idpSsoUrl || ''}
-            onChange={(e) => setForm((f) => ({ ...f, idpSsoUrl: e.target.value }))} />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t('settings.saml.idpCertificate')}</Label>
-          <textarea
-            className="w-full h-24 rounded-md border border-border bg-background px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder={settings.hasIdpCertificate ? '••••••••••••••••' : '-----BEGIN CERTIFICATE-----'}
-            value={form.idpCertificate || ''}
-            onChange={(e) => setForm((f) => ({ ...f, idpCertificate: e.target.value }))}
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t('settings.saml.attrUsername')}</Label>
-            <Input className="h-8 text-xs" value={form.attrUsername || ''}
-              onChange={(e) => setForm((f) => ({ ...f, attrUsername: e.target.value }))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t('settings.saml.attrEmail')}</Label>
-            <Input className="h-8 text-xs" value={form.attrEmail || ''}
-              onChange={(e) => setForm((f) => ({ ...f, attrEmail: e.target.value }))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t('settings.saml.attrDisplayName')}</Label>
-            <Input className="h-8 text-xs" value={form.attrDisplayName || ''}
-              onChange={(e) => setForm((f) => ({ ...f, attrDisplayName: e.target.value }))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t('settings.saml.attrRole')}</Label>
-            <Input className="h-8 text-xs" value={form.attrRole || ''}
-              onChange={(e) => setForm((f) => ({ ...f, attrRole: e.target.value || null }))} />
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t('settings.saml.roleAdminValue')}</Label>
-          <Input className="h-8 text-xs" value={form.roleAdminValue || ''}
-            onChange={(e) => setForm((f) => ({ ...f, roleAdminValue: e.target.value || null }))} />
-        </div>
-
-        <div className="flex items-center gap-2 pt-1">
-          <Switch checked={!!form.autoProvision} onCheckedChange={(v) => setForm((f) => ({ ...f, autoProvision: v }))} />
-          <Label className="text-xs">{t('settings.saml.autoProvision')}</Label>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">{t('settings.saml.defaultRole')}</Label>
-          <Select value={form.defaultRole || 'viewer'} onValueChange={(v) => setForm((f) => ({ ...f, defaultRole: v as 'admin' | 'viewer' }))}>
-            <SelectTrigger className="h-8 text-xs w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="admin">{t('settings.users.roleAdmin')}</SelectItem>
-              <SelectItem value="viewer">{t('settings.users.roleViewer')}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
-          {save.isPending ? t('common.loading') : t('common.save')}
         </Button>
       </CardContent>
     </Card>

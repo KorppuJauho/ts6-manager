@@ -57,7 +57,7 @@ userRoutes.get('/', async (req: Request, res: Response, next) => {
     const prisma = req.app.locals.prisma;
     const users = await prisma.user.findMany({
       select: {
-        id: true, username: true, displayName: true, role: true, enabled: true, createdAt: true, lastLoginAt: true, mfaEnabled: true, mfaRequired: true,
+        id: true, username: true, displayName: true, role: true, enabled: true, createdAt: true, lastLoginAt: true,
         serverAccess: { select: { serverConfigId: true } },
       },
       orderBy: { id: 'asc' },
@@ -85,7 +85,6 @@ userRoutes.post('/', async (req: Request, res: Response, next) => {
     const user = await prisma.user.create({
       data: {
         username, passwordHash, displayName, role: assignedRole,
-        mfaRequired: !!req.body.mfaRequired,
         mustChangePassword: !!req.body.mustChangePassword,
         ...(serverIds?.length ? { serverAccess: { create: serverIds.map((serverConfigId) => ({ serverConfigId })) } } : {}),
       },
@@ -113,16 +112,6 @@ userRoutes.put('/:userId', async (req: Request, res: Response, next) => {
       data.passwordHash = await bcrypt.hash(req.body.password, 12);
     }
     if (req.body.mustChangePassword !== undefined) data.mustChangePassword = !!req.body.mustChangePassword;
-    // Admin MFA controls
-    if (req.body.mfaRequired !== undefined) data.mfaRequired = !!req.body.mfaRequired;
-    if (req.body.resetMfa) {
-      // Lost device: clear the user's MFA so they (re-)enroll. If still
-      // required, they're forced to set it up again at next login.
-      data.mfaEnabled = false;
-      data.mfaSecret = null;
-      data.mfaPendingSecret = null;
-      data.mfaRecoveryCodes = null;
-    }
 
     const isDemoting = data.enabled === false || data.role === 'viewer';
     if (isDemoting) {

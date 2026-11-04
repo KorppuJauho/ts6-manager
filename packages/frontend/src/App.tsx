@@ -30,7 +30,6 @@ const queryClient = new QueryClient({
 
 // Lazy-loaded pages
 const Login = lazy(() => import('@/pages/Login'));
-const SsoCallback = lazy(() => import('@/pages/SsoCallback'));
 const MusicBots = lazy(() => import('@/pages/MusicBots'));
 const MusicRequests = lazy(() => import('@/pages/MusicRequests'));
 const Settings = lazy(() => import('@/pages/Settings'));
@@ -50,7 +49,6 @@ export function App() {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/login" element={<Login />} />
-            <Route path="/login/sso" element={<SsoCallback />} />
             <Route path="/setup" element={<SetupPage />} />
 
             <Route element={<AppLayout />}>
