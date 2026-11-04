@@ -96,4 +96,9 @@ ENV SIDECAR_URL=http://ts6-sidecar:9800
 ENV PRISMA_HIDE_UPDATE_MESSAGE=1
 # Refresh yt-dlp on every start (best effort): YouTube breaks stale versions
 # within weeks, and the image is only rebuilt occasionally.
-CMD ["sh", "-c", "(pip install --no-cache-dir -qU 'yt-dlp[default]' || true) && npx prisma db push --skip-generate && npx prisma db seed || true && node dist/index.js"]
+# The schema push must succeed before the app starts. A push that would drop
+# data is refused without --accept-data-loss; starting anyway would run this
+# build against the old tables, so the container exits instead and the log
+# shows the refused change (docs/deploying.md has the upgrade procedure).
+# The seed only fills defaults, so its failure does not stop the start.
+CMD ["sh", "-c", "(pip install --no-cache-dir -qU 'yt-dlp[default]' || true) && npx prisma db push --skip-generate && (npx prisma db seed || true) && exec node dist/index.js"]
