@@ -48,8 +48,6 @@
       "changing": "Changing...",
       "passwordChanged": "Password changed successfully",
       "passwordsDoNotMatch": "Passwords do not match",
-      "language": "Interface language",
-      "languageHint": "Applies to your account on every device.",
       "passwordTooShort": "New password must be at least 6 characters"
     },
     "connections": {
@@ -203,9 +201,7 @@
       "save": "Save",
       "saving": "Saving...",
       "toastSaved": "Settings saved",
-      "toastSaveFailed": "Failed to save",
-      "botLanguage": "Bot language",
-      "botLanguageHint": "The language the bot replies in on TeamSpeak. Independent of the language of this interface."
+      "toastSaveFailed": "Failed to save"
     },
     "streaming": {
       "encodingTitle": "Video encoding",

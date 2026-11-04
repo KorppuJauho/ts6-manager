@@ -1,10 +1,9 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageLoader } from '@/components/shared/LoadingSpinner';
 import { useAuthStore } from '@/stores/auth.store';
-import { applyUserLanguage } from '@/hooks/use-auth';
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const isAdmin = useAuthStore((s) => s.isAdmin());
@@ -37,12 +36,6 @@ const NotFound = lazy(() => import('@/pages/NotFound'));
 const SetupPage = lazy(() => import('@/pages/SetupPage'));
 
 export function App() {
-  // Apply the signed-in user's saved language on startup (cross-device safety
-  // net; same-device choice is already restored from localStorage by i18n).
-  useEffect(() => {
-    applyUserLanguage(useAuthStore.getState().user);
-  }, []);
-
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>

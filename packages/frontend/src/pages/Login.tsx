@@ -6,9 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { authApi } from '@/api/auth.api';
 import { useAuthStore } from '@/stores/auth.store';
-import { applyUserLanguage } from '@/hooks/use-auth';
 import { useTranslation } from 'react-i18next';
-import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 import { Loader2, AlertCircle } from 'lucide-react';
 
 type Step = 'password' | 'changePassword';
@@ -31,7 +29,6 @@ export default function Login() {
 
   const finish = (data: any) => {
     setAuth(data.accessToken, data.refreshToken, data.user);
-    applyUserLanguage(data.user);
     navigate('/');
   };
 
@@ -72,7 +69,6 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background grid-bg">
-      <div className="fixed top-3 right-3 z-10"><LanguageSwitcher /></div>
       <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/5 rounded-full blur-[120px] pointer-events-none" />
 
       <div className="w-full max-w-sm mx-4 relative">
