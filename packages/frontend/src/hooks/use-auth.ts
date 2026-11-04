@@ -19,7 +19,7 @@ export function useLogin() {
     onSuccess: (data) => {
       setAuth(data.accessToken, data.refreshToken, data.user);
       applyUserLanguage(data.user);
-      navigate('/dashboard');
+      navigate('/');
     },
   });
 }

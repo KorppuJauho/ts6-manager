@@ -256,6 +256,13 @@ export class VoiceBotManager extends EventEmitter {
     return { id: dbBot.id };
   }
 
+  /** Points the server's bots at a new host; each uses it on its next connect. */
+  applyServerHost(serverConfigId: number, host: string): void {
+    for (const [botId, bot] of this.bots) {
+      if (this.botServerConfigId.get(botId) === serverConfigId) bot.updateConfig({ serverHost: host });
+    }
+  }
+
   getBot(id: number): VoiceBot | undefined {
     return this.bots.get(id);
   }

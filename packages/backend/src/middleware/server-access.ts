@@ -6,16 +6,24 @@ import { Request, Response, NextFunction } from 'express';
  */
 export function requireServerAccess() {
   return async (req: Request, res: Response, next: NextFunction) => {
-    // Admins have access to all servers
-    if (req.user?.role === 'admin') return next();
-
     const configId = parseInt(req.params.configId as string);
     if (isNaN(configId)) {
       res.status(400).json({ error: 'Invalid server config ID' });
       return;
     }
 
+    // A missing server is a 404 for everyone, not a foreign-key error further
+    // down in the route.
     const prisma = req.app.locals.prisma;
+    const server = await prisma.tsServerConfig.findUnique({ where: { id: configId }, select: { id: true } });
+    if (!server) {
+      res.status(404).json({ error: 'Server not found' });
+      return;
+    }
+
+    // Admins have access to all servers
+    if (req.user?.role === 'admin') return next();
+
     const access = await prisma.userServerAccess.findUnique({
       where: {
         userId_serverConfigId: {

@@ -96,31 +96,7 @@ export interface BotMessages {
   tvNotFound: (query: string) => string;
   tvStartFailed: (reason: string) => string;
 
-  // Channels and moving users
-  channelsNone: string;
-  channelsHeader: (count: number) => string;
-  channelsMore: (count: number) => string;
-  channelNotFoundById: (id: number) => string;
-  channelNotFound: (query: string) => string;
-  channelAmbiguous: (query: string) => string;
-  channelAmbiguousList: (query: string, matches: string) => string;
-  userNotFound: (ref: string) => string;
-  userAmbiguous: (ref: string) => string;
-  userAmbiguousList: (ref: string, matches: string) => string;
-  moveUsage: string;
-  moved: (user: string, channel: string) => string;
-  moveAllUsage: string;
-  moveAllNobody: (channel: string) => string;
-  moveAllDone: (count: number, channel: string) => string;
-  moveAllFailed: (names: string) => string;
-
-  // Notifications
-  notifEnabled: string;
-  notifDisabled: string;
-
-  // Permissions and errors
-  permissionCheckFailed: string;
-  permissionDenied: (group: string) => string;
+  // Errors
   genericError: (reason: string) => string;
   botConfigNotFound: string;
 

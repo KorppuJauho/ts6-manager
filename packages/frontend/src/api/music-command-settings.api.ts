@@ -1,8 +1,6 @@
 import api from './client';
 
 export interface MusicCommandSettings {
-  musicCommandSgid: number | null;
-  adminCommandSgid: number | null;
   notifyNowPlaying: boolean;
   /** Language the bot replies in on TeamSpeak. */
   language: string;

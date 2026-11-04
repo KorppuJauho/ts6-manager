@@ -76,7 +76,8 @@ model TsServerConfig {
   name         String
   host         String
   webqueryPort Int      @default(10080)
-  apiKey       String
+  /// Unused since WebQuery was removed; dropped by the schema cleanup.
+  apiKey       String   @default("")
   useHttps     Boolean  @default(false)
   sshPort      Int      @default(10022)
   sshUsername  String?

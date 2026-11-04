@@ -16,8 +16,8 @@ export default function NotFound() {
       <p className="text-sm text-muted-foreground max-w-sm">
         {t('notFound.message')}
       </p>
-      <Button variant="outline" onClick={() => navigate('/dashboard')}>
-        {t('notFound.backToDashboard')}
+      <Button variant="outline" onClick={() => navigate('/')}>
+        {t('notFound.backHome')}
       </Button>
     </div>
   );

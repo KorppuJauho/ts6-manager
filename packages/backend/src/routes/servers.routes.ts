@@ -1,61 +1,57 @@
 import { Router, Request, Response } from 'express';
 import { requireRole } from '../middleware/rbac.js';
 import { AppError } from '../middleware/error-handler.js';
-import { WebQueryClient } from '../ts-client/webquery-client.js';
-import type { ConnectionPool } from '../ts-client/connection-pool.js';
-import { encrypt, decrypt } from '../utils/crypto.js';
+import type { VoiceBotManager } from '../voice/voice-bot-manager.js';
 
 export const serverRoutes: Router = Router();
 
-// List all configured TS server connections
+// A server record is only what a bot needs to find the server: a name for the
+// pickers and the host it connects to. The voice port is per bot.
+const SERVER_SELECT = { id: true, name: true, host: true, createdAt: true } as const;
+
+function readNameAndHost(body: any, partial: boolean): { name?: string; host?: string } {
+  const out: { name?: string; host?: string } = {};
+  for (const field of ['name', 'host'] as const) {
+    const value = body?.[field];
+    if (value === undefined && partial) continue;
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new AppError(400, partial ? `${field} must not be empty` : 'Name and host are required');
+    }
+    out[field] = value.trim();
+  }
+  return out;
+}
+
+// List the TeamSpeak servers bots can connect to (viewers: the ones granted to them)
 serverRoutes.get('/', async (req: Request, res: Response, next) => {
   try {
     const prisma = req.app.locals.prisma;
     const servers = await prisma.tsServerConfig.findMany({
       where: req.user?.role === 'admin' ? {} : { userAccess: { some: { userId: req.user!.id } } },
-      select: {
-        id: true, name: true, host: true, webqueryPort: true,
-        useHttps: true, enabled: true, createdAt: true,
-      },
+      select: SERVER_SELECT,
       orderBy: { id: 'asc' },
     });
-
     res.json(servers);
   } catch (err) { next(err); }
 });
 
-// Add new TS server connection
+// Add a server
 serverRoutes.post('/', requireRole('admin'), async (req: Request, res: Response, next) => {
   try {
-    const { name, host, webqueryPort, apiKey, useHttps } = req.body;
-    if (!name || !host || !apiKey) throw new AppError(400, 'Name, host, and API key are required');
-
+    const { name, host } = readNameAndHost(req.body, false);
     const prisma = req.app.locals.prisma;
-    // H8: Encrypt sensitive fields at rest
-    const server = await prisma.tsServerConfig.create({
-      data: {
-        name,
-        host,
-        webqueryPort: webqueryPort || 10080,
-        apiKey: encrypt(apiKey),
-        useHttps: useHttps || false,
-      },
-    });
-
-    // Add to connection pool (use plaintext key for connection)
-    const pool: ConnectionPool = req.app.locals.connectionPool;
-    pool.addClient(server.id, server.host, server.webqueryPort, apiKey, server.useHttps);
-
-    res.status(201).json({ id: server.id, name: server.name });
+    const server = await prisma.tsServerConfig.create({ data: { name, host }, select: SERVER_SELECT });
+    res.status(201).json(server);
   } catch (err) { next(err); }
 });
 
-// Get server connection details
+// Get one server
 serverRoutes.get('/:configId', async (req: Request, res: Response, next) => {
   try {
     const prisma = req.app.locals.prisma;
     const server = await prisma.tsServerConfig.findUnique({
       where: { id: parseInt(String(req.params.configId)) },
+      select: SERVER_SELECT,
     });
     if (!server) throw new AppError(404, 'Server config not found');
 
@@ -66,77 +62,46 @@ serverRoutes.get('/:configId', async (req: Request, res: Response, next) => {
       if (!access) throw new AppError(403, 'No access to this server');
     }
 
-    res.json({
-      id: server.id, name: server.name, host: server.host,
-      webqueryPort: server.webqueryPort, useHttps: server.useHttps,
-      enabled: server.enabled, createdAt: server.createdAt,
-    });
+    res.json(server);
   } catch (err) { next(err); }
 });
 
-// Update server connection
+// Rename a server or point it at another host
 serverRoutes.put('/:configId', requireRole('admin'), async (req: Request, res: Response, next) => {
   try {
     const prisma = req.app.locals.prisma;
     const id = parseInt(String(req.params.configId));
-    const data: any = {};
-
-    const fields = ['name', 'host', 'webqueryPort', 'apiKey', 'useHttps', 'enabled'];
-    // The frontend never receives these back, so an empty value on edit means
-    // "keep the stored one" — never overwrite credentials with a blank.
-    const keepIfEmpty = ['apiKey'];
-    for (const field of fields) {
-      if (req.body[field] !== undefined) {
-        if (keepIfEmpty.includes(field) && req.body[field] === '') continue;
-        // H8: Encrypt sensitive fields
-        if (field === 'apiKey') {
-          data[field] = encrypt(req.body[field]);
-        } else {
-          data[field] = req.body[field];
-        }
-      }
-    }
+    const data = readNameAndHost(req.body, true);
 
     const current = await prisma.tsServerConfig.findUnique({ where: { id } });
     if (!current) throw new AppError(404, 'Server config not found');
 
-    const server = await prisma.tsServerConfig.update({ where: { id }, data });
+    const server = await prisma.tsServerConfig.update({ where: { id }, data, select: SERVER_SELECT });
 
-    // Refresh connection pool
-    const pool: ConnectionPool = req.app.locals.connectionPool;
-    await pool.refreshClient(id);
+    // Running bots keep their connection; the new host applies the next time
+    // each one connects.
+    if (data.host && data.host !== current.host) {
+      const manager: VoiceBotManager | undefined = req.app.locals.voiceBotManager;
+      manager?.applyServerHost(id, data.host);
+    }
 
-    res.json({ id: server.id, name: server.name });
+    res.json(server);
   } catch (err) { next(err); }
 });
 
-// Delete server connection
+// Delete a server, and the bots that connect to it
 serverRoutes.delete('/:configId', requireRole('admin'), async (req: Request, res: Response, next) => {
   try {
     const prisma = req.app.locals.prisma;
     const id = parseInt(String(req.params.configId));
+
+    // The cascade deletes the bot rows, but would leave the bots themselves
+    // connected; stop and remove them first.
+    const manager: VoiceBotManager | undefined = req.app.locals.voiceBotManager;
+    const bots = await prisma.musicBot.findMany({ where: { serverConfigId: id }, select: { id: true } });
+    for (const bot of bots) await manager?.removeBot(bot.id);
+
     await prisma.tsServerConfig.delete({ where: { id } });
-
-    const pool: ConnectionPool = req.app.locals.connectionPool;
-    pool.removeClient(id);
-
     res.status(204).send();
-  } catch (err) { next(err); }
-});
-
-// Test connection
-serverRoutes.post('/:configId/test', requireRole('admin'), async (req: Request, res: Response, next) => {
-  try {
-    const prisma = req.app.locals.prisma;
-    const server = await prisma.tsServerConfig.findUnique({
-      where: { id: parseInt(String(req.params.configId)) },
-    });
-    if (!server) throw new AppError(404, 'Server config not found');
-
-    const client = new WebQueryClient(server.host, server.webqueryPort, decrypt(server.apiKey), server.useHttps);
-    const ok = await client.testConnection();
-    client.destroy(); // Close the temporary TCP connection immediately
-
-    res.json({ success: ok });
   } catch (err) { next(err); }
 });

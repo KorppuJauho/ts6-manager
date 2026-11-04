@@ -56,9 +56,9 @@ export interface ValidateUrlResult {
  *
  * This checks only the URL it is handed. A 3xx Location can still walk an
  * outbound request onto an internal address, so a caller fetching a
- * user-supplied URL must either refuse redirects (axios `maxRedirects: 0`) or
+ * user-supplied URL must either refuse redirects (`redirect: 'manual'`) or
  * re-validate every hop — as fetchIcyMetadata does inside its redirect loop.
- * Do not "tidy away" a `maxRedirects: 0` in this codebase; it is load-bearing.
+ * Do not "tidy away" that per-hop check; it is load-bearing.
  */
 export async function validateUrl(
   url: string,
@@ -105,7 +105,7 @@ export async function validateUrl(
         return { valid: false, error: `Hostname "${hostname}" resolves to a cloud metadata IP` };
       }
     } catch {
-      // DNS resolution failed — allow the request to proceed and let axios/ffmpeg handle the error
+      // DNS resolution failed — allow the request to proceed and let the fetch/ffmpeg handle the error
     }
   }
 

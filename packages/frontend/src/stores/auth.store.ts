@@ -20,7 +20,6 @@ interface AuthStore {
   logout: () => void;
   isAuthenticated: () => boolean;
   isAdmin: () => boolean;
-  canWrite: () => boolean;
 }
 
 // M9: Tokens stored in localStorage. This is an accepted tradeoff — no XSS vectors
@@ -41,7 +40,6 @@ export const useAuthStore = create<AuthStore>()(
         set({ accessToken: null, refreshToken: null, user: null }),
       isAuthenticated: () => !!get().accessToken,
       isAdmin: () => get().user?.role === 'admin',
-      canWrite: () => get().user?.role === 'admin',
     }),
     { name: 'ts6-auth' },
   ),

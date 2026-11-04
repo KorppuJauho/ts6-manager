@@ -13,7 +13,6 @@ services:
       - DATABASE_URL=file:/app/packages/backend/data/ts6webui.db
       - "JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env - generate with openssl rand -hex 32}"
       - "ENCRYPTION_KEY=${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env, different from JWT_SECRET - generate with openssl rand -hex 32}"
-      - TS_ALLOW_SELF_SIGNED=${TS_ALLOW_SELF_SIGNED:-false}
       - JWT_ACCESS_EXPIRY=15m
       - JWT_REFRESH_EXPIRY=7d
       # Must match the origin the browser actually uses — it is the CORS

@@ -30,14 +30,42 @@ userRoutes.put('/password-policy', async (req: Request, res: Response, next) => 
   } catch (err) { next(err); }
 });
 
+/**
+ * The servers a request grants, or undefined when it leaves them unchanged.
+ * Grants only matter to viewers: admins reach every server anyway.
+ */
+async function readServerIds(prisma: any, value: unknown): Promise<number[] | undefined> {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new AppError(400, 'serverIds must be an array');
+  const ids = [...new Set(value.map((v) => Number(v)))];
+  if (ids.some((n) => !Number.isInteger(n) || n <= 0)) throw new AppError(400, 'serverIds must be server ids');
+  if (ids.length && await prisma.tsServerConfig.count({ where: { id: { in: ids } } }) !== ids.length) {
+    throw new AppError(400, 'Unknown server in serverIds');
+  }
+  return ids;
+}
+
+function grantWrites(prisma: any, userId: number, ids: number[]) {
+  return [
+    prisma.userServerAccess.deleteMany({ where: { userId } }),
+    ...(ids.length ? [prisma.userServerAccess.createMany({ data: ids.map((serverConfigId) => ({ userId, serverConfigId })) })] : []),
+  ];
+}
+
 userRoutes.get('/', async (req: Request, res: Response, next) => {
   try {
     const prisma = req.app.locals.prisma;
     const users = await prisma.user.findMany({
-      select: { id: true, username: true, displayName: true, role: true, enabled: true, createdAt: true, lastLoginAt: true, mfaEnabled: true, mfaRequired: true },
+      select: {
+        id: true, username: true, displayName: true, role: true, enabled: true, createdAt: true, lastLoginAt: true, mfaEnabled: true, mfaRequired: true,
+        serverAccess: { select: { serverConfigId: true } },
+      },
       orderBy: { id: 'asc' },
     });
-    res.json(users);
+    res.json(users.map(({ serverAccess, ...u }: any) => ({
+      ...u,
+      serverIds: serverAccess.map((a: { serverConfigId: number }) => a.serverConfigId),
+    })));
   } catch (err) { next(err); }
 });
 
@@ -52,12 +80,14 @@ userRoutes.post('/', async (req: Request, res: Response, next) => {
 
     const assignedRole = role || 'viewer';
     if (!VALID_ROLES.includes(assignedRole)) throw new AppError(400, `Invalid role. Must be one of: ${VALID_ROLES.join(', ')}`);
+    const serverIds = await readServerIds(prisma, req.body.serverIds);
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await prisma.user.create({
       data: {
         username, passwordHash, displayName, role: assignedRole,
         mfaRequired: !!req.body.mfaRequired,
         mustChangePassword: !!req.body.mustChangePassword,
+        ...(serverIds?.length ? { serverAccess: { create: serverIds.map((serverConfigId) => ({ serverConfigId })) } } : {}),
       },
     });
 
@@ -107,7 +137,11 @@ userRoutes.put('/:userId', async (req: Request, res: Response, next) => {
       }
     }
 
-    await prisma.user.update({ where: { id }, data });
+    const serverIds = await readServerIds(prisma, req.body.serverIds);
+    await prisma.$transaction([
+      prisma.user.update({ where: { id }, data }),
+      ...(serverIds ? grantWrites(prisma, id, serverIds) : []),
+    ]);
     res.status(204).send();
   } catch (err) { next(err); }
 });

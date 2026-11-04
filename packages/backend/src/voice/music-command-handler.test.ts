@@ -37,9 +37,7 @@ function command(bot: unknown, text: string) {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  handler = new MusicCommandHandler(null as any, null as any, null as any);
-  // Access control reads server groups over WebQuery; not what is under test.
-  vi.spyOn(handler as any, 'checkAccess').mockResolvedValue(true);
+  handler = new MusicCommandHandler(null as any);
   vi.spyOn(handler as any, 'getSettings').mockResolvedValue({ notifyNowPlaying: true });
   vi.spyOn(console, 'log').mockImplementation(() => { });
 });

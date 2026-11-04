@@ -4,7 +4,6 @@ import { WebSocketServer } from 'ws';
 import { bindIdentity, type WsIdentity } from './ws/ws-broadcast.js';
 import type { JwtPayload } from '@ts6/common';
 import { PrismaClient } from '../generated/prisma/index.js';
-import { ConnectionPool } from './ts-client/connection-pool.js';
 import { VoiceBotManager } from './voice/voice-bot-manager.js';
 import { MusicCommandHandler } from './voice/music-command-handler.js';
 import { applyTrustProxy, loadTrustProxy } from './routes/settings.routes.js';
@@ -119,13 +118,8 @@ async function main() {
     bindIdentity(socket, identity);
   });
 
-  // Initialize TS connection pool
-  const connectionPool = new ConnectionPool(prisma);
-  await connectionPool.initialize();
-
   // Make services available via app.locals
   app.locals.prisma = prisma;
-  app.locals.connectionPool = connectionPool;
   app.locals.wss = wss;
 
   // Load the SAML SP config/instance from the DB (no-op if SAML is unconfigured/disabled)
@@ -143,7 +137,7 @@ async function main() {
 
   // Wire Music Command Handler for text-based music bot control (!radio, !play, etc.)
   // Listens directly on each VoiceBot's own TS3 connection
-  const musicCommandHandler = new MusicCommandHandler(prisma, voiceBotManager, connectionPool);
+  const musicCommandHandler = new MusicCommandHandler(prisma);
   musicCommandHandler.setPlaylistImporter(playlistImporter);
   voiceBotManager.setMusicCommandHandler(musicCommandHandler);
 
@@ -157,7 +151,6 @@ async function main() {
   const shutdown = async () => {
     console.log('\n[TS6 WebUI] Shutting down...');
     await voiceBotManager.stopAll();
-    connectionPool.destroy();
     wss.close();
     server.close();
     await prisma.$disconnect();
