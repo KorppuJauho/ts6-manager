@@ -1,8 +1,5 @@
 import { createApp } from './app.js';
-import { createServer, type IncomingMessage } from 'http';
-import { WebSocketServer } from 'ws';
-import { bindIdentity, type WsIdentity } from './ws/ws-broadcast.js';
-import type { JwtPayload } from '@ts6/common';
+import { createServer } from 'http';
 import { PrismaClient } from '../generated/prisma/index.js';
 import { VoiceBotManager } from './voice/voice-bot-manager.js';
 import { MusicCommandHandler } from './voice/music-command-handler.js';
@@ -11,7 +8,6 @@ import { config } from './config.js';
 import { setYtCookieFile } from './voice/audio/youtube.js';
 import { warmUpOpusEncoder } from './voice/audio/pipeline.js';
 import { PlaylistImporter } from './voice/playlist-import.js';
-import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
 
@@ -63,68 +59,13 @@ async function main() {
   // protection is unaffected.
   server.requestTimeout = 0;
 
-  // H3: WebSocket with JWT authentication
-  const wss = new WebSocketServer({
-    server,
-    path: '/ws',
-    verifyClient: ({ req }, done) => {
-      // Mirrors middleware/auth.ts: assert the token class, then confirm the
-      // account is still live. Verifying the signature alone would accept a
-      // password-change token and would keep serving a disabled account.
-      void (async () => {
-        try {
-          const wsUrl = new URL(req.url!, `http://${req.headers.host}`);
-          const token = wsUrl.searchParams.get('token');
-          if (!token) return done(false, 401, 'Missing token');
-
-          const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload;
-          if (payload.typ !== 'access') return done(false, 401, 'Invalid token');
-
-          const user = await prisma.user.findUnique({
-            where: { id: payload.id },
-            select: { enabled: true, role: true },
-          });
-          if (!user || !user.enabled) return done(false, 401, 'Invalid token');
-
-          const grants = user.role === 'admin'
-            ? []
-            : await prisma.userServerAccess.findMany({
-                where: { userId: payload.id },
-                select: { serverConfigId: true },
-              });
-
-          (req as IncomingMessage & { wsIdentity?: WsIdentity }).wsIdentity = {
-            id: payload.id,
-            role: user.role,
-            serverIds: new Set(grants.map((g: { serverConfigId: number }) => g.serverConfigId)),
-          };
-          done(true);
-        } catch {
-          done(false, 401, 'Invalid token');
-        }
-      })();
-    },
-  });
-
-  // Carry the identity resolved in verifyClient onto the socket, so broadcasts
-  // can be filtered per user (see ws/ws-broadcast.ts).
-  wss.on('connection', (socket, req) => {
-    const identity = (req as IncomingMessage & { wsIdentity?: WsIdentity }).wsIdentity;
-    if (!identity) {
-      socket.close(1008, 'Unauthenticated');
-      return;
-    }
-    bindIdentity(socket, identity);
-  });
-
   // Make services available via app.locals
   app.locals.prisma = prisma;
-  app.locals.wss = wss;
 
   // Initialize Voice Bot Manager (Music Bots). Warm the Opus encoder first, so
   // the first song after a restart does not pay for compiling it.
   warmUpOpusEncoder();
-  const voiceBotManager = new VoiceBotManager(prisma, wss);
+  const voiceBotManager = new VoiceBotManager(prisma);
   app.locals.voiceBotManager = voiceBotManager;
   await voiceBotManager.start();
 
@@ -139,7 +80,6 @@ async function main() {
 
   server.listen(config.port, () => {
     console.log(`[TS6 WebUI] Backend running on http://localhost:${config.port}`);
-    console.log(`[TS6 WebUI] WebSocket available at ws://localhost:${config.port}/ws`);
     console.log(`[TS6 WebUI] Environment: ${config.nodeEnv}`);
   });
 
@@ -147,7 +87,6 @@ async function main() {
   const shutdown = async () => {
     console.log('\n[TS6 WebUI] Shutting down...');
     await voiceBotManager.stopAll();
-    wss.close();
     server.close();
     await prisma.$disconnect();
     process.exit(0);

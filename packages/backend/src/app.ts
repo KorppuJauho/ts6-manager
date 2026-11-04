@@ -19,6 +19,7 @@ import { spotifyRoutes } from './routes/spotify.routes.js';
 import { musicCommandSettingsRoutes } from './routes/music-command-settings.routes.js';
 import { streamSettingsRoutes } from './routes/stream-settings.routes.js';
 import { requireServerAccess } from './middleware/server-access.js';
+import { createRelayRoutes } from './voice/streaming/yt-relay.js';
 import { requireIntParams } from './middleware/validate-params.js';
 
 export function createApp(): Express {
@@ -62,6 +63,10 @@ export function createApp(): Express {
   // Public routes
   app.use('/api/setup', setupRoutes);
   app.use('/api/auth', authRoutes);
+
+  // yt-dlp sources for the sidecar, outside /api: token per source, no
+  // session (see voice/streaming/yt-relay.ts)
+  app.use('/internal/relay', createRelayRoutes());
 
   // Protected routes
   app.use('/api', authMiddleware);

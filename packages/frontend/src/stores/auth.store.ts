@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { queryClient } from '@/lib/query-client';
 
 interface UserInfo {
   id: number;
@@ -30,13 +31,20 @@ export const useAuthStore = create<AuthStore>()(
       accessToken: null,
       refreshToken: null,
       user: null,
-      setAuth: (accessToken, refreshToken, user) =>
-        set({ accessToken, refreshToken, user }),
+      // A new identity must not see the previous one's cached queries: an
+      // admin's ['me'] read back for a viewer would hand them the admin UI,
+      // and the music pages would show the previous user's servers.
+      setAuth: (accessToken, refreshToken, user) => {
+        queryClient.clear();
+        set({ accessToken, refreshToken, user });
+      },
       setTokens: (accessToken, refreshToken) =>
         set({ accessToken, refreshToken }),
       setUser: (user) => set({ user }),
-      logout: () =>
-        set({ accessToken: null, refreshToken: null, user: null }),
+      logout: () => {
+        queryClient.clear();
+        set({ accessToken: null, refreshToken: null, user: null });
+      },
       isAuthenticated: () => !!get().accessToken,
       isAdmin: () => get().user?.role === 'admin',
     }),

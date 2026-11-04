@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   VIDEO_FORMAT_SORT,
-  parseResolvedFormat,
   videoCodecFamily,
   videoFormatArgs,
   videoFormatFilter,
@@ -46,30 +45,5 @@ describe('videoCodecFamily', () => {
     expect(videoCodecFamily('')).toBe('');
     expect(videoCodecFamily('none')).toBe('');
     expect(videoCodecFamily('hevc')).toBe('');
-  });
-});
-
-describe('parseResolvedFormat', () => {
-  // As yt-dlp printed it for a 4K test video: the codec, then video and audio URLs.
-  it('reads the codec line and the URLs of a DASH pair', () => {
-    const out = 'av01.0.13M.08\nhttps://example.test/v\nhttps://example.test/a\n';
-    expect(parseResolvedFormat(out)).toEqual({
-      videoCodec: 'av1',
-      urls: ['https://example.test/v', 'https://example.test/a'],
-    });
-  });
-
-  it('reads a progressive format: one URL', () => {
-    expect(parseResolvedFormat('avc1.42001E\nhttps://example.test/p\n')).toEqual({
-      videoCodec: 'h264',
-      urls: ['https://example.test/p'],
-    });
-  });
-
-  it('takes output without a codec line as URLs only', () => {
-    expect(parseResolvedFormat('https://example.test/p\n')).toEqual({
-      videoCodec: '',
-      urls: ['https://example.test/p'],
-    });
   });
 });

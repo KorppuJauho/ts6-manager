@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from '@/lib/query-client';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { PageLoader } from '@/components/shared/LoadingSpinner';
 import { useAuthStore } from '@/stores/auth.store';
@@ -16,16 +17,6 @@ function Home() {
   const isAdmin = useAuthStore((s) => s.isAdmin());
   return <Navigate to={isAdmin ? '/music-bots' : '/music-requests'} replace />;
 }
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-      staleTime: 30_000,
-    },
-  },
-});
 
 // Lazy-loaded pages
 const Login = lazy(() => import('@/pages/Login'));

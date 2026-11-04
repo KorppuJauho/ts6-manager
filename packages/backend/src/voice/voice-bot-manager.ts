@@ -1,16 +1,13 @@
 import { EventEmitter } from 'events';
 import type { PrismaClient } from '../../generated/prisma/index.js';
 import { getStreamSettings } from '../utils/stream-settings.js';
-import type { WebSocketServer } from 'ws';
 import { VoiceBot, type VoiceBotConfig, type VoiceBotStatus } from './voice-bot.js';
 import { generateIdentityAsync, restoreIdentity, type IdentityData } from './tslib/index.js';
 import type { QueueItem } from './playlist/queue.js';
 import type { MusicCommandHandler } from './music-command-handler.js';
 import { decrypt, encrypt } from '../utils/crypto.js';
-import { broadcastScoped } from '../ws/ws-broadcast.js';
 import { loadTeamSpeakAvatar, removeBotAvatarFiles, type AvatarMode } from './bot-avatar.js';
 
-const PROGRESS_INTERVAL_MS = 1000;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const MAX_RECONNECT_DELAY_MS = 30000;
 const RECONNECT_GRACE_PERIOD_MS = 5000;
@@ -22,16 +19,12 @@ interface ReconnectState {
 
 export class VoiceBotManager extends EventEmitter {
   private bots = new Map<number, VoiceBot>();
-  /** botId -> serverConfigId, so broadcasts can be scoped where only the id is in scope. */
+  /** botId -> serverConfigId, for operations on all of a server's bots. */
   private botServerConfigId = new Map<number, number>();
-  private progressTimers = new Map<number, ReturnType<typeof setInterval>>();
   private reconnectState = new Map<number, ReconnectState>();
   private musicCmdHandler: MusicCommandHandler | null = null;
 
-  constructor(
-    private prisma: PrismaClient,
-    private wss: WebSocketServer,
-  ) {
+  constructor(private prisma: PrismaClient) {
     super();
   }
 
@@ -97,43 +90,8 @@ export class VoiceBotManager extends EventEmitter {
     const bot = new VoiceBot(config);
     this.botServerConfigId.set(config.id, config.serverConfigId);
 
-    bot.on('statusChange', (status: VoiceBotStatus) => {
-      this.broadcast('music:bot:status', { botId: config.id, status }, config.serverConfigId);
-
-      if (status === 'playing') {
-        this.startProgressBroadcast(config.id);
-      } else {
-        this.stopProgressBroadcast(config.id);
-      }
-    });
-
     bot.on('error', (err: Error) => {
       console.error(`[VoiceBotManager] Bot ${config.id} error: ${err.message}`);
-    });
-
-    bot.on('nowPlaying', (item: QueueItem) => {
-      const progress = bot.playbackProgress;
-      this.broadcast('music:bot:nowPlaying', {
-        botId: config.id,
-        song: { id: item.id, title: item.title, artist: item.artist, duration: item.duration, source: item.source },
-        progress: progress ? { position: progress.position, duration: progress.duration } : null,
-      }, config.serverConfigId);
-    });
-
-    bot.on('trackEnd', (item: QueueItem | null) => {
-      this.broadcast('music:bot:trackEnd', { botId: config.id, songId: item?.id ?? null }, config.serverConfigId);
-    });
-
-    bot.on('volumeChange', (volume: number) => {
-      this.broadcast('music:bot:volumeChange', { botId: config.id, volume }, config.serverConfigId);
-    });
-
-    bot.on('metadataChange', (item: QueueItem) => {
-      this.broadcast('music:bot:nowPlaying', {
-        botId: config.id,
-        song: { id: item.id, title: item.title, artist: item.artist, duration: item.duration, source: item.source },
-        progress: null,
-      }, config.serverConfigId);
     });
 
     bot.on('disconnected', () => {
@@ -143,35 +101,9 @@ export class VoiceBotManager extends EventEmitter {
       }
     });
 
-    // Video streaming events
-    bot.on('videoStreamStarted', (data: any) => {
-      this.broadcast('music:bot:videoStreamStarted', { botId: config.id, ...data }, config.serverConfigId);
-    });
-
-    bot.on('videoStreamStopped', () => {
-      this.broadcast('music:bot:videoStreamStopped', { botId: config.id }, config.serverConfigId);
-    });
-
-    bot.on('videoViewerJoined', (viewer: any) => {
-      this.broadcast('music:bot:videoViewerJoined', { botId: config.id, viewer }, config.serverConfigId);
-    });
-
-    bot.on('videoViewerLeft', (clid: number) => {
-      this.broadcast('music:bot:videoViewerLeft', { botId: config.id, clid }, config.serverConfigId);
-    });
-
-    bot.on('videoSourceChanged', (source: string) => {
-      this.broadcast('music:bot:videoSourceChanged', { botId: config.id, source }, config.serverConfigId);
-    });
-
-    bot.on('avatarStatus', (avatar: unknown) => {
-      this.broadcast('music:bot:avatar', { botId: config.id, avatar }, config.serverConfigId);
-    });
-
     bot.on('fatalError', (msg: string) => {
       console.error(`[VoiceBotManager] Bot ${config.id}: fatal error — ${msg}. No reconnect.`);
       this.clearReconnect(config.id);
-      this.broadcast('music:bot:error', { botId: config.id, error: msg }, config.serverConfigId);
     });
 
     // Register for music text commands
@@ -273,7 +205,6 @@ export class VoiceBotManager extends EventEmitter {
     if (bot && bot.status !== 'stopped') {
       await bot.stop();
     }
-    this.stopProgressBroadcast(id);
     this.bots.delete(id);
     this.musicCmdHandler?.unregisterBot(id);
     await this.prisma.musicBot.delete({ where: { id } });
@@ -347,8 +278,6 @@ export class VoiceBotManager extends EventEmitter {
         promises.push(bot.stop());
       }
     }
-    this.progressTimers.forEach((timer) => clearInterval(timer));
-    this.progressTimers.clear();
     await Promise.allSettled(promises);
   }
 
@@ -370,7 +299,6 @@ export class VoiceBotManager extends EventEmitter {
 
     if (state.attempts >= MAX_RECONNECT_ATTEMPTS) {
       console.error(`[VoiceBotManager] Bot ${botId}: max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached, giving up`);
-      this.broadcast('music:bot:reconnectFailed', { botId }, this.botServerConfigId.get(botId));
       this.reconnectState.delete(botId);
       return;
     }
@@ -420,37 +348,5 @@ export class VoiceBotManager extends EventEmitter {
       clearTimeout(state.timer);
     }
     this.reconnectState.delete(botId);
-  }
-
-  private startProgressBroadcast(botId: number): void {
-    this.stopProgressBroadcast(botId);
-    const timer = setInterval(() => {
-      const bot = this.bots.get(botId);
-      if (!bot || bot.status !== 'playing') {
-        this.stopProgressBroadcast(botId);
-        return;
-      }
-      const progress = bot.playbackProgress;
-      if (progress) {
-        this.broadcast('music:bot:progress', {
-          botId,
-          position: progress.position,
-          duration: progress.duration,
-        }, this.botServerConfigId.get(botId));
-      }
-    }, PROGRESS_INTERVAL_MS);
-    this.progressTimers.set(botId, timer);
-  }
-
-  private stopProgressBroadcast(botId: number): void {
-    const timer = this.progressTimers.get(botId);
-    if (timer) {
-      clearInterval(timer);
-      this.progressTimers.delete(botId);
-    }
-  }
-
-  private broadcast(type: string, payload: any, serverConfigId?: number | null): void {
-    broadcastScoped(this.wss, type, payload, serverConfigId);
   }
 }

@@ -88,7 +88,7 @@ async function getSpotifyToken(config: SpotifyConfig): Promise<string> {
   if (cached && Date.now() < cached.expiresAt - 60000) return cached.token;
 
   if (!config.clientId || !config.clientSecret) {
-    throw new Error('Spotify non configuré (Settings → Spotify)');
+    throw new Error('Spotify is not configured (Settings → Spotify)');
   }
 
   const auth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
@@ -136,7 +136,7 @@ function toTrackInfo(track: SpotifyTrackObject, albumName = '', fallbackArtist =
 
 export async function resolveSpotifyInput(input: string, config: SpotifyConfig): Promise<SpotifyResolvedInput> {
   const parsed = parseSpotifyInput(input);
-  if (!parsed) throw new Error('Lien Spotify invalide (track ou album uniquement)');
+  if (!parsed) throw new Error('Not a Spotify track or album link');
 
   if (parsed.type === 'track') {
     const track = await spotifyGet<SpotifyTrackObject>(`/tracks/${encodeURIComponent(parsed.id)}`, config);
@@ -247,9 +247,9 @@ export async function findBestYouTubeForSpotify(track: SpotifyTrackInfo): Promis
     .map((result) => ({ ...result, score: scoreCandidate(track, result) }))
     .sort((a, b) => b.score - a.score);
 
-  if (!scored.length) throw new Error('Aucune correspondance YouTube trouvée');
+  if (!scored.length) throw new Error('No YouTube match found');
   if (scored[0].score < 20) {
-    throw new Error(`Aucune correspondance fiable pour ${track.artist} - ${track.title}`);
+    throw new Error(`No reliable YouTube match for ${track.artist} - ${track.title}`);
   }
   return scored[0];
 }

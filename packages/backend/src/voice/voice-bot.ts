@@ -12,14 +12,14 @@ import {
   DEFAULT_PRESET,
   AUTO_PRESET,
   autoMaxOrDefault,
-  SOURCE_SEPARATOR,
   clampBitrate,
   encodePresetFor,
   type VideoViewerInfo,
   type VideoStreamStatus,
 } from './streaming/types.js';
 import { probeVideoHeight } from './streaming/probe.js';
-import { videoFormatArgs, parseResolvedFormat, type VideoCodecFamily } from './streaming/source-format.js';
+import { videoFormatArgs, videoCodecFamily, type VideoCodecFamily } from './streaming/source-format.js';
+import { parseRelayInfo, registerRelay } from './streaming/yt-relay.js';
 import { nowPlayingNickname, streamingNickname, MAX_NICKNAME_LENGTH } from './nickname.js';
 import { getCookieArgs, runYtDlp, assertSafeUrl, fetchVideoTitle } from './audio/youtube.js';
 import {
@@ -65,15 +65,23 @@ function isYtDlpSource(url: string): boolean {
 }
 
 /**
- * Resolve a source to what the sidecar plays: the direct URL (a DASH pair
- * joined by SOURCE_SEPARATOR) and, when yt-dlp chose the format, its video
- * codec.
+ * What the sidecar plays for a source: its URL (a DASH pair joined by
+ * SOURCE_SEPARATOR) and, when yt-dlp chose the format, the video codec, the
+ * height and a release for the relay URLs.
  */
+interface ResolvedVideo {
+  url: string;
+  videoCodec: VideoCodecFamily;
+  /** Known without a probe for a yt-dlp source; undefined means probe. */
+  height?: number | null;
+  release?: () => void;
+}
+
 async function resolveVideoUrl(
   url: string,
   maxHeight: number = 720,
   operatorConfigured = false,
-): Promise<{ url: string; videoCodec: VideoCodecFamily }> {
+): Promise<ResolvedVideo> {
   assertSafeUrl(url);
 
   // Only resolve YouTube and other yt-dlp-supported sites
@@ -100,27 +108,29 @@ async function resolveVideoUrl(
   // The format choice (a DASH pair, SDR, AV1 or VP9) is explained in
   // streaming/source-format.ts.
   //
+  // Only the choice is made here. The sidecar does not fetch the media URLs
+  // yt-dlp would print: YouTube refuses them to anything but yt-dlp, so it
+  // reads each format through the relay instead (streaming/yt-relay.ts).
+  //
   // runYtDlp adds the cookie args' siblings (timeout, full stderr logging);
   // normal CPU priority — the user is waiting for the stream to start.
   const stdout = await runYtDlp([
     ...getCookieArgs(),
     ...videoFormatArgs(maxHeight),
     '--no-playlist',
-    '--print', '%(vcodec)s',  // the chosen video codec, printed first
-    '-g',  // then the direct URL of each stream
+    '--dump-json',  // the chosen format and everything a fetch needs to download it
     '--',  // nothing past this point is parsed as an option
     url,
   ], 60_000, { lowPriority: false });
 
-  // One URL per stream: a single line for a progressive format, two (video
-  // then audio) for a DASH pair.
-  const { urls, videoCodec } = parseResolvedFormat(stdout);
-  const directUrl = urls.join(SOURCE_SEPARATOR);
-  if (!directUrl) {
-    throw new Error('yt-dlp returned no URL');
+  const { vcodec, formatIds, height, infoJson } = parseRelayInfo(stdout);
+  if (formatIds.length === 0) {
+    throw new Error('yt-dlp chose no format');
   }
-  console.log(`[VideoResolve] Resolved: ${url.substring(0, 60)}... → direct URL${videoCodec ? ` (${videoCodec})` : ''}`);
-  return { url: directUrl, videoCodec };
+  const videoCodec = videoCodecFamily(vcodec);
+  const relay = registerRelay(url, formatIds, infoJson);
+  console.log(`[VideoResolve] Resolved: ${url.substring(0, 60)}... → format ${formatIds.join('+')}${videoCodec ? ` (${videoCodec})` : ''}${height ? `, ${height}p` : ''}, via the relay`);
+  return { url: relay.source, videoCodec, height, release: relay.release };
 }
 
 export type VoiceBotStatus = 'stopped' | 'starting' | 'connected' | 'playing' | 'paused' | 'error';
@@ -232,6 +242,8 @@ export class VoiceBot extends EventEmitter {
   private _videoEncoder = '';
   private _videoHwDevice = '';
   private _videoCodec: VideoCodecFamily = '';
+  /** Revokes the relay URLs of the current source, if it has any. */
+  private _videoRelease: (() => void) | null = null;
   private _videoIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly VIDEO_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -1237,6 +1249,7 @@ export class VoiceBot extends EventEmitter {
    * once per leftover.
    */
   private async abandonVideoStart(): Promise<void> {
+    this.releaseVideoSource();
     if (this._videoStreaming) {
       // The server has the stream: a full stop also ends it there. Not
       // stopVideoStream(), which would wait for this very start to finish.
@@ -1372,6 +1385,8 @@ export class VoiceBot extends EventEmitter {
     ]);
     const resolvedSource = resolved.url;
     this._videoCodec = resolved.videoCodec;
+    this.releaseVideoSource();
+    this._videoRelease = resolved.release ?? null;
 
     // Auto encodes at the source's own resolution rather than upscaling: a
     // 720p channel gains nothing from a 1080p encode but spends the higher
@@ -1386,7 +1401,9 @@ export class VoiceBot extends EventEmitter {
     // such a service can refuse the second.
     this._videoPreset = await encodePresetFor(
       followSource ? AUTO_PRESET : this._videoPreset,
-      () => probeVideoHeight(resolvedSource),
+      // yt-dlp already knows a relayed source's height, and probing the
+      // relay would start a second download for nothing.
+      () => (resolved.height !== undefined ? Promise.resolve(resolved.height) : probeVideoHeight(resolvedSource)),
       autoMax,
     );
     if (followSource) {
@@ -1443,6 +1460,11 @@ export class VoiceBot extends EventEmitter {
     this.emit('statusChange', this._status);
   }
 
+  private releaseVideoSource(): void {
+    this._videoRelease?.();
+    this._videoRelease = null;
+  }
+
   /** Stop video streaming */
   async stopVideoStream(): Promise<void> {
     // A stop given while a start is still waiting is meant for the stream
@@ -1493,6 +1515,7 @@ export class VoiceBot extends EventEmitter {
 
     this._activeStreamId = null;
     this._videoSource = null;
+    this.releaseVideoSource();
     this._videoStreaming = false;
     this._videoTitle = null;
     this._videoStartedAt = null;
@@ -1561,22 +1584,33 @@ export class VoiceBot extends EventEmitter {
     // A source swapped mid-stream is a fresh URL from the caller, so it is
     // only trusted if this stream was started from the operator's playlist.
     const resolved = await resolveVideoUrl(source, currentPreset.height, this._videoOperatorConfigured);
-    if (!stillCurrent()) throw new Error('The video stream was stopped');
+    if (!stillCurrent()) {
+      resolved.release?.();
+      throw new Error('The video stream was stopped');
+    }
     this._videoCodec = resolved.videoCodec;
 
     // Reuses the encoder resolved at stream start: changing it here would
     // renegotiate the codec under peers that are already connected. The
     // source's own codec is new, and only chooses how it is decoded.
-    await sidecar.setSource(
-      resolved.url,
-      currentPreset.width,
-      currentPreset.height,
-      this._videoFramerate,
-      this._videoBitrate,
-      this._videoEncoder,
-      this._videoHwDevice,
-      this._videoCodec,
-    );
+    try {
+      await sidecar.setSource(
+        resolved.url,
+        currentPreset.width,
+        currentPreset.height,
+        this._videoFramerate,
+        this._videoBitrate,
+        this._videoEncoder,
+        this._videoHwDevice,
+        this._videoCodec,
+      );
+    } catch (err) {
+      resolved.release?.();
+      throw err;
+    }
+    // The sidecar now reads the new source; the old one's relay can go.
+    this.releaseVideoSource();
+    this._videoRelease = resolved.release ?? null;
     // The preset stays as it is: renegotiating dimensions under peers that
     // are already connected is a bigger change than this path should make.
     // A source whose resolution differs is therefore encoded at the preset

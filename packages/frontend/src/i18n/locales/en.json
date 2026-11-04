@@ -12,7 +12,7 @@
     "music": "Music"
   },
   "login": {
-    "appSubtitle": "Server Administration Panel",
+    "appSubtitle": "Music and video bots for TeamSpeak",
     "signInToContinue": "Sign in to continue",
     "username": "Username",
     "password": "Password",
@@ -63,7 +63,7 @@
       "dialogAddTitle": "Add server",
       "dialogEditTitle": "Edit server",
       "deleteTitle": "Delete server?",
-      "deleteDescription": "This removes the server together with every bot, song, playlist, radio station and music request that belongs to it.",
+      "deleteDescription": "This removes the server together with its bots, playlists, radio stations, music requests and library entries. Song files already downloaded stay in the music folder.",
       "toastAdded": "Server added",
       "toastUpdated": "Server updated",
       "toastDeleted": "Server deleted",
@@ -122,7 +122,7 @@
       },
       "reverseProxy": {
         "title": "Reverse proxy / client IP",
-        "description": "Number of reverse proxies in front of the backend, so the real client IP is read from X-Forwarded-For (connection journal, rate limiting). 1 = the built-in frontend nginx only; add 1 per extra proxy/WAF (e.g. 2 behind SafeLine).",
+        "description": "Number of reverse proxies in front of the backend, so the real client IP is read from X-Forwarded-For (login and API rate limits). 1 = the built-in frontend nginx only; add 1 per extra proxy/WAF (e.g. 2 behind SafeLine).",
         "trustedHops": "Trusted proxy hops",
         "detectedIpPre": "Detected IP for your current request:",
         "detectedIpPost": "Adjust the hop count and save until this shows your real public IP (save reloads it).",
@@ -167,7 +167,7 @@
       "toastRemoveFailed": "Failed to remove cookies",
       "playlistLimit": {
         "title": "Playlist import limit",
-        "description": "Maximum number of tracks fetched when importing a YouTube playlist, from the music library or from !play in TeamSpeak/Discord.",
+        "description": "Maximum number of tracks fetched when importing a YouTube playlist, from the music library or from !play in TeamSpeak.",
         "maxTracks": "Max tracks per import",
         "hint": "Tracks already in the playlist do not count towards the limit. Anything beyond it is reported as skipped, never downloaded. 0 disables importing.",
         "save": "Save",

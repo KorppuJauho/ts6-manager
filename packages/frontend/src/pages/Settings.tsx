@@ -166,6 +166,8 @@ function ConnectionsTab() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['servers'] });
       qc.invalidateQueries({ queryKey: ['music-bots'] });
+      // Grants to the deleted server went with it.
+      qc.invalidateQueries({ queryKey: ['users'] });
     },
   });
 
@@ -311,7 +313,8 @@ function UsersTab() {
 
   const openAccess = (u: any) => {
     setAccessUserId(u.id);
-    setAccessIds(Array.isArray(u.serverIds) ? u.serverIds : []);
+    // Only servers that still exist: the backend refuses an unknown id.
+    setAccessIds((Array.isArray(u.serverIds) ? u.serverIds : []).filter((id: number) => serverList.some((s: any) => s.id === id)));
   };
 
   const handleSaveAccess = () => {
