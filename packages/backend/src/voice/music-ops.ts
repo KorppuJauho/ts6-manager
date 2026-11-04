@@ -94,8 +94,8 @@ export async function enqueueSpotify(
 }
 
 /**
- * Transport-agnostic music operations shared by the TS chat commands
- * (!play) and the Discord slash commands (/play).
+ * Music operations behind the TS chat commands (!play, !queue), kept apart
+ * from the chat parsing so they can be tested on their own.
  */
 
 /** URL passthrough, or YouTube search → URL of the first result. */
@@ -120,7 +120,7 @@ export interface PlayResult {
  * playback unless something is already playing.
  */
 export async function downloadAndEnqueue(prisma: PrismaClient, bot: VoiceBot, url: string): Promise<PlayResult> {
-  // !play / !queue are reachable by any TS or Discord user when no command
+  // !play / !queue are reachable by any TS user when no command
   // server-group is configured, so the URL is untrusted: block private ranges
   // and cloud-metadata endpoints before yt-dlp fetches it.
   const check = await validateUrl(url, { allowedProtocols: ['http:', 'https:'] });

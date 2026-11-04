@@ -1,14 +1,11 @@
 import { useDashboard } from '@/hooks/use-dashboard';
 import { useServerStore } from '@/stores/server.store';
-import { useAuthStore } from '@/stores/auth.store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { PageLoader } from '@/components/shared/LoadingSpinner';
 import { EmptyState } from '@/components/shared/EmptyState';
-import { WidgetManagerModal } from '@/components/widget/WidgetManagerModal';
 import { formatBytes, formatUptime } from '@/lib/utils';
-import { Users, Activity, Clock, Hash, ArrowDownToLine, ArrowUpFromLine, Wifi, Server, LayoutGrid } from 'lucide-react';
+import { Users, Activity, Clock, Hash, ArrowDownToLine, ArrowUpFromLine, Wifi, Server } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip as ReTooltip, ResponsiveContainer } from 'recharts';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -45,9 +42,7 @@ export default function Dashboard() {
   const { t } = useTranslation();
   const { selectedConfigId, selectedSid } = useServerStore();
   const { data, isLoading, error } = useDashboard();
-  const isAdmin = useAuthStore((s) => s.isAdmin());
   const [bandwidthHistory, setBandwidthHistory] = useState<any[]>([]);
-  const [showWidgets, setShowWidgets] = useState(false);
 
   // Reset bandwidth history when switching to a different server (adjusted during render,
   // per React's "you don't need an effect" guidance, instead of a setState-in-effect).
@@ -109,11 +104,6 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {isAdmin && (
-            <Button size="sm" variant="outline" onClick={() => setShowWidgets(true)}>
-              <LayoutGrid className="h-3.5 w-3.5 mr-1.5" /> {t('dashboard.widgets')}
-            </Button>
-          )}
           <div className="text-right">
             <p className="text-[10px] text-muted-foreground font-mono-data uppercase tracking-widest">{t('dashboard.liveMonitoring')}</p>
             <div className="flex items-center gap-1 justify-end mt-0.5">
@@ -254,8 +244,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
-
-      <WidgetManagerModal open={showWidgets} onOpenChange={setShowWidgets} />
     </div>
   );
 }

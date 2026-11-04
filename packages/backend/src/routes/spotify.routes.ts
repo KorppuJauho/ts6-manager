@@ -35,7 +35,7 @@ spotifyRoutes.put('/settings', async (req: Request, res: Response, next) => {
     const data: any = {};
     if (enabled !== undefined) data.enabled = !!enabled;
     if (clientId !== undefined) data.clientId = clientId || null;
-    // Empty secret means "unchanged" (same convention as API keys / Discord token)
+    // Empty secret means "unchanged" (same convention as the server API key)
     if (clientSecret) data.clientSecret = encrypt(String(clientSecret));
     if (maxAlbumTracks !== undefined) data.maxAlbumTracks = Math.max(1, parseInt(maxAlbumTracks) || 50);
 

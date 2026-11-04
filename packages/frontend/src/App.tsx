@@ -34,19 +34,14 @@ const ChannelGroups = lazy(() => import('@/pages/ChannelGroups'));
 const Permissions = lazy(() => import('@/pages/Permissions'));
 const Bans = lazy(() => import('@/pages/Bans'));
 const Tokens = lazy(() => import('@/pages/Tokens'));
-const Files = lazy(() => import('@/pages/Files'));
 const Complaints = lazy(() => import('@/pages/Complaints'));
 const Messages = lazy(() => import('@/pages/Messages'));
 const ServerLogs = lazy(() => import('@/pages/ServerLogs'));
 const Instance = lazy(() => import('@/pages/Instance'));
-const BotList = lazy(() => import('@/pages/BotList'));
-const BotEditor = lazy(() => import('@/pages/BotEditor'));
 const MusicBots = lazy(() => import('@/pages/MusicBots'));
 const MusicRequests = lazy(() => import('@/pages/MusicRequests'));
-const Journal = lazy(() => import('@/pages/Journal'));
 const Settings = lazy(() => import('@/pages/Settings'));
 const NotFound = lazy(() => import('@/pages/NotFound'));
-const WidgetPage = lazy(() => import('@/pages/WidgetPage'));
 const SetupPage = lazy(() => import('@/pages/SetupPage'));
 
 export function App() {
@@ -64,7 +59,6 @@ export function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/login/sso" element={<SsoCallback />} />
             <Route path="/setup" element={<SetupPage />} />
-            <Route path="/widget/:token" element={<WidgetPage />} />
 
             <Route element={<AppLayout />}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -77,15 +71,11 @@ export function App() {
               <Route path="/permissions" element={<AdminRoute><Permissions /></AdminRoute>} />
               <Route path="/bans" element={<AdminRoute><Bans /></AdminRoute>} />
               <Route path="/tokens" element={<AdminRoute><Tokens /></AdminRoute>} />
-              <Route path="/files" element={<AdminRoute><Files /></AdminRoute>} />
               <Route path="/complaints" element={<AdminRoute><Complaints /></AdminRoute>} />
               <Route path="/messages" element={<AdminRoute><Messages /></AdminRoute>} />
               <Route path="/logs" element={<AdminRoute><ServerLogs /></AdminRoute>} />
               <Route path="/instance" element={<AdminRoute><Instance /></AdminRoute>} />
-              <Route path="/journal" element={<AdminRoute><Journal /></AdminRoute>} />
               <Route path="/music-requests" element={<AdminRoute><MusicRequests /></AdminRoute>} />
-              <Route path="/bots" element={<AdminRoute><BotList /></AdminRoute>} />
-              <Route path="/bots/:botId" element={<AdminRoute><BotEditor /></AdminRoute>} />
               <Route path="/music-bots" element={<AdminRoute><MusicBots /></AdminRoute>} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<NotFound />} />

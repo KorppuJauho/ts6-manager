@@ -88,10 +88,6 @@ function BotPlayerCard({ bot, onEdit, onDelete, onPlay }: {
   const shuffleMut = useSetShuffle();
   const repeatMut = useSetRepeat();
 
-  // Widget token dialog
-  const [showWidget, setShowWidget] = useState(false);
-  const [widgetData, setWidgetData] = useState<{ token: string; jsonUrl: string; bbcodeUrl: string } | null>(null);
-
   // Local drag state so sliders don't snap back during interaction
   const [draggingSeek, setDraggingSeek] = useState<number | null>(null);
   const [draggingVolume, setDraggingVolume] = useState<number | null>(null);
@@ -110,16 +106,6 @@ function BotPlayerCard({ bot, onEdit, onDelete, onPlay }: {
             <CardTitle className="text-sm font-medium truncate">{bot.name}</CardTitle>
           </div>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" className="h-7 w-7" title={t('musicBots.player.widgetTooltip')}
-              onClick={() => {
-                setShowWidget(true);
-                musicBotsApi.playerWidgetToken(bot.id)
-                  .then(setWidgetData)
-                  .catch(() => { setShowWidget(false); toast.error(t('musicBots.toast.widgetFailed')); });
-              }}
-            >
-              <Link className="h-3.5 w-3.5" />
-            </Button>
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit}>
               <Pencil className="h-3.5 w-3.5" />
             </Button>
@@ -304,43 +290,6 @@ function BotPlayerCard({ bot, onEdit, onDelete, onPlay }: {
         </div>
       </CardContent>
 
-      {/* Player Widget Dialog */}
-      <Dialog open={showWidget} onOpenChange={setShowWidget}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-sm">{t('musicBots.widget.title')}</DialogTitle>
-            <DialogDescription className="text-xs">
-              {t('musicBots.widget.description')}
-            </DialogDescription>
-          </DialogHeader>
-          {widgetData && (
-            <div className="space-y-3">
-              <div>
-                <Label className="text-[10px] text-muted-foreground">{t('musicBots.widget.bbcodeLabel')}</Label>
-                <div className="flex gap-1.5 mt-1">
-                  <Input readOnly className="h-7 text-[11px] font-mono-data" value={widgetData.bbcodeUrl} />
-                  <Button variant="outline" size="sm" className="h-7 text-xs shrink-0"
-                    onClick={() => { navigator.clipboard.writeText(widgetData.bbcodeUrl); toast.success(t('musicBots.toast.copied')); }}
-                  >{t('musicBots.widget.copy')}</Button>
-                </div>
-              </div>
-              <div>
-                <Label className="text-[10px] text-muted-foreground">{t('musicBots.widget.jsonLabel')}</Label>
-                <div className="flex gap-1.5 mt-1">
-                  <Input readOnly className="h-7 text-[11px] font-mono-data" value={widgetData.jsonUrl} />
-                  <Button variant="outline" size="sm" className="h-7 text-xs shrink-0"
-                    onClick={() => { navigator.clipboard.writeText(widgetData.jsonUrl); toast.success(t('musicBots.toast.copied')); }}
-                  >{t('musicBots.widget.copy')}</Button>
-                </div>
-              </div>
-              <div>
-                <Label className="text-[10px] text-muted-foreground">{t('musicBots.widget.tokenLabel')}</Label>
-                <Input readOnly className="h-7 text-[11px] font-mono-data mt-1" value={widgetData.token} />
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </Card>
   );
 }

@@ -1,7 +1,7 @@
 /**
- * Lyrics lookup shared by the TS (!lyrics) and Discord (/lyrics) commands.
+ * Lyrics lookup for the !lyrics chat command.
  * Sources: LRCLIB (no API key) with a lyrics.ovh fallback. Pure helpers
- * (title cleaning, chunking) live here too so both bridges stay thin.
+ * (title cleaning, chunking) live here too so the command handler stays thin.
  */
 
 const FETCH_TIMEOUT_MS = 10_000;

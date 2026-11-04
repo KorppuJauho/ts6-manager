@@ -40,7 +40,7 @@ Dockerfiles. Run the equivalent locally before pushing.
 
 | Package | What |
 |---|---|
-| `packages/backend` | Express API, Prisma, TeamSpeak client, voice bots, Discord bridge |
+| `packages/backend` | Express API, Prisma, TeamSpeak client, voice bots |
 | `packages/frontend` | React + Vite + Tailwind + shadcn/ui, TanStack Query, i18next |
 | `packages/common` | Types and constants shared by both |
 | `packages/sidecar` | Go WebRTC media relay; drives FFmpeg, talks RTP to TeamSpeak |

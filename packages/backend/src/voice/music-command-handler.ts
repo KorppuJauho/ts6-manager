@@ -61,8 +61,7 @@ interface MusicCommandSettingsRow extends MusicCommandAccessSettings {
  * Handles text-based music commands (!radio, !play, !stop, etc.)
  * by listening directly on each VoiceBot's TS3 connection.
  *
- * The bot receives `notifytextmessage` in its own channel —
- * no SSH EventBridge needed.
+ * The bot receives `notifytextmessage` in its own channel.
  */
 export class MusicCommandHandler {
   private registeredBots = new Set<number>();

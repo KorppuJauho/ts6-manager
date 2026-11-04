@@ -1,8 +1,8 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Server, Hash, Users, Shield, ShieldCheck,
-  Lock, Ban, KeyRound, FolderOpen, MessageSquareWarning, Mail,
-  ScrollText, Settings, Bot, Cpu, ChevronLeft, ChevronRight, Music, ListMusic, History,
+  Lock, Ban, KeyRound, MessageSquareWarning, Mail,
+  ScrollText, Settings, Cpu, ChevronLeft, ChevronRight, Music, ListMusic,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
@@ -42,7 +42,6 @@ const navSections = [
     label: 'nav.content',
     adminOnly: true,
     items: [
-      { to: '/files', icon: FolderOpen, label: 'nav.files', adminOnly: true },
       { to: '/complaints', icon: MessageSquareWarning, label: 'nav.complaints', adminOnly: true },
       { to: '/messages', icon: Mail, label: 'nav.messages', adminOnly: true },
     ],
@@ -52,7 +51,6 @@ const navSections = [
     adminOnly: true,
     items: [
       { to: '/logs', icon: ScrollText, label: 'nav.serverLogs', adminOnly: true },
-      { to: '/journal', icon: History, label: 'nav.connectionJournal', adminOnly: true },
       { to: '/instance', icon: Cpu, label: 'nav.instance', adminOnly: true },
       { to: '/music-requests', icon: ListMusic, label: 'nav.musicRequests', adminOnly: true },
     ],
@@ -61,7 +59,6 @@ const navSections = [
     label: 'nav.automation',
     adminOnly: true,
     items: [
-      { to: '/bots', icon: Bot, label: 'nav.botFlows', adminOnly: true },
       { to: '/music-bots', icon: Music, label: 'nav.musicBots', adminOnly: true },
     ],
   },
