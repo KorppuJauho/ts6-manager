@@ -191,6 +191,7 @@ travel with each stream instead.
 | `ENCRYPTION_KEY` | — | **Required**, at least 32 characters, must differ from `JWT_SECRET`. Encrypts stored credentials. |
 | `SIDECAR_TOKEN` | — | Shared secret for the sidecar API. The sidecar refuses to start without it. |
 | `SIDECAR_URL` | — | Sidecar address when it runs as its own container (e.g. `http://ts6-sidecar:9800`). |
+| `BACKEND_INTERNAL_URL` | `http://backend:<PORT>` with `SIDECAR_URL`, else `http://127.0.0.1:<PORT>` | Where the sidecar reaches the backend to read YouTube video through yt-dlp. Set it only if the compose service is not named `backend`. |
 | `FRONTEND_URL` | `http://localhost:5173` | Public origin the browser uses: the CORS allow-list. The compose files default it to `http://localhost:3000`. |
 | `PORT` | `3001` | Backend port. |
 | `DATABASE_URL` | `file:./data/ts6webui.db` | SQLite path. |

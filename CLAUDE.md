@@ -94,6 +94,14 @@ is video and audio URLs joined by `|||`: declared in
 Change both together. `validSource` validates each segment separately —
 preserve that loop, it is what stops a source smuggling an FFmpeg argument.
 
+**The sidecar never fetches YouTube itself.** YouTube refuses the media URLs
+`yt-dlp -g` prints to anything but yt-dlp, so a yt-dlp source reaches the
+sidecar as URLs of the backend's relay (`voice/streaming/yt-relay.ts`,
+`/internal/relay/<token>/<n>`), and each fetch runs `yt-dlp -o -` from the info
+JSON saved at resolve time. Do not "simplify" this back to `-g`: it streams
+nothing but a 403. The relay is outside `/api` and its token is the only
+access control; it is revoked when the stream stops or changes source.
+
 **The sidecar runs two ways.** Spawned as a child process locally (config via
 env at spawn), or as a long-lived container in Docker (`SIDECAR_URL` set).
 In container mode env is fixed at container start, so **anything

@@ -1474,6 +1474,64 @@ including a bot that was set to another language; no command group
 restriction; and viewers see only Music Requests, for the servers an admin
 grants them under Settings → Users.
 
+### YouTube streams through yt-dlp
+
+| | |
+|---|---|
+| Commits | `fix(stream): fetch YouTube video through yt-dlp, not from its media URLs`, `perf(stream): start relayed streams from the resolve step's info JSON` |
+| Files | `voice/streaming/yt-relay.ts` (new), `voice/voice-bot.ts`, `app.ts`, `voice/streaming/source-format.ts` |
+
+`!stream` of a YouTube link stopped working, in production as well: the bot
+announced the stream and the viewer joined, but FFmpeg in the sidecar exited
+with `HTTP error 403 Forbidden` before the first frame. YouTube now refuses
+the media URLs `yt-dlp -g` prints when anything but yt-dlp fetches them.
+Tested against yt-dlp 2026.10.26, the 403 came back for FFmpeg and for a plain
+HTTP client alike: with no headers, with yt-dlp's own request headers from
+the same extraction, with a `Range` header and with the `&range=` parameter.
+`yt-dlp -o -` streamed the very same format. Music `!play` was unaffected,
+because it downloads through yt-dlp.
+
+So the sidecar no longer gets the media URLs. Resolving asks yt-dlp for the
+format choice only (`--dump-json`), and the bot hands the sidecar one URL per
+format of the chosen pair, pointing at a relay in the backend. Each fetch
+runs `yt-dlp -f <format> -o -` and pipes the output through. The sidecar's
+inputs, its DASH-pair handling and its source validation are unchanged: the
+relay URLs are ordinary `http://` segments. Keeping up with YouTube stays
+yt-dlp's job, and the image refreshes yt-dlp on every start.
+
+- **The info JSON.** Extracting a page again for every fetch took 6-8 s,
+  mostly solving YouTube's JavaScript challenge. FFmpeg opens a DASH pair's
+  inputs one after the other, so a start waited for two extractions in a row.
+  The resolve step's JSON is therefore written to a private temp file, and a
+  fetch runs `yt-dlp --load-info-json`: the audio then starts in about 0.3 s.
+  The JSON's media URLs expire after some hours, which only matters to a
+  reconnect late in a very long stream; without the file a fetch extracts the
+  page as before.
+- **Auto quality** takes the height yt-dlp reports. It used to probe the
+  media URL with ffprobe, which would get the same 403, and probing the relay
+  would start a download for nothing.
+- **Access.** The relay is at `/internal/relay/<token>/<n>`, outside `/api`:
+  the frontend's nginx does not proxy it and it takes no session. Each source
+  has a 192-bit random token. It is revoked when the stream stops, changes
+  source or fails to start, and expires after 24 hours regardless. A fetch
+  only runs yt-dlp for the page and format the bot itself chose. A page URL
+  is passed after a literal `--`, and the info file is never derived from
+  the request. When the sidecar hangs up, its yt-dlp is killed. The backend
+  port is published on the host in the compose files, so the token is the
+  whole protection. It travels only in the backend's request to the
+  sidecar, and in the sidecar's log.
+- **Addressing.** The sidecar reaches the backend at `http://backend:<port>`
+  when it is its own container (the compose service name) and at loopback
+  when the backend spawns it. `BACKEND_INTERNAL_URL` overrides both.
+
+Diagnosing it, one trap: FFmpeg writes its progress with carriage returns,
+and `docker logs` stores a line only when a newline arrives, so a
+`frame=    1` can stay the last stored line of an encode that is running
+fine. Count frames with `FFREPORT=file=/tmp/ffreport-%t.log:level=40` in the
+sidecar's environment instead. Relay yt-dlp processes blocked on a socket
+write are normal too: FFmpeg reads at real time (`-re`), slower than yt-dlp
+downloads.
+
 ## Fixes to coom's changes (fork only)
 
 This fork builds on [coom/ts6-manager](https://github.com/coom/ts6-manager),

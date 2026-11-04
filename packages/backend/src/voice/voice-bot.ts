@@ -19,7 +19,7 @@ import {
 } from './streaming/types.js';
 import { probeVideoHeight } from './streaming/probe.js';
 import { videoFormatArgs, videoCodecFamily, type VideoCodecFamily } from './streaming/source-format.js';
-import { parseRelayFormat, registerRelay } from './streaming/yt-relay.js';
+import { parseRelayInfo, registerRelay } from './streaming/yt-relay.js';
 import { nowPlayingNickname, streamingNickname, MAX_NICKNAME_LENGTH } from './nickname.js';
 import { getCookieArgs, runYtDlp, assertSafeUrl, fetchVideoTitle } from './audio/youtube.js';
 import {
@@ -118,17 +118,17 @@ async function resolveVideoUrl(
     ...getCookieArgs(),
     ...videoFormatArgs(maxHeight),
     '--no-playlist',
-    '--print', '%(vcodec)s %(format_id)s %(height)s',
+    '--dump-json',  // the chosen format and everything a fetch needs to download it
     '--',  // nothing past this point is parsed as an option
     url,
   ], 60_000, { lowPriority: false });
 
-  const { vcodec, formatIds, height } = parseRelayFormat(stdout);
+  const { vcodec, formatIds, height, infoJson } = parseRelayInfo(stdout);
   if (formatIds.length === 0) {
     throw new Error('yt-dlp chose no format');
   }
   const videoCodec = videoCodecFamily(vcodec);
-  const relay = registerRelay(url, formatIds);
+  const relay = registerRelay(url, formatIds, infoJson);
   console.log(`[VideoResolve] Resolved: ${url.substring(0, 60)}... → format ${formatIds.join('+')}${videoCodec ? ` (${videoCodec})` : ''}${height ? `, ${height}p` : ''}, via the relay`);
   return { url: relay.source, videoCodec, height, release: relay.release };
 }
