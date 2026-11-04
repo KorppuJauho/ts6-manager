@@ -33,7 +33,9 @@ they were accidental rather than intended:
   a way that showed up as deletions: `voice/lyrics.ts`, `discord/member-count.ts`,
   `utils/server-group-filter.ts` and `docs/recover-server-access.md`, plus the
   matching hunks in `discord-bridge.ts`, `embeds.ts`, `server-groups.routes.ts`
-  and `Settings.tsx`. All are retained from upstream.
+  and `Settings.tsx`. All are retained from upstream. (All have since been
+  removed with server management and the Discord bridge; see *Bot only*
+  below.)
 - **Dependency downgrades.** `tar`, `axios` and `postcss` were moved backwards
   and four pnpm overrides (`brace-expansion@1`, `brace-expansion@5`,
   `ip-address`, `postcss`) removed. Those pins were added upstream in `960c5ff`
@@ -296,9 +298,11 @@ turning it off made no difference anyone could see, because the bot accepts
 every join request itself. What viewers took for "waiting to be let in" was
 the sidecar's ICE gathering (see "Viewers waited five seconds to join"
 below). `VoiceBot` sends `accessibility=0`, what the setting defaulted to. The
-`streamPublic` column stays in the schema, unread: the container applies the
-schema with a plain `prisma db push`, which refuses to drop a column holding
-data, and a failed push would leave every later schema change unapplied.
+`streamPublic` column stayed in the schema, unread, for a while: the container
+applies the schema with a plain `prisma db push`, which refuses to drop a
+column holding data. It was dropped with the other leftovers in the schema
+cleanup, whose one-off upgrade step accepts the loss (see *Schema cleanup:
+the removed features' tables and columns dropped* below).
 
 ### Bot speaks English
 
@@ -313,11 +317,13 @@ quotes"` (the French marks render inconsistently across TeamSpeak client
 fonts), column padding was re-aligned for English label widths, and the French
 aliases `!aide` and `!paroles` were dropped.
 
-Resolved. `voice/bot-i18n/` holds one catalogue per language (English,
-Finnish, French, German, Spanish, Italian), selected by a stored setting.
-Every catalogue is typed `BotMessages`, so a key added to one and forgotten
-elsewhere is a compile error; `messages(lang)` falls back to English for an
-unknown value, because it comes from a database column.
+For a while the replies were translated: `voice/bot-i18n/` held one catalogue
+per language (English, Finnish, French, German, Spanish and Italian), chosen by
+a setting under Settings → Music Bot. That is gone again. Only English is
+used, so `voice/bot-i18n/` now keeps the English catalogue alone, typed
+`BotMessages`. The replies stay in a catalogue rather than as literals in the
+handler so the wording can be reviewed in one place. The language setting and
+its column went with the other catalogues; see *English only* below.
 
 Typing the keys surfaced a latent bug: `QueueItem.artist` is optional and was
 interpolated directly, so a track with no artist metadata replied "Now
@@ -356,15 +362,15 @@ enforced instead.
 | `python3` + `build-essential` in base images | `build(docker): install a native-module toolchain…` | node-gyp built `cpu-features` and `ssh2`'s crypto binding at install time. Removed with ssh2; see *Bot only* below |
 | `docker-compose.coolify.yml` removed | `chore(compose): remove the Coolify compose file…` | It ran upstream's Docker Hub images with no sidecar and no `SIDECAR_TOKEN`, and pinned one install's Coolify network ID; nobody deploys this fork on Coolify to keep it working |
 | `docker-compose.hub.yml` and `docker-compose.dev.yml` removed | `chore: remove upstream's Docker Hub compose files…` | Both ran clusterzx's Docker Hub images (`clusterzx/ts6-manager:backend`, `:backend-dev`), so a deployment using either ran upstream's code with none of this fork in it. `docker-compose.yml` builds this fork and `docker-compose.ghcr.yml` runs its CI images |
-| Translated READMEs removed | same commit | `README.{fr,de,es,it}.md` described `coom/ts6-manager` and none of this fork, and linked the removed Docker Hub compose file. The web UI keeps its five languages; only the READMEs went |
+| Translated READMEs removed | same commit | `README.{fr,de,es,it}.md` described `coom/ts6-manager` and none of this fork, and linked the removed Docker Hub compose file. The web UI kept its five languages then; it is English only since *English only* below |
 
 ### Settings, and the dependency fixes
 
 The hardcoded values above are now a `StreamSettings` row, edited in
 Settings → Streaming: hardware encoding and its device, the encoder profile,
 the default preset, and the IPTV playlist, filter and sort.
-The bot's language sits with the other bot settings in Settings → Music
-Commands.
+The bot's language sat with the other bot settings in Settings → Music
+Bot until the bot became English only.
 
 Encoder selection reaches the sidecar in the `POST /source` body rather than
 its environment. This is not a style choice: in a container deployment the
@@ -398,7 +404,8 @@ and 4.22.2 is the last of the v4 line — there is no express release carrying
 the fixes.
 
 **Two remain, both `react-router`, both fixed only in >=7.18.0.** Neither is
-reachable here, which is why the v7 major has not been forced:
+reachable here, which is why the v7 major was not forced then (React Router 7,
+`react-router-dom` ^7.18.5, was adopted later and closed both):
 
 - `deserializeErrors()` constructor injection (CVE-2026-53666) is an SSR
   hydration path. There is no SSR — no `renderToString`, `hydrateRoot` or
@@ -1183,33 +1190,39 @@ shared network.
 
 | | |
 |---|---|
-| Commit | `refactor!: remove bot flows, SSH ServerQuery, Discord, the connection journal and server widgets` |
-| Backend | `bot-engine/`, `discord/`, `widget/`, `connection-journal.ts`, `utils/geo.ts`; routes `bots`, `discord`, `journal`, `widget`, `widget-public`, `files` |
+| Commits | `chore(deps): drop dependencies nothing imports`, `refactor!: remove bot flows, SSH ServerQuery, Discord, the connection journal and server widgets`, `refactor!: remove the music bot player widget` |
+| Backend | `bot-engine/`, `discord/`, `widget/`, `connection-journal.ts`, `utils/geo.ts`; routes `bots`, `discord`, `journal`, `widget`, `widget-public`, `files`, `player-widget` |
 | Frontend | pages `BotList`, `BotEditor`, `Journal`, `WidgetPage`, `Files`; `components/bots`, `components/widget`, `data/bot-templates.ts`; the Discord settings tab, the journal-retention card, the Dashboard's widget button, a bot card's player-widget button, the SSH fields under Settings → Connections |
 
 This fork is run for its music and video bot only. The manager's other half,
 administering the TeamSpeak server itself, is not used, and every part of it
-is code to keep patched. This is the first of several removals; it takes out
-everything that needed an SSH ServerQuery session or an outside service.
+is code to keep patched. This is the first of several removals (the sections
+after this one record the rest); it takes out everything that needed an SSH
+ServerQuery session or an outside service.
 
 The voice bot never depended on any of it. It receives chat commands on its
 own TS3 voice connection (`MusicCommandHandler.registerBot`), so `!play`,
 `!stream` and the rest work as before without SSH credentials.
 
 The music bot's player widget (now playing as JSON/BBCode under
-`/api/widget/player/`) went with the server widgets.
+`/api/widget/player/`) went in its own commit right after. It was not used
+either, and with it went the last unauthenticated route besides login and
+setup, and the rate limiter that guarded it.
 
 **The Files page went in this step** rather than with the other server pages,
 because it listed files over the shared SSH session (`ft*` commands are not
 available over WebQuery).
 
-**Database:** nothing is dropped yet. The `BotFlow`, `Widget`,
+**Database:** this step dropped nothing. The `BotFlow`, `Widget`,
 `DiscordSettings` and `ConnectionLog` tables and the server record's SSH
-columns stay until the schema cleanup, which comes with its own backup and
-upgrade steps. The backend simply stops reading them.
+columns stayed, unread, until the schema cleanup at the end of the set, which
+comes with its own backup and upgrade steps (see *Schema cleanup* below).
+Keeping the drop for last meant one data-losing upgrade instead of one per
+removal.
 
 `utils/geo.ts` existed for the journal's country lookup (`geoip-lite`, about
-110 MB of data). Web bans only needed its `normalizeIp`, now `utils/ip.ts`.
+110 MB of data). Web bans only needed its `normalizeIp`, which moved to
+`utils/ip.ts` and went later with web bans themselves.
 
 Packages removed: `ssh2`, `@types/ssh2`, `node-cron`, `discord.js`,
 `@discordjs/voice`, `@snazzah/davey`, `geoip-lite`, `@types/geoip-lite`,
@@ -1219,7 +1232,247 @@ five Radix packages (`accordion`, `context-menu`, `popover`, `progress`,
 `avatar`). The `undici` and `ip-address` overrides matched only packages
 reached through discord.js and ssh2, so they went too. No native module is
 left to compile, so `python3` and `build-essential` left both Dockerfiles'
-base stage. The backend image keeps `python3` for yt-dlp.
+base stage. The backend image keeps `python3` for yt-dlp. That toolchain was
+most of the saving: the backend image went from 2.61 GB (fork `main` at
+`4ba4587`) to 1.99 GB after this step.
+
+### Server management and WebQuery removed
+
+| | |
+|---|---|
+| Commits | `refactor!: remove server management, WebQuery and the move/channel commands`, `feat: let admins grant viewers servers, and show viewers their music requests` |
+| Backend | `ts-client/` (the WebQuery client and connection pool), `middleware/ensure-connection.ts`, `utils/server-group-filter.ts`, `voice/music-command-access.ts`, `TSApiError` in `middleware/error-handler.ts`; routes `dashboard`, `virtual-servers`, `channels`, `clients`, `server-groups`, `channel-groups`, `permissions`, `bans`, `tokens`, `complaints`, `messages`, `logs`, `instance`; `servers.routes.ts` rewritten; `users.routes.ts` (server grants); `middleware/server-access.ts` |
+| Frontend | pages `Dashboard`, `VirtualServers`, `Channels`, `Clients`, `ServerGroups`, `ChannelGroups`, `Permissions`, `Bans`, `Tokens`, `Complaints`, `Messages`, `ServerLogs`, `Instance` with their API clients and hooks; `components/shared/DataTable.tsx`; Settings → Connections, now Settings → Servers; a Servers column under Settings → Users |
+| Common | the WebQuery types (`types/teamspeak.ts`, most of `types/api.ts`) and `utils/ts-escape.ts` |
+
+The manager's other half, administering TeamSpeak servers over WebQuery, goes
+here. The music and video bot connects as an ordinary client over its own TS3
+connection and never used the query interface, so nothing it does changes.
+What went was a set of pages nobody opened, and a WebQuery API key stored on
+every server record for them.
+
+Removed with it:
+
+- **The chat commands `!channels`, `!move`, `!moveall` and `!notif`.** The
+  first three listed channels and moved clients through WebQuery. `!notif`
+  toggled the now-playing notice for every bot; it was an admin-group command,
+  and with the group gate gone anyone could have flipped it. The notice keeps
+  its switch under Settings → Music Bot.
+- **The server-group gate on bot commands.** Settings → Music Bot could
+  name a music command group and an admin command group, and the bot looked up
+  the invoker's server groups over WebQuery before obeying. It was dropped
+  rather than rebuilt: anyone who can message a bot can now command it, and
+  TeamSpeak's own channel permissions decide who gets to the bot.
+- **The server record's `enabled` flag.** Only the WebQuery connection pool
+  read it, to skip disabled servers.
+- Packages `axios` (backend only; the frontend keeps it), `recharts` and
+  `@tanstack/react-table`, and the `TS_ALLOW_SELF_SIGNED` setting.
+
+A server record is now a **name and a host**, all a bot needs to find the
+server; the voice port stays per bot. Settings → Servers (formerly
+Connections) keeps the list the bot form picks from. Three behaviours of that
+list are new:
+
+- **Deleting a server first stops and removes its bots.** The cascade deleted
+  the bot rows but left the bots themselves connected. The confirmation says
+  what goes: the bots, playlists, radio stations, music requests and library
+  entries; downloaded song files stay in the music folder.
+- **A changed host applies on each running bot's next connect.** The bots keep
+  their current connection rather than being dropped mid-song.
+- **`requireServerAccess` answers 404** for a server id that does not exist,
+  for admins too, instead of letting the route run on into a foreign-key
+  error.
+
+**Viewers.** The viewer role was kept, but nothing had ever written a
+`UserServerAccess` row, so a viewer saw no server and could open nothing but
+their own account. Settings → Users now has a Servers column: admins see every
+server, and a viewer's grants are set from a checklist, also offered when a
+viewer is created. An update replaces the grants in the same transaction as
+the rest of the change, and an unknown server id refuses the whole request.
+Music Requests is open to viewers and is their landing page; it shows only the
+servers granted to them, through the server selector and
+`requireServerAccess`. Music Bots stays admin-only and is the admins' landing
+page.
+
+The schema change here was only a default on `apiKey`, so new rows need none;
+the columns themselves went in the schema cleanup.
+
+### MFA, trusted devices, SAML and web bans removed
+
+| | |
+|---|---|
+| Commit | `refactor!: remove MFA, trusted devices, SAML SSO and web bans` |
+| Backend | `auth/saml/`, routes `saml`, `saml-auth`; `utils/mfa.ts`, `utils/trusted-device.ts`, `utils/trusted-device-service.ts`, `utils/web-ban.ts`, `utils/ip.ts`; `routes/auth.routes.ts`, `routes/users.routes.ts`, `auth/session.ts`, `middleware/auth.ts`, `app.ts` |
+| Frontend | the MFA step in `Login.tsx`, `SsoCallback.tsx`, `api/saml.api.ts`, the MFA, trusted-device and SAML parts of Settings |
+
+Sign-in is a username and password. Roles, the password policy, the forced
+password change and the login rate limits are unchanged. Everything else
+around sign-in served an install with outside users; this one has a few
+known accounts.
+
+Removed:
+
+- **TOTP MFA**: enrolment, the code step at login, recovery codes, the
+  admin's "require MFA" and reset controls, and the MFA challenge token class.
+- **Trusted devices**: the remember-this-computer cookie, its list and its
+  revocation, and with them `cookie-parser`, the only cookie reader.
+- **SAML SSO**: `/api/auth/saml`, `/api/saml`, the settings tab, the callback
+  page, and the urlencoded body parser that only the assertion consumer needed.
+- **Web IP bans.** Nothing could create or lift one once the connection
+  journal went, so only stale rows were still enforced.
+- Packages `otplib`, `qrcode`, `@types/qrcode`, `@node-saml/node-saml`,
+  `cookie-parser`, `@types/cookie-parser`, and the `@xmldom/xmldom` override
+  that only node-saml reached.
+
+**The token-class check stays.** `authMiddleware` accepts only `typ=access`
+tokens. With the MFA challenge token gone it now keeps the short-lived
+password-change token (`typ=pwchange`) from being used as a session, the same
+class of confusion the 2026-08-06 security release fixed for MFA.
+
+A user provisioned by SSO has no password and cannot sign in until an admin
+sets one; the password endpoints say that rather than naming SSO. Users who had
+MFA sign in with their password alone.
+
+### English only
+
+| | |
+|---|---|
+| Commit | `refactor!: English only, in the web UI and in the bot's replies` |
+| Backend | `voice/bot-i18n/` (`de`, `es`, `fi`, `fr`, `it` removed), `voice/music-command-handler.ts`, `routes/auth.routes.ts`, `routes/music-command-settings.routes.ts`, `auth/session.ts` |
+| Frontend | `i18n/locales/{de,es,fr,it}.json` removed, `i18n/index.ts`, `LanguageSwitcher.tsx`, `Flag.tsx`, the Account language card and the bot-language picker in `Settings.tsx`, `scripts/merge-i18n.mjs` and `scripts/i18n-fragments/`, `index.html` |
+
+The web UI had English, French, German, Spanish and Italian, and the bot
+replied in those and Finnish. Only English is used, and every other catalogue
+was text to keep in step with each change. The server-management removal had
+already pruned the keys nothing referenced any more from every locale
+(1215 → 529).
+
+- **Web UI.** `en.json` is the only locale. The language switcher, the Account
+  language card, browser language detection, `flag-icons` and
+  `i18next-browser-languagedetector` are gone. Strings still go through
+  i18next, so the wording stays in one file. `index.html` says `lang="en"`.
+- **Bot.** `voice/bot-i18n/` keeps the English catalogue only. The
+  bot-language picker under Settings → Music Bot, `PUT /api/auth/language`
+  and the language fields of `/me`, the session and the music-command settings
+  are gone. Two French leftovers in replies were fixed on the way:
+  "(en direct)" and "Now playing :".
+- **`scripts/merge-i18n.mjs`** and its fragments went too. It was an authoring
+  tool nobody ran any more, and running it would have merged every removed key
+  back into the locales.
+
+A stored language choice is ignored: a bot set to Finnish answers in English.
+The `User.language` and `MusicCommandSettings.language` columns went in the
+schema cleanup.
+
+### Schema cleanup: the removed features' tables and columns dropped
+
+| | |
+|---|---|
+| Commit | `refactor!: drop the tables and columns of the removed features` |
+| Files | `prisma/schema.prisma`, `prisma/seed.ts`, `prisma/table-counts.mjs` (new), `Dockerfile.backend`, root `package.json` |
+
+Each removal above stopped reading its data and left it in place. This commit
+drops it, once, so the upgrade that loses data is a single deliberate step
+with a backup.
+
+| Dropped | |
+|---|---|
+| Tables | `BotFlow`, `BotVariable`, `BotExecution`, `BotExecutionLog`, `Widget`, `DiscordSettings`, `ConnectionLog`, `SAMLSettings`, `TrustedDevice`, `WebBan`, `StreamSession` (never used) |
+| `User` | `mfaEnabled`, `mfaSecret`, `mfaPendingSecret`, `mfaRecoveryCodes`, `mfaRequired`, `language`, `authProvider`, `externalId` |
+| `TsServerConfig` | `webqueryPort`, `apiKey`, `useHttps`, `sshPort`, `sshUsername`, `sshPassword`, `sshHostKeyFp`, `enabled` |
+| `MusicCommandSettings` | `language`, `musicCommandSgid`, `adminCommandSgid` |
+| `StreamSettings` | `streamPublic` |
+
+The other tables are untouched. SQLite cannot drop a column in place, so
+`User`, `TsServerConfig`, `MusicCommandSettings` and `StreamSettings` are
+rebuilt and their rows copied. The seed also deletes the orphaned
+`journal.retentionDays` setting.
+
+**The container now stops on a refused push.** `prisma db push` refuses a
+change that drops data unless told to accept it, exiting 1 with "Use the
+--accept-data-loss flag". The old start command chained it as `push && seed
+|| true && node`, so a refused push still started the app, running this
+build against the old tables. The command is now
+
+```sh
+(pip install … yt-dlp || true) && npx prisma db push --skip-generate \
+  && (npx prisma db seed || true) && exec node dist/index.js
+```
+
+so a refused push ends the container. An upgrade that skips the one-off step
+restart-loops with Prisma's data-loss warning in the log; it does not lose
+data and does not half-work. The yt-dlp refresh and the seed stay best effort.
+
+**The upgrade is one manual push with `--accept-data-loss`,** after a backup,
+with the backend stopped. The full procedure is in
+[Deploying](deploying.md): back up the whole data directory, count rows with
+the new image, optionally dry-run with `prisma migrate diff … --script`, run
+the push once, count again, then start normally. The log then says "The
+database is already in sync with the Prisma schema". `prisma/table-counts.mjs`
+is the counting tool: it prints each table's row count and SQLite's
+`integrity_check` and `foreign_key_check`, and changes nothing.
+
+Rehearsed on 2026-11-04 on a copy of a realistic database, in WSL, with every
+step of that procedure:
+
+| | Rows |
+|---|---|
+| Kept, identical before and after | `AppSetting` 3, `MusicBot` 2, `MusicCommandSettings` 1, `MusicRequest` 1, `Playlist` 1, `PlaylistSong` 2, `RadioStation` 1, `RefreshToken` 6, `Song` 2, `SpotifySettings` 0, `StreamSettings` 1, `TsServerConfig` 2, `User` 2, `UserServerAccess` 1 |
+| Dropped | `BotExecution` 32, `BotExecutionLog` 156, `BotFlow` 2, `BotVariable` 0, `ConnectionLog` 83, `DiscordSettings` 1, `SAMLSettings` 1, `StreamSession` 0, `TrustedDevice` 2, `WebBan` 1, `Widget` 1 |
+
+The dry run showed `DROP TABLE` for the eleven tables and rebuilds of the
+four, nothing else. Both checks were ok afterwards, and spot checks of the
+values came back unchanged: server names and hosts, users and roles, the
+viewer's grant, bot identities, the IPTV settings and the playlist's songs.
+
+**Rolling back means restoring the backup.** An older image cannot re-add the
+dropped required columns on its own, so the way back is: stop, restore the
+backup, run the previous image tag.
+
+The root `db:migrate` script (`prisma migrate dev`, which offers to reset a
+database managed with `db push`) is replaced by `db:push`.
+
+### The WebSocket removed
+
+| | |
+|---|---|
+| Commit | `refactor: remove the WebSocket nobody listens to` |
+| Files | `index.ts`, `ws/ws-broadcast.ts` (removed), `voice/voice-bot-manager.ts`, `Dockerfile.frontend` (nginx), `vite.config.ts`, `packages/backend/package.json` |
+
+The web UI polls the REST API and never opens `/ws`, and nothing else
+connects to it. The backend still authenticated sockets, scoped every bot
+event per server and ran a one-second progress timer per playing bot to feed
+them. Once viewers could be granted servers it would also have been a leak: a
+viewer's socket would have received stream sources, IPTV playlist entries
+included, that the UI never shows them.
+
+Removed: the `WebSocketServer` and its token check, `ws/ws-broadcast.ts`, the
+broadcast-only bot event listeners and progress timers in `VoiceBotManager`,
+the `/ws` proxies in nginx and Vite, and the `ws` and `@types/ws` packages.
+The nginx `/widget/` location went too; it disabled framing protection for the
+removed widget page.
+
+### Smaller sweep
+
+| | |
+|---|---|
+| Commit | `chore: drop the unused alert-dialog package, correct the server delete warning` |
+| Files | `packages/frontend/package.json`, `i18n/locales/en.json` |
+
+`@radix-ui/react-alert-dialog` had no component and no importer. The server
+delete confirmation said the server's songs were removed; deleting a server
+removes its library rows but not the song files in the music folder, and the
+text now says so.
+
+With the whole set, the backend image is 1.95 GB (2.61 GB at `4ba4587`,
+1.99 GB after the first step): its node_modules went from 650 MB in 670
+packages to 450 MB in 470. The frontend image is 91.2 MB (98.1 MB).
+
+**What users notice after upgrading:** no server-management pages; no Discord,
+flows, journal or widgets; sign-in by password only; no web bans; English only,
+including a bot that was set to another language; no command group
+restriction; and viewers see only Music Requests, for the servers an admin
+grants them under Settings → Users.
 
 ## Fixes to coom's changes (fork only)
 

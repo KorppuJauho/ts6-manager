@@ -3,8 +3,8 @@ import { Request, Response, NextFunction } from 'express';
 const INT_RE = /^\d+$/;
 
 /**
- * Rejects requests whose numeric route params (e.g. :configId, :sid) are not
- * plain integers, before they reach Prisma or ServerQuery. parseInt() alone
+ * Rejects requests whose numeric route params (e.g. :configId) are not
+ * plain integers, before they reach Prisma. parseInt() alone
  * lets NaN through ("12abc" → 12, "abc" → NaN).
  */
 export function requireIntParams(...names: string[]) {

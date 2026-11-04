@@ -25,8 +25,8 @@ cd packages/sidecar && go build ./... && go vet ./...
 
 A local TeamSpeak server to test against, and what a local rig can and cannot
 verify (VAAPI cannot be tested under WSL2): `docs/local-testing.md`.
-Moving a deployment onto a git checkout, and the settings that need
-re-enabling after upgrading from a pre-settings version: `docs/deploying.md`.
+Moving a deployment onto a git checkout, backing up before an upgrade, and the
+one-off procedure for a schema change that drops data: `docs/deploying.md`.
 
 **`@ts6/common` must be built before typechecking.** Skipping it produces a
 cascade of `Cannot find module '@ts6/common'` errors that look like broken
@@ -40,18 +40,37 @@ Dockerfiles. Run the equivalent locally before pushing.
 
 | Package | What |
 |---|---|
-| `packages/backend` | Express API, Prisma, TeamSpeak client, voice bots |
-| `packages/frontend` | React + Vite + Tailwind + shadcn/ui, TanStack Query, i18next |
+| `packages/backend` | Express REST API, Prisma (SQLite), sign-in and users, the voice bots (`src/voice/`: own TS3 voice client in `tslib/`, music, radio, IPTV, playlists, lyrics, streaming) |
+| `packages/frontend` | React + Vite + Tailwind + shadcn/ui, TanStack Query, i18next; polls the REST API (there is no WebSocket) |
 | `packages/common` | Types and constants shared by both |
 | `packages/sidecar` | Go WebRTC media relay; drives FFmpeg, talks RTP to TeamSpeak |
+
+The manager does not administer TeamSpeak servers. A server record is a name
+and a host (Settings -> Servers) that bots connect to as ordinary clients;
+there is no ServerQuery, WebQuery or SSH connection. What was removed from
+upstream, and why, is in `docs/fork-changes.md`.
 
 ## Things that will bite you
 
 **Schema changes go through `prisma db push`, not migrations.**
-`Dockerfile.backend` runs `prisma db push` on container start. The committed
-`prisma/migrations/` directory is a single one-off patch, not a replayable
-history — `prisma migrate diff` cannot even replay it. Do not add migration
-files; edit `schema.prisma` and let db push apply it.
+`Dockerfile.backend` runs `prisma db push` on container start, and the app
+starts only if the push succeeds. The committed `prisma/migrations/`
+directory is a single one-off patch, not a replayable history — do not add
+migration files, and do not run `prisma migrate dev`, which offers to reset a
+db push database (the root script is `pnpm db:push`). Edit `schema.prisma` and
+let db push apply it.
+
+A change that drops data (a removed table or column, or a column SQLite must
+rebuild the table for) is refused without `--accept-data-loss`. The container
+start does not pass that flag on purpose: the push fails, the container exits
+with Prisma's data-loss warning in the log, and the new build never runs
+against the old tables. Such a change needs the one-off backup and
+`--accept-data-loss` procedure in `docs/deploying.md`; say so in the commit
+message. `prisma/table-counts.mjs` (shipped in the image) prints row counts
+plus SQLite's `integrity_check` and `foreign_key_check` for the before/after
+comparison, and `prisma migrate diff --from-url "$DATABASE_URL"
+--to-schema-datamodel prisma/schema.prisma --script` shows the SQL a push
+would run without running it.
 
 **The video codec appears in three places that must agree.** In
 `packages/sidecar/main.go`: `MediaEngine.RegisterCodec` (SDP), the
@@ -94,10 +113,11 @@ to start without the NVIDIA runtime. NVENC encodes H.264 only, and must be fed
 
 - **Comments explain why, not what.** The codebase documents reasoning and
   non-obvious constraints; it does not narrate the code. Match that.
-- **Write comments and user-facing strings in English.** The bot's TeamSpeak
-  replies come from `voice/bot-i18n/`, not string literals.
-- **Frontend strings go through i18next** (`src/i18n/locales/*.json`), all
-  five languages. Never hardcode display text in a component.
+- **English only.** Comments, the web UI and the bot's replies are in
+  English; there is no language setting. The bot's TeamSpeak replies come
+  from `voice/bot-i18n/en.ts`, not string literals.
+- **Frontend strings go through i18next** (`src/i18n/locales/en.json`, the
+  only locale). Never hardcode display text in a component.
 - Commit messages: conventional-commit subject, then a body explaining the
   reasoning and any trade-off carried. Look at recent history for the register.
 - **Do not put personal identity in the history.** Commit as
@@ -111,9 +131,11 @@ to start without the NVIDIA runtime. NVENC encodes H.264 only, and must be fed
 
 ## Security
 
-This project handles TeamSpeak ServerQuery credentials, SAML config and user
-sessions. Several guards exist because of specific past vulnerabilities and
-are easy to remove by accident:
+This project handles user sessions (password sign-in with admin and viewer
+roles, the password policy, login rate limits), Spotify credentials and the
+bots' TeamSpeak identities. It holds no ServerQuery credentials and no SSO
+config. Several guards exist because of specific past vulnerabilities and are
+easy to remove by accident:
 
 - `assertSafeUrl` / `validateUrl` guard SSRF on anything fetched from a URL a
   user supplied. `validateUrl` refuses private addresses — which is why the
@@ -123,6 +145,12 @@ are easy to remove by accident:
   the positional argument.
 - The sidecar's HTTP API requires a bearer token and refuses to start without
   one.
+- `authMiddleware` accepts only tokens with `typ: 'access'`, so the
+  short-lived forced-password-change token cannot be used as a session.
+- Bot identities and the Spotify client secret are stored encrypted
+  (`utils/crypto.ts`); do not write them to the database or a log in clear.
+- `requireServerAccess` scopes viewers to the servers an admin granted them
+  under Settings -> Users; routes taking a server id must keep it.
 
 When a change touches any of these, say in the commit message why it is still
 safe.

@@ -45,9 +45,9 @@ Linux NVIDIA driver inside WSL.
 
 Everything else this project does can be exercised locally: the settings UI
 and its persistence, software VP8/VP9 streaming end to end, the DASH
-video+audio resolution, presets, the idle auto-stop, the
-bot's six reply languages, and `!tv` — which can point at a real IPTV proxy on
-your LAN, since the backend does the fetching.
+video+audio resolution, presets, the idle auto-stop, the bot's commands, and
+`!tv` — which can point at a real IPTV proxy on your LAN, since the backend
+does the fetching.
 
 ## Running alongside a production deployment
 
@@ -61,8 +61,6 @@ binds a port production uses.
 | | Production | Test |
 |---|---|---|
 | TeamSpeak voice (UDP) | 9987 | **9988** |
-| TeamSpeak WebQuery | 10080 | **10081** |
-| TeamSpeak ServerQuery (SSH) | 10022 | **10023** |
 | TeamSpeak file transfer | 30033 | **30034** |
 | Manager UI | 3000 | **3010** |
 | Manager API | 3001 | **3011** |
@@ -158,9 +156,10 @@ every file read crosses the Windows filesystem boundary.
 
 ## Choosing a TeamSpeak server image
 
-This project talks to the server over the **WebQuery HTTP API** — the
-ServerQuery replacement in modern TeamSpeak builds — not telnet ServerQuery.
-A server build old enough to offer only telnet will not work with it.
+The manager does not use the server's query interfaces. The music bot joins
+as an ordinary TeamSpeak client over the **voice port (UDP)**, so the server
+only has to accept client connections there. WebQuery and SSH ServerQuery can
+stay switched off, which is the TeamSpeak 6 default.
 
 The image is not pinned here because it depends on which build you have
 access to. Check what your existing server runs (`docker ps` on the NAS, or
@@ -170,29 +169,14 @@ its container manager) and set it in `.env`:
 TS_SERVER_IMAGE=<the image:tag your server uses>
 ```
 
-The compose files accept the licence and switch on the query interfaces
-under both naming schemes: `TSSERVER_*` for TeamSpeak 6 and
-`TS3SERVER_LICENSE` for TeamSpeak 3. A TeamSpeak 6 server without the
-acknowledgement exits at once and restarts forever, and it starts with
-WebQuery off — the only interface the manager speaks — so both are required,
-not optional. An image that uses other names lists its own:
-`docker run --rm <image> tsserver --help`.
+The compose files accept the licence under both naming schemes:
+`TSSERVER_LICENSE_ACCEPTED` for TeamSpeak 6 and `TS3SERVER_LICENSE` for
+TeamSpeak 3. A TeamSpeak 6 server without the acknowledgement exits at once
+and restarts forever, so it is required, not optional. An image that uses
+other names lists its own: `docker run --rm <image> tsserver --help`.
 
 The compose files deliberately keep the server ephemeral, so
-`docker compose down -v` gives a clean slate — and a new API key.
-
-## Getting the WebQuery API key
-
-The manager authenticates to the server with an API key sent as `x-api-key`,
-not a username and password. A TeamSpeak server prints an initial admin key
-**on first start**, so capture it:
-
-```bash
-docker compose -f docker-compose.tsserver.yml logs teamspeak | head -50
-```
-
-If you miss it, `docker compose down -v` and start again — the key is only
-generated on a fresh instance.
+`docker compose down -v` gives a clean slate.
 
 ## Day-to-day: server in Docker, manager native
 
@@ -202,9 +186,11 @@ Fast loop, hot reload, real stack traces.
 docker compose -f docker-compose.tsserver.yml up -d
 
 cp .env.example .env          # then fill in the secrets below
+cp .env packages/backend/.env # the Prisma CLI reads DATABASE_URL from here
 pnpm install
 pnpm --filter @ts6/common run build    # required before anything typechecks
 pnpm db:generate
+pnpm db:push                  # create the SQLite schema (only Docker does it on start)
 pnpm dev
 ```
 
@@ -220,17 +206,16 @@ openssl rand -hex 32   # ENCRYPTION_KEY  (must differ from JWT_SECRET)
 openssl rand -hex 32   # SIDECAR_TOKEN
 ```
 
-Then add the server in the UI under Settings → Connections:
+Then add the server in the UI under Settings → Servers:
 
 | Field | Value |
 |---|---|
+| Name | anything, e.g. `Local test` |
 | Host | `localhost` |
-| WebQuery port | `10081` (the shifted test port) |
-| API key | the admin key from the server's first-start log |
-| Use HTTPS | off |
 
-Here the manager runs directly in WSL, so it reaches the server through the
-published ports: a music bot's voice port is **`9988`** too.
+The voice port is not part of the server record; each music bot has its own.
+Here the manager runs directly in WSL, so the bot reaches the server through
+the published port: give it voice port **`9988`**.
 
 ## Before deploying: the full stack
 
@@ -245,18 +230,17 @@ docker compose -p ts6-test -f docker-compose.test.yml up -d --build
 The `-p ts6-test` is not optional — see the isolation section above.
 
 Here the manager runs in a container on the same Docker network as the
-server, so it reaches it by service name on the **internal, unshifted** ports
-— not the ones the table above lists for Windows:
+server, so it reaches it by service name on the **internal, unshifted** port
+— not the one the table above lists for Windows. Under Settings → Servers:
 
 | Field | Value |
 |---|---|
+| Name | anything, e.g. `Local test` |
 | Host | `teamspeak` |
-| WebQuery port | `10080` |
-| Music bot voice port | **`9987`** |
-| API key | the admin key from the server's first-start log |
-| Use HTTPS | off |
 
-The shifted ports (9988, 10081, …) are only for things on the Windows side:
+and on the music bot, voice port **`9987`**.
+
+The shifted ports (9988, 30034, …) are only for things on the Windows side:
 the TeamSpeak client, the browser. A bot given 9988 here sends its voice
 packets to a port nothing listens on and fails with `Connection timeout`.
 
@@ -285,9 +269,9 @@ under WSL2 and worth investigating before trusting it.
 
 ## Troubleshooting
 
-**The TeamSpeak client cannot connect, but the UI can.** The UI uses TCP
-(WebQuery) and the client uses UDP. This is the mirrored-networking setting
-above.
+**The TeamSpeak client cannot connect, but the UI can.** The browser reaches
+the manager over TCP, which WSL2 forwards well enough; the TeamSpeak client
+uses UDP. This is the mirrored-networking setting above.
 
 **The UI or the client times out on `localhost` from Windows.** IPv6 loopback
 is not mirrored. Use `127.0.0.1`.
@@ -305,7 +289,11 @@ for being idle. See the idle timeouts under networking.
 
 **Backend exits immediately on start.** It refuses to run without
 `JWT_SECRET`, `ENCRYPTION_KEY` and — when `SIDECAR_URL` is set — `SIDECAR_TOKEN`.
-The error names the missing one.
+The error names the missing one. In the container it also exits when the
+schema push is refused ("Use the --accept-data-loss flag" in the log): the
+volume holds a database from before the bot-only version. Follow
+[the upgrade procedure](deploying.md#upgrading-to-the-bot-only-version), or for
+a throwaway rig `down -v` and start fresh.
 
 **`Cannot find module '@ts6/common'` everywhere.** The shared package has not
 been built: `pnpm --filter @ts6/common run build`.

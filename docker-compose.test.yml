@@ -3,7 +3,7 @@
 # problems the native `pnpm dev` loop hides.
 #
 #   docker compose -f docker-compose.test.yml up -d --build
-#   # UI on http://localhost:3000
+#   # UI on http://127.0.0.1:3010
 #
 # For a fast edit-reload loop instead, run docker-compose.tsserver.yml and
 # `pnpm dev`. See docs/local-testing.md.
@@ -33,15 +33,10 @@ services:
       # forever.
       - TS3SERVER_LICENSE=accept
       - TSSERVER_LICENSE_ACCEPTED=accept
-      # Both query interfaces are off by default on TS6. HTTP is WebQuery,
-      # which is everything the manager speaks; SSH backs only the
-      # server-access recovery feature.
-      - TSSERVER_QUERY_HTTP_ENABLED=1
-      - TSSERVER_QUERY_SSH_ENABLED=1
+      # The query interfaces (WebQuery, SSH) stay at their TS6 default, off:
+      # the music bot joins as an ordinary client on the voice port.
     ports:
       - "${TEST_TS_VOICE_PORT:-9988}:9987/udp"
-      - "${TEST_TS_WEBQUERY_PORT:-10081}:10080"
-      - "${TEST_TS_SSH_PORT:-10023}:10022"
       - "${TEST_TS_FILE_PORT:-30034}:30033"
     networks:
       - ts6-test

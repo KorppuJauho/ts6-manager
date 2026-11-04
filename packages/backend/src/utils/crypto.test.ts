@@ -10,7 +10,7 @@ const { encrypt, decrypt } = await import('./crypto.js');
 
 describe('crypto', () => {
   it('round-trips a value', () => {
-    const secret = 'ssh-p@ssw0rd-éàü';
+    const secret = 'spotify-s3cr3t-éàü';
     const enc = encrypt(secret);
     expect(enc).toMatch(/^enc:[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/);
     expect(decrypt(enc)).toBe(secret);

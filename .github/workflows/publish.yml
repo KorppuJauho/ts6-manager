@@ -78,10 +78,10 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Scoped per image so the backend's slow native-module layer is not
-          # evicted by the sidecar's cache. The scope is keyed on the
-          # Dockerfile name, not the image name, because that is what the CI
-          # workflow's matrix carries — the two must match or neither reuses
-          # the other's layers.
+          # Scoped per image so the backend's dependency layers (the FFmpeg
+          # base and the pnpm install) are not evicted by the sidecar's cache.
+          # The scope is keyed on the Dockerfile name, not the image name,
+          # because that is what the CI workflow's matrix carries — the two
+          # must match or neither reuses the other's layers.
           cache-from: type=gha,scope=${{ matrix.dockerfile }}
           cache-to: type=gha,mode=max,scope=${{ matrix.dockerfile }}

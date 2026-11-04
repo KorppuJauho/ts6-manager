@@ -21,8 +21,8 @@ export default tseslint.config(
       // is redundant on TS and misfires on Node/DOM globals (disabling it is
       // typescript-eslint's own recommendation).
       'no-undef': 'off',
-      // Existing debt (~80 occurrences across API payloads and bot-flow configs);
-      // re-enable once payloads are typed from @ts6/common.
+      // Existing debt across API payloads; re-enable once payloads are typed
+      // from @ts6/common.
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': [
         'error',

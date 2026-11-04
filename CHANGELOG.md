@@ -6,6 +6,18 @@ Started at the 2026-08-06 security review; earlier history is in the git log.
 
 ## [Unreleased]
 
+### Removed
+
+- **Everything except the music and video bot** (2026-11). Server
+  management and WebQuery, SSH ServerQuery, bot flows, Discord, the
+  connection journal, server and player widgets, the Files page, the
+  WebSocket, `!channels`/`!move`/`!moveall`/`!notif` and the command
+  server-group gate, MFA, trusted devices, SAML SSO, web bans, and every
+  language but English. Admins now grant viewers servers, so viewers see
+  Music Requests. Their tables and columns are dropped, so upgrading needs a
+  backup and a one-off `prisma db push --accept-data-loss`
+  (`docs/deploying.md`). Details and reasons: `docs/fork-changes.md`.
+
 ### Fork
 
 > This section records the first import, on 2026-09-13, and is not kept up to
@@ -50,6 +62,8 @@ column is written by the UI but ignored at stream time.
 ### Security
 
 Full security review of the codebase. Twelve issues, three of them high severity.
+These entries record the 2026-08 review; several concern features removed in
+2026-11 (see Removed above).
 
 - **MFA bypass via JWT token-class confusion** (high). Access, MFA-challenge and
   forced-password-change tokens were all HS256 over the same secret with no
