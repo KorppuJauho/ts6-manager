@@ -7,7 +7,6 @@ import { PrismaClient } from '../generated/prisma/index.js';
 import { VoiceBotManager } from './voice/voice-bot-manager.js';
 import { MusicCommandHandler } from './voice/music-command-handler.js';
 import { applyTrustProxy, loadTrustProxy } from './routes/settings.routes.js';
-import { loadSamlRuntime } from './auth/saml/saml-config.js';
 import { config } from './config.js';
 import { setYtCookieFile } from './voice/audio/youtube.js';
 import { warmUpOpusEncoder } from './voice/audio/pipeline.js';
@@ -71,7 +70,7 @@ async function main() {
     verifyClient: ({ req }, done) => {
       // Mirrors middleware/auth.ts: assert the token class, then confirm the
       // account is still live. Verifying the signature alone would accept a
-      // pre-MFA challenge token and would keep serving a disabled account.
+      // password-change token and would keep serving a disabled account.
       void (async () => {
         try {
           const wsUrl = new URL(req.url!, `http://${req.headers.host}`);
@@ -121,9 +120,6 @@ async function main() {
   // Make services available via app.locals
   app.locals.prisma = prisma;
   app.locals.wss = wss;
-
-  // Load the SAML SP config/instance from the DB (no-op if SAML is unconfigured/disabled)
-  await loadSamlRuntime(prisma);
 
   // Initialize Voice Bot Manager (Music Bots). Warm the Opus encoder first, so
   // the first song after a restart does not pay for compiling it.

@@ -17,7 +17,6 @@ export function AppLayout() {
   // back in, and a session that lost its user — tokens present, user null —
   // stays that way for as long as the refresh token keeps rotating.
   // Re-reading the identity on mount corrects both on the next page load.
-  // Shares the ['me'] key with Settings, so it costs nothing extra there.
   const { data: me } = useQuery({
     queryKey: ['me'],
     queryFn: authApi.me,
@@ -26,7 +25,7 @@ export function AppLayout() {
   });
 
   useEffect(() => {
-    // /auth/me answers { user: {...} }, matching how Settings reads this key.
+    // /auth/me answers { user: {...} }.
     if (me?.user) setUser(me.user);
   }, [me, setUser]);
 

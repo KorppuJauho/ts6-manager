@@ -22,9 +22,9 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   try {
     const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as JwtPayload;
 
-    // MFA challenge and forced-password-change tokens are signed with the same
-    // secret but are issued after the password step *alone*. Without this check
-    // either one is accepted here as a full session, bypassing the second factor.
+    // The forced-password-change token is signed with the same secret but is
+    // issued before the change is made. Without this check it would be accepted
+    // here as a full session, skipping the forced change.
     if (payload.typ !== 'access') {
       res.status(401).json({ error: 'Invalid or expired token' });
       return;

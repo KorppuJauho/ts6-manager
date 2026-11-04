@@ -8,7 +8,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 /**
  * Required secret. Fails closed rather than falling back to a published
  * default: JWT_SECRET signs every session, and ENCRYPTION_KEY protects the
- * stored ServerQuery keys, SSH passwords and TOTP secrets. A default that only
+ * stored bot identities and the Spotify client secret. A default that only
  * aborts when NODE_ENV is exactly "production" still ships a known signing key
  * to any deployment that runs the backend directly, under pm2 or under systemd.
  */

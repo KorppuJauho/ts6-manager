@@ -1,12 +1,12 @@
 export type UserRole = 'admin' | 'viewer';
 
 /**
- * Token classes. All three are signed with the same secret, so every verifier
- * must assert the class it expects — otherwise a pre-authentication token
- * (mfa/pwchange, issued after the password step alone) is accepted as a full
- * session and the second factor is bypassed.
+ * Token classes. Both are signed with the same secret, so every verifier must
+ * assert the class it expects — otherwise the password-change token, issued
+ * after the password step alone, is accepted as a full session and the forced
+ * change is skipped.
  */
-export type TokenType = 'access' | 'mfa' | 'pwchange';
+export type TokenType = 'access' | 'pwchange';
 
 export interface JwtPayload {
   id: number;

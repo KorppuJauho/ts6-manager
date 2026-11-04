@@ -1,7 +1,6 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -15,13 +14,10 @@ import { playlistRoutes } from './routes/playlists.routes.js';
 import { radioStationRoutes } from './routes/radio-stations.routes.js';
 import { musicRequestRoutes } from './routes/music-requests.routes.js';
 import { setupRoutes } from './routes/setup.routes.js';
-import { samlAuthRoutes } from './routes/saml-auth.routes.js';
 import { settingsRoutes } from './routes/settings.routes.js';
 import { spotifyRoutes } from './routes/spotify.routes.js';
 import { musicCommandSettingsRoutes } from './routes/music-command-settings.routes.js';
 import { streamSettingsRoutes } from './routes/stream-settings.routes.js';
-import { samlRoutes } from './routes/saml.routes.js';
-import { requireRole } from './middleware/rbac.js';
 import { requireServerAccess } from './middleware/server-access.js';
 import { requireIntParams } from './middleware/validate-params.js';
 
@@ -36,9 +32,6 @@ export function createApp(): Express {
   app.use(helmet());
   app.use(cors({ origin: config.frontendUrl, credentials: true }));
   app.use(express.json({ limit: '10mb' }));
-  // The IdP posts the SAMLResponse as application/x-www-form-urlencoded (ACS endpoint).
-  app.use(express.urlencoded({ extended: false, limit: '1mb' }));
-  app.use(cookieParser());
 
   // Health check
   app.get('/api/health', (_req, res) => {
@@ -69,7 +62,6 @@ export function createApp(): Express {
   // Public routes
   app.use('/api/setup', setupRoutes);
   app.use('/api/auth', authRoutes);
-  app.use('/api/auth/saml', samlAuthRoutes);
 
   // Protected routes
   app.use('/api', authMiddleware);
@@ -88,7 +80,6 @@ export function createApp(): Express {
   app.use('/api/spotify', spotifyRoutes);
   app.use('/api/music-command-settings', musicCommandSettingsRoutes);
   app.use('/api/stream-settings', streamSettingsRoutes);
-  app.use('/api/saml', requireRole('admin'), samlRoutes);
 
   // Error handler (must be last)
   app.use(errorHandler);

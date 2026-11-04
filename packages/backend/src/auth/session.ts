@@ -3,13 +3,7 @@ import crypto from 'crypto';
 import { nanoid } from 'nanoid';
 import { config } from '../config.js';
 
-const MFA_CHALLENGE_TTL = '5m';
-
-export function signMfaChallenge(userId: number): string {
-  return jwt.sign({ typ: 'mfa', mfa: true, id: userId }, config.jwtSecret, { expiresIn: MFA_CHALLENGE_TTL } as jwt.SignOptions);
-}
-
-/** Issue access + refresh tokens and the user payload (shared by local login, MFA step and SAML). */
+/** Issue access + refresh tokens and the user payload (login and the forced password change). */
 export async function issueSession(prisma: any, user: any) {
   const payload = { typ: 'access', id: user.id, username: user.username, role: user.role };
   const accessToken = jwt.sign(payload, config.jwtSecret, { expiresIn: config.jwtAccessExpiry } as jwt.SignOptions);
@@ -26,14 +20,4 @@ export async function issueSession(prisma: any, user: any) {
     refreshToken,
     user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role, language: user.language },
   };
-}
-
-/**
- * Gating applied once the identity is proven (password or SAML assertion):
- * require the MFA second factor / enrollment, otherwise issue the session.
- */
-export async function gateAfterPassword(prisma: any, user: any) {
-  if (user.mfaEnabled) return { mfaRequired: true, mfaToken: signMfaChallenge(user.id) };
-  if (user.mfaRequired) return { mfaSetupRequired: true, mfaToken: signMfaChallenge(user.id) };
-  return issueSession(prisma, user);
 }

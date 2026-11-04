@@ -1,7 +1,6 @@
 {
   "common": {
     "save": "Salva",
-    "loading": "Caricamento...",
     "saving": "Salvataggio..."
   },
   "nav": {
@@ -19,17 +18,6 @@
     "signIn": "Accedi",
     "signingIn": "Accesso in corso...",
     "invalidCredentials": "Credenziali non valide. Riprova.",
-    "twoFactorTitle": "Autenticazione a due fattori",
-    "twoFactorSetupTitle": "Configura l'autenticazione a due fattori",
-    "setupPrompt": "Il tuo amministratore richiede l'autenticazione a due fattori. Scansiona questo codice QR con un'app di autenticazione e inserisci il codice a 6 cifre.",
-    "verifyAndContinue": "Verifica e continua",
-    "saveRecoveryCodes": "Salva i tuoi codici di recupero",
-    "recoveryCodesHint": "Ognuno è utilizzabile una volta se perdi il dispositivo. Non verranno più mostrati.",
-    "enterCode": "Inserisci il codice a 6 cifre della tua app di autenticazione.",
-    "enterCodeToFinish": "Inserisci il codice a 6 cifre della tua app di autenticazione per completare l'accesso.",
-    "verify": "Verifica",
-    "verifying": "Verifica in corso...",
-    "invalidCode": "Codice non valido. Riprova.",
     "changePasswordTitle": "Cambia la tua password",
     "changePasswordPrompt": "Devi impostare una nuova password prima di continuare.",
     "currentPassword": "Password attuale",
@@ -38,22 +26,7 @@
     "changeAndContinue": "Cambia e continua",
     "changingPassword": "Modifica in corso...",
     "passwordsDoNotMatch": "Le password non corrispondono",
-    "changeFailed": "Impossibile cambiare la password",
-    "trustDevice": "Questo è un computer attendibile",
-    "trustDeviceInfo": "Per 30 giorni questo dispositivo effettuerà l'accesso automaticamente, senza password né codice a due fattori. Usalo solo su un dispositivo privato che controlli. Puoi revocarlo in qualsiasi momento da Impostazioni → Account.",
-    "continueAs": "Continua come {{name}}",
-    "useAnotherAccount": "Accedi con un altro account",
-    "or": "o",
-    "sso": "Accedi tramite SSO",
-    "ssoProcessing": "Accesso in corso…",
-    "backToLogin": "Torna all'accesso",
-    "ssoError": {
-      "generic": "Accesso SSO non riuscito",
-      "not_provisioned": "Account non registrato. Contatta un amministratore.",
-      "saml_failed": "Autenticazione SAML non riuscita",
-      "exchange_failed": "Sessione SSO non valida o scaduta",
-      "missing_code": "Risposta SSO non valida"
-    }
+    "changeFailed": "Impossibile cambiare la password"
   },
   "settings": {
     "title": "Impostazioni",
@@ -64,7 +37,6 @@
       "youtube": "YouTube",
       "spotify": "Spotify",
       "musicCommands": "Music Bot",
-      "saml": "SSO / SAML",
       "streaming": "Streaming"
     },
     "account": {
@@ -77,42 +49,7 @@
       "passwordsDoNotMatch": "Le password non corrispondono",
       "language": "Lingua dell'interfaccia",
       "languageHint": "Si applica al tuo account su tutti i dispositivi.",
-      "passwordTooShort": "La nuova password deve contenere almeno 6 caratteri",
-      "mfa": {
-        "title": "Autenticazione a due fattori (TOTP)",
-        "on": "Attivata",
-        "off": "Disattivata",
-        "recoveryTitle": "Codici di recupero (mostrati una sola volta)",
-        "recoveryHint": "Ognuno è utilizzabile una volta se perdi il dispositivo. Conservali in un luogo sicuro.",
-        "intro": "Proteggi il tuo account con un'app di autenticazione (Google Authenticator, Authy, Bitwarden...).",
-        "starting": "Avvio...",
-        "enable": "Attiva 2FA",
-        "scanPrompt": "Scansiona con la tua app di autenticazione e inserisci il codice a 6 cifre.",
-        "verifying": "Verifica in corso...",
-        "verifyEnable": "Verifica e attiva",
-        "requiredNote": "Il 2FA è richiesto da un amministratore e non può essere disattivato.",
-        "disablePrompt": "Inserisci la tua password per disattivare il 2FA.",
-        "passwordPlaceholder": "Password",
-        "disable": "Disattiva",
-        "setupFailed": "Impossibile avviare la configurazione MFA",
-        "enabledToast": "MFA attivato",
-        "invalidCode": "Codice non valido",
-        "disabledToast": "MFA disattivato",
-        "disableFailed": "Impossibile disattivare il MFA"
-      },
-      "trustedDevices": {
-        "title": "Dispositivi attendibili",
-        "description": "Dispositivi che accedono automaticamente per 30 giorni, senza password né codice a due fattori.",
-        "empty": "Nessun dispositivo attendibile.",
-        "thisDevice": "Questo dispositivo",
-        "added": "Aggiunto",
-        "expires": "Scade",
-        "revoke": "Revoca",
-        "revokeAll": "Revoca tutti",
-        "revoked": "Dispositivo attendibile revocato",
-        "revokedAll": "Tutti i dispositivi attendibili sono stati revocati",
-        "revokeError": "Impossibile revocare il dispositivo"
-      }
+      "passwordTooShort": "La nuova password deve contenere almeno 6 caratteri"
     },
     "connections": {
       "subtitle": "Gestisci le connessioni ai server TeamSpeak",
@@ -150,15 +87,8 @@
       "colDisplayName": "Nome visualizzato",
       "colRole": "Ruolo",
       "colStatus": "Stato",
-      "col2fa": "2FA",
       "colActions": "Azioni",
       "active": "Attivo",
-      "require2faTitle": "Richiedi 2FA per questo utente",
-      "mfaOn": "attivo",
-      "mfaPending": "in attesa",
-      "mfaOff": "disattivo",
-      "reset": "Reimposta",
-      "resetLostDeviceTitle": "Reimposta (dispositivo perso)",
       "resetPasswordTitle": "Reimposta password",
       "resetPasswordDialogTitle": "Reimposta password",
       "setNewPasswordFor": "Imposta una nuova password per",
@@ -176,11 +106,6 @@
       "toastEnabled": "Utente attivato",
       "toastDisabled": "Utente disattivato",
       "toastStatusFailed": "Aggiornamento dello stato non riuscito",
-      "toastMfaRequired": "2FA richiesta per l'utente",
-      "toastMfaNotRequired": "2FA non più richiesta",
-      "toastMfaRequireFailed": "Aggiornamento del requisito 2FA non riuscito",
-      "toastMfaReset": "2FA reimpostata — l'utente deve registrarsi di nuovo",
-      "toastMfaResetFailed": "Reimpostazione della 2FA non riuscita",
       "toastPasswordReset": "Password reimpostata con successo",
       "toastPasswordResetFailed": "Reimpostazione della password non riuscita",
       "toastDeleted": "Utente eliminato",
@@ -206,7 +131,6 @@
         "toastSaved": "Impostazione proxy salvata",
         "toastSaveFailed": "Salvataggio non riuscito"
       },
-      "requireMfa": "Richiedi MFA (registrazione al primo accesso)",
       "mustChangePassword": "Cambia la password al prossimo accesso"
     },
     "youtube": {
@@ -269,24 +193,6 @@
       "botLanguage": "Lingua del bot",
       "botLanguageHint": "La lingua in cui il bot risponde su TeamSpeak. Indipendente dalla lingua di questa interfaccia."
     },
-    "saml": {
-      "enable": "Attiva l'autenticazione SSO (SAML)",
-      "autoProvision": "Effettua il provisioning automatico degli account autenticati via SSO",
-      "defaultRole": "Ruolo predefinito degli account SSO",
-      "idpSsoUrl": "URL SSO dell'IdP",
-      "idpCertificate": "Certificato di firma dell'IdP",
-      "idpEntityId": "Entity ID dell'IdP",
-      "attrUsername": "Attributo: nome utente",
-      "attrEmail": "Attributo: e-mail",
-      "attrDisplayName": "Attributo: nome visualizzato",
-      "attrRole": "Attributo: ruolo / gruppo",
-      "roleAdminValue": "Valore che concede il ruolo admin",
-      "spInfo": "Da configurare lato IdP (Authentik):",
-      "spMetadataUrl": "URL dei metadati del SP",
-      "acsUrl": "URL ACS (Assertion Consumer Service)",
-      "saved": "Impostazioni SSO salvate",
-      "saveError": "Salvataggio delle impostazioni SSO non riuscito"
-    },
     "streaming": {
       "encodingTitle": "Codifica video",
       "encodingDescription": "Come il bot codifica il video prima di inviarlo a TeamSpeak. La codifica hardware la affida alla GPU, liberando un core della CPU e permettendo risoluzioni più alte.",
@@ -318,9 +224,6 @@
       "noHardwareForCodec": "nessun supporto GPU",
       "hardwareUnavailableForCodec": "Questa GPU non può codificare il codec selezionato: lo streaming userà il codificatore software."
     }
-  },
-  "tokens": {
-    "copied": "Copiato"
   },
   "musicRequests": {
     "noServerSelected": "Nessun server selezionato",

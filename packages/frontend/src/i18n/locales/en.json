@@ -1,7 +1,6 @@
 {
   "common": {
     "save": "Save",
-    "loading": "Loading...",
     "saving": "Saving..."
   },
   "nav": {
@@ -20,17 +19,6 @@
     "signIn": "Sign In",
     "signingIn": "Signing in...",
     "invalidCredentials": "Invalid credentials. Please try again.",
-    "twoFactorTitle": "Two-factor authentication",
-    "twoFactorSetupTitle": "Set up two-factor authentication",
-    "setupPrompt": "Your administrator requires two-factor authentication. Scan this QR code with an authenticator app, then enter the 6-digit code.",
-    "verifyAndContinue": "Verify & continue",
-    "saveRecoveryCodes": "Save your recovery codes",
-    "recoveryCodesHint": "Each can be used once if you lose your device. They won't be shown again.",
-    "enterCode": "Enter the 6-digit code from your authenticator app.",
-    "enterCodeToFinish": "Enter the 6-digit code from your authenticator app to finish signing in.",
-    "verify": "Verify",
-    "verifying": "Verifying...",
-    "invalidCode": "Invalid code. Try again.",
     "changePasswordTitle": "Change your password",
     "changePasswordPrompt": "You must set a new password before continuing.",
     "currentPassword": "Current password",
@@ -39,22 +27,7 @@
     "changeAndContinue": "Change & continue",
     "changingPassword": "Changing...",
     "passwordsDoNotMatch": "Passwords do not match",
-    "changeFailed": "Could not change the password",
-    "trustDevice": "This is a trusted computer",
-    "trustDeviceInfo": "For 30 days, this device will sign you in automatically — no password and no two-factor code. Only use this on a private device you control. You can revoke it anytime from Settings → Account.",
-    "continueAs": "Continue as {{name}}",
-    "useAnotherAccount": "Sign in with a different account",
-    "or": "or",
-    "sso": "Sign in via SSO",
-    "ssoProcessing": "Signing in…",
-    "backToLogin": "Back to sign in",
-    "ssoError": {
-      "generic": "SSO sign-in failed",
-      "not_provisioned": "Account not provisioned. Contact an administrator.",
-      "saml_failed": "SAML authentication failed",
-      "exchange_failed": "SSO session invalid or expired",
-      "missing_code": "Invalid SSO response"
-    }
+    "changeFailed": "Could not change the password"
   },
   "settings": {
     "title": "Settings",
@@ -65,7 +38,6 @@
       "youtube": "YouTube",
       "spotify": "Spotify",
       "musicCommands": "Music Bot",
-      "saml": "SSO / SAML",
       "streaming": "Streaming"
     },
     "account": {
@@ -78,42 +50,7 @@
       "passwordsDoNotMatch": "Passwords do not match",
       "language": "Interface language",
       "languageHint": "Applies to your account on every device.",
-      "passwordTooShort": "New password must be at least 6 characters",
-      "mfa": {
-        "title": "Two-Factor Authentication (TOTP)",
-        "on": "Enabled",
-        "off": "Disabled",
-        "recoveryTitle": "Recovery codes (shown once)",
-        "recoveryHint": "Each can be used once if you lose your device. Store them somewhere safe.",
-        "intro": "Protect your account with an authenticator app (Google Authenticator, Authy, Bitwarden...).",
-        "starting": "Starting...",
-        "enable": "Enable 2FA",
-        "scanPrompt": "Scan with your authenticator app, then enter the 6-digit code.",
-        "verifying": "Verifying...",
-        "verifyEnable": "Verify & enable",
-        "requiredNote": "2FA is required by an administrator and cannot be disabled.",
-        "disablePrompt": "Enter your password to disable 2FA.",
-        "passwordPlaceholder": "Password",
-        "disable": "Disable",
-        "setupFailed": "Failed to start MFA setup",
-        "enabledToast": "MFA enabled",
-        "invalidCode": "Invalid code",
-        "disabledToast": "MFA disabled",
-        "disableFailed": "Failed to disable MFA"
-      },
-      "trustedDevices": {
-        "title": "Trusted devices",
-        "description": "Devices that sign in automatically for 30 days without a password or two-factor code.",
-        "empty": "No trusted devices.",
-        "thisDevice": "This device",
-        "added": "Added",
-        "expires": "Expires",
-        "revoke": "Revoke",
-        "revokeAll": "Revoke all",
-        "revoked": "Trusted device revoked",
-        "revokedAll": "All trusted devices revoked",
-        "revokeError": "Could not revoke the device"
-      }
+      "passwordTooShort": "New password must be at least 6 characters"
     },
     "connections": {
       "subtitle": "TeamSpeak servers your bots connect to",
@@ -152,15 +89,8 @@
       "colDisplayName": "Display Name",
       "colRole": "Role",
       "colStatus": "Status",
-      "col2fa": "2FA",
       "colActions": "Actions",
       "active": "Active",
-      "require2faTitle": "Require 2FA for this user",
-      "mfaOn": "on",
-      "mfaPending": "pending",
-      "mfaOff": "off",
-      "reset": "Reset",
-      "resetLostDeviceTitle": "Reset (lost device)",
       "resetPasswordTitle": "Reset Password",
       "resetPasswordDialogTitle": "Reset Password",
       "setNewPasswordFor": "Set a new password for",
@@ -178,11 +108,6 @@
       "toastEnabled": "User enabled",
       "toastDisabled": "User disabled",
       "toastStatusFailed": "Failed to update status",
-      "toastMfaRequired": "2FA required for user",
-      "toastMfaNotRequired": "2FA no longer required",
-      "toastMfaRequireFailed": "Failed to update 2FA requirement",
-      "toastMfaReset": "2FA reset — the user must re-enroll",
-      "toastMfaResetFailed": "Failed to reset 2FA",
       "toastPasswordReset": "Password reset successfully",
       "toastPasswordResetFailed": "Failed to reset password",
       "toastDeleted": "User deleted",
@@ -208,7 +133,6 @@
         "toastSaved": "Proxy setting saved",
         "toastSaveFailed": "Failed to save"
       },
-      "requireMfa": "Require MFA (enroll at first login)",
       "mustChangePassword": "Change password at next logon",
       "colServers": "Servers",
       "allServers": "All servers",
@@ -283,24 +207,6 @@
       "botLanguage": "Bot language",
       "botLanguageHint": "The language the bot replies in on TeamSpeak. Independent of the language of this interface."
     },
-    "saml": {
-      "enable": "Enable SSO authentication (SAML)",
-      "autoProvision": "Automatically provision accounts authenticated via SSO",
-      "defaultRole": "Default role for SSO accounts",
-      "idpSsoUrl": "IdP SSO URL",
-      "idpCertificate": "IdP signing certificate",
-      "idpEntityId": "IdP Entity ID",
-      "attrUsername": "Attribute: username",
-      "attrEmail": "Attribute: email",
-      "attrDisplayName": "Attribute: display name",
-      "attrRole": "Attribute: role / group",
-      "roleAdminValue": "Value granting the admin role",
-      "spInfo": "To configure on the IdP side (Authentik):",
-      "spMetadataUrl": "SP metadata URL",
-      "acsUrl": "ACS URL (Assertion Consumer Service)",
-      "saved": "SSO settings saved",
-      "saveError": "Failed to save SSO settings"
-    },
     "streaming": {
       "encodingTitle": "Video encoding",
       "encodingDescription": "How the bot encodes video before sending it to TeamSpeak. Hardware encoding offloads this to the GPU, which frees a CPU core and allows higher resolutions.",
@@ -332,9 +238,6 @@
       "noHardwareForCodec": "no GPU support",
       "hardwareUnavailableForCodec": "This GPU cannot encode the selected codec, so streams will fall back to the software encoder."
     }
-  },
-  "tokens": {
-    "copied": "Copied"
   },
   "musicRequests": {
     "noServerSelected": "No server selected",
