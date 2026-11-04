@@ -44,16 +44,3 @@ export function videoCodecFamily(vcodec: string): VideoCodecFamily {
   if (c.startsWith('avc1') || c === 'h264') return 'h264';
   return '';
 }
-
-/**
- * Split yt-dlp's `--print "%(vcodec)s" -g` output: the codec on the first line,
- * then one URL per stream (one for a progressive format, video then audio for
- * a DASH pair). A first line that is already a URL means no codec was printed.
- */
-export function parseResolvedFormat(stdout: string): { urls: string[]; videoCodec: VideoCodecFamily } {
-  const lines = stdout.trim().split('\n').map((l) => l.trim()).filter(Boolean);
-  if (lines.length > 0 && !lines[0].includes('://')) {
-    return { videoCodec: videoCodecFamily(lines[0]), urls: lines.slice(1) };
-  }
-  return { videoCodec: '', urls: lines };
-}
