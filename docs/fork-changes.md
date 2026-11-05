@@ -12,6 +12,68 @@ git fetch upstream
 git diff upstream/main...HEAD
 ```
 
+## Summary
+
+The sections below give the reasons for each change, and what to preserve when
+merging upstream. In short:
+
+**Bot only**
+- The manager no longer administers TeamSpeak servers. A server record is a
+  name and a host, which the bots connect to; the voice port is set per bot.
+- Removed: server management and WebQuery, bot flows and SSH ServerQuery,
+  server and player widgets, the Discord bridge, the connection journal, MFA,
+  trusted devices, SAML SSO, web bans, every UI and bot language but English,
+  and the native Opus encoder. Their database tables are gone, not just
+  hidden; upgrading an older install needs a backup and a one-off schema push
+  ([Upgrading to the bot-only version](deploying.md#upgrading-to-the-bot-only-version)).
+- Viewers see the Music Request History of the servers an admin grants them,
+  and their own account settings.
+
+**Video streaming**
+- **Hardware encoding** on Intel and AMD (VAAPI) or NVIDIA (NVENC, H.264),
+  configured in Settings → Streaming: encoder, GPU device, on/off. Which GPU
+  is set by the compose file that passes it through. Encoders the host cannot
+  run are greyed out; one that fails falls back to software.
+- **VP8, VP9 and H.264**, software or hardware. H.264 is sent as Constrained
+  High, the only H.264 profile the TeamSpeak client decodes.
+- **YouTube through yt-dlp**: YouTube refuses its media URLs to anything but
+  yt-dlp, so the sidecar reads them through a relay in the backend that runs
+  yt-dlp. **1080p and above** comes as separate video and audio (DASH)
+  streams, since YouTube's combined formats stop at 720p.
+- **Auto quality**, the default: the stream follows the source's resolution,
+  up to a configurable limit (4K unless lowered). Or a fixed preset, up to
+  2160p.
+- **The GPU decodes the source as well as encoding it**, where it supports the
+  source's codec; otherwise decoding falls back to the CPU.
+- **Idle streams stop themselves** after five minutes with no viewers.
+- Several fixes to streams that negotiated and then showed a black picture
+  (keyframe gate, ICE candidates, codec mismatches).
+
+**Music bot**
+- **Live TV:** `!tv` streams channels from an M3U/M3U8 playlist, with loose
+  name matching (`!tv mtv3` finds "MTV 3"). The playlist, a channel filter and
+  the order are set in the UI.
+- The bot's nickname shows what it is streaming (`Boten Anna - Streaming 'MTV3'`).
+- **Bot avatars:** upload one (PNG, JPEG or GIF up to 200 KB, shrunk to fit
+  300×300 for TeamSpeak), use the app icon, or none.
+- Radio stations are listed by id, the number `!radio <id>` takes.
+- Audio is encoded by opusscript (libopus as WebAssembly) only, warmed up at
+  start so the first song does not stutter.
+
+**Deployment**
+- **Prebuilt images** on GHCR for every branch and commit
+  (`docker-compose.ghcr.yml`); building from source is still the default.
+- [Deploying](deploying.md): moving a deployment onto a git checkout,
+  upgrading, rolling back, and deploying a branch.
+- [Local testing](local-testing.md): a local TeamSpeak server to test against.
+
+**Lineage.** The original, [clusterzx/ts6-manager](https://github.com/clusterzx/ts6-manager),
+managed servers over the WebQuery HTTP API and had music bots, bot flows and
+server widgets. `coom/ts6-manager`, a hardened fork of it, added MFA and SSO,
+the Discord bridge, the connection journal, five UI languages, and the music
+bot's streamed playback and native Opus encoder. This fork kept the streamed
+playback and removed the rest of what the two built around the bot.
+
 ## How this fork was reconstructed
 
 The changes below were originally made in a ZIP download of the repository —
